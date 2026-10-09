@@ -1,0 +1,14 @@
+{
+  "name": "arkiv-hackathon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arkiv Global Tour Stop project. Concept selection and verified SDK bootstrap in progress.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@arkiv-network/sdk": "0.8.1",
+    "viem": "2.57.4"
+  }
+}
