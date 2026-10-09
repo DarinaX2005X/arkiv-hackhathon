@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "network": "tiramisu",
+  "chainId": 7738577,
+  "sdkVersion": "0.8.1",
+  "observedAt": "2026-10-09T13:19:10.955Z",
+  "creator": "0x6267AB770266dA229130a2a75a52A9d578Fb0A5b",
+  "owner": "0x6267AB770266dA229130a2a75a52A9d578Fb0A5b",
+  "entityKey": "0xfadef279e9b79b91409a85ba941aa5b03e7f7e48ee3cab28e97c0d3fa8d25050",
+  "transactionHash": "0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3",
+  "receipt": {
+    "status": "success",
+    "blockNumber": "351105",
+    "blockHash": "0xd0ff44475766010d9797f42712600488a8199f4762440b2aa70a7aa9d3975911",
+    "gasUsed": "101712",
+    "effectiveGasPriceWei": "1000000002",
+    "gasFeeWei": "101712000203424",
+    "gasFeeTestGlm": "0.000101712000203424"
+  },
+  "expiration": {
+    "createdAtBlock": "351105",
+    "expiresAtBlock": "1647105",
+    "minimumLifetimeBlocks": "1296000",
+    "requestedDays": 30
+  },
+  "budget": {
+    "maximumWei": "100000000000000000",
+    "maximumTestGlm": "0.1",
+    "spentWei": "101712000203424",
+    "accountBalanceDeltaWei": "101712000203424"
+  },
+  "proof": {
+    "parameterSha256": "9be0a88123eb3b74b52146d55c9fa0ef846a069f148148ab9e1f49ab497c6d5b",
+    "payloadSha256": "ea7778b72acedbdea9b03ad6ef2a5946b95722d70dcdca5625fcacc049f8f7a8",
+    "payload": {
+      "purpose": "Verify Arkiv create, read-back and typed query",
+      "sdk": "0.8.1",
+      "synthetic": true
+    },
+    "contentType": "application/json",
+    "attributes": {
+      "created_at": {
+        "type": "u64",
+        "value": "1791551901691"
+      },
+      "entity_type": {
+        "type": "str",
+        "value": "bootstrap"
+      },
+      "project": {
+        "type": "str",
+        "value": "arkiv_hackathon_capability_probe_v1"
+      },
+      "seed_id": {
+        "type": "str",
+        "value": "sdk_081_v1"
+      }
+    },
+    "flags": {
+      "readonly": true,
+      "permissionlessExtension": false,
+      "raw": 1
+    },
+    "pinnedReadBlock": "351105",
+    "currentReadBlock": "351106",
+    "creatorScopedSeedQuery": "project = str('arkiv_hackathon_capability_probe_v1') AND entity_type = str('bootstrap') AND seed_id = str('sdk_081_v1') AND $creator = addr(0x6267AB770266dA229130a2a75a52A9d578Fb0A5b)",
+    "keyQueryMatched": true,
+    "typedSeedQueryMatched": true,
+    "payloadAndAttributesMatched": true
+  },
+  "references": {
+    "entity": "https://tiramisu.explorer.arkiv.network/entity/0xfadef279e9b79b91409a85ba941aa5b03e7f7e48ee3cab28e97c0d3fa8d25050",
+    "transaction": "https://tiramisu.explorer.arkiv.network/tx/0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3"
+  }
+}

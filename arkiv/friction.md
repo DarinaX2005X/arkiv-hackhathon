@@ -10,7 +10,7 @@ This report records observed behavior and reproducible tests. Unverified claims 
 - Network target: Tiramisu, chain ID 7738577.
 - Official guidance downloaded from Arkiv-Network/global-tour-stop-pre-devcon before concept selection.
 - Official `arkiv` and `arkiv-first-write` skills installed from Arkiv-Network/skills into the user's Codex skills directory and read directly.
-- No on-chain write has occurred yet. No existing signer was configured in the task environment.
+- No existing signer was configured at task start. A dedicated test signer was created locally and the first synthetic write was confirmed at 2026-10-09T13:19:10Z.
 
 ## Initial version resolution
 
@@ -64,4 +64,18 @@ Suggested improvement: make the remaining owner powers prominent beside the flag
 
 `node scripts/create-demo-wallet.mjs` creates a dedicated local Tiramisu test wallet without sending transactions and only prints its public address. `.local/` is Git-ignored. Public demo address: `0x6267AB770266dA229130a2a75a52A9d578Fb0A5b`.
 
-No project entity has been created yet. Faucet authentication and CAPTCHA require a manual user action. Do not infer first-write time, confirmation or spend from wallet creation.
+Faucet authentication and CAPTCHA required a manual user action. The user confirmed delivery, and a read at 2026-10-09T13:05:52Z verified 10 test GLM. No real funds were requested or used.
+
+## First write, confirmation and read-back
+
+Surface: SDK 0.8.1 `createEntity`, a dedicated local testnet signer, Tiramisu chain 7738577. Reproduction helper: `scripts/first-write.mjs`; guard tests: `node --test tests/first-write.test.mjs` (11 passed). The helper defaults to estimate/reconciliation and requires `--broadcast` for its single frozen synthetic operation.
+
+Expected: estimate the exact SDK serialization without signing or sending; cap aggregate spend at 0.1 test GLM; persist send identity before network side effects; verify successful creation using the receipt plus creator-scoped, typed queries.
+
+Observed: the guarded estimate returned 102698 gas. Admission used gas limit 123238. Transaction `0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3` succeeded at block 351105. Entity `0xfadef279e9b79b91409a85ba941aa5b03e7f7e48ee3cab28e97c0d3fa8d25050` matched the predicted key, immutable creator, initial owner, exact payload, typed attributes, creation flags and 30-day lifetime. Both the key query and creator-scoped seed query matched at the receipt block; the latter also matched at block 351106.
+
+Actual gas used: 101712. Actual total fee and observed account balance delta: 0.000101712000203424 test GLM. Public evidence is stored in [evidence/bootstrap.json](evidence/bootstrap.json); keys and signed bytes remain in Git-ignored local custody. This bootstrap entity demonstrates SDK behavior, not final product functionality.
+
+Elapsed from the task's practical setup start at approximately 12:39 UTC to confirmed read-back at 13:19 UTC: approximately 40 minutes, including parallel research and a manual faucet step. Do not interpret this as SDK installation or transaction latency alone.
+
+Observed friction: the SDK's ergonomic mutation method also performs preparation, signing and sending, so an estimate-only helper needs a read-method allowlist, a signing guard, and interception of `eth_estimateGas`. The first-write skill provides this pattern. A first-class public prepare/estimate API returning the exact mutation calldata and fee cap would make safe first-use tooling simpler. No write failure is claimed: the bounded first send succeeded.

@@ -1,6 +1,8 @@
 {
   "checks": [
     { "command": "$NODE", "args": ["--check", "scripts/probe-arkiv.mjs"] },
-    { "command": "$NODE", "args": ["--check", "scripts/create-demo-wallet.mjs"] }
+    { "command": "$NODE", "args": ["--check", "scripts/create-demo-wallet.mjs"] },
+    { "command": "$NODE", "args": ["--check", "scripts/first-write.mjs"] },
+    { "command": "$NODE", "args": ["--test", "tests/first-write.test.mjs"] }
   ]
 }
