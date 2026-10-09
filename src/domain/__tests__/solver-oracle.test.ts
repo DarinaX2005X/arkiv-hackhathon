@@ -274,7 +274,8 @@ function preserve(value: SolverInput, previous: OracleCandidate): void {
     allocations: previous.allocations, requiredApprovers: [...new Set(previous.allocations.map((a) => a.publisherRoot))],
     conditions: selected.flatMap((c) => c.offer.conditions), instructions: value.recipe.instructions,
     runbook: previous.allocations.map((a) => ({ kind: 'task', id: `task-${a.id}`, title: a.requirementId,
-      publisherRoot: a.publisherRoot, interval: a.interval, allocationIds: [a.id], dependsOn: [], instructions: '' })), predecessor: null };
+      publisherRoot: a.publisherRoot, interval: previous.variant.requirements.find(requirement => requirement.id === a.requirementId)!.interval,
+      allocationIds: [a.id], dependsOn: [], instructions: '' })), predecessor: null };
   const proposalHash = hashPlan(plan);
   const owner = value.publishers[0]!.root.provenance;
   value.predecessor = { key: 'local:previous-proposal', provenance: owner,

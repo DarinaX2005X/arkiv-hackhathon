@@ -25,6 +25,8 @@ const clone = <T>(value: T): T => JSON.parse(canonicalJson(value)) as T;
 const equal = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
 const set = (keys: EntityKey[]): string => canonicalJson(keys.map(publicKey).sort());
 const DAY_SECONDS = 86_400;
+const MULTI_STEP_KINDS: OperationKind[] = ['create_project', 'register_publisher', 'publish_plan', 'share_offer'];
+const phaseIdentity = (phase: OperationPhase, publisherRoot?: EntityKey): string => `${phase}:${publisherRoot ?? ''}`;
 function valid(reasons: DomainReason[], diagnostic: string): void {
   if (reasons.length) throw new ArkivRepositoryError('invalid_input', reasons[0]!.code, diagnostic, false, reasons);
 }
@@ -99,7 +101,10 @@ export class ArkivWriter {
     assertArkiv(result, 'unverified', 'evidence_unavailable', 'The admitted operation is unresolved. Its original ID and transaction must be reconciled before sending again.');
     if (result.reverted) {
       await this.connected().markReverted(record.operation.id, record.step.id, result.receipt);
-      throw new ArkivRepositoryError('reverted', 'evidence_unavailable', 'The transaction reverted. No entity changes were applied; prepare a new corrected operation.');
+      const partial = this.connected().getOperation(record.operation.id)?.steps.some(step => step.status === 'confirmed');
+      throw new ArkivRepositoryError('reverted', 'evidence_unavailable', partial
+        ? 'This later transaction reverted. Earlier confirmed steps remain recorded. Check and continue the same saved request.'
+        : 'The transaction reverted. No entity changes were applied; prepare a new corrected operation.');
     }
     if (record.step.status !== 'confirmed') await this.connected().markConfirmed(record.operation.id, record.step.id, result.receipt);
     return result;
@@ -110,10 +115,19 @@ export class ArkivWriter {
     const latest = controller.getOperation(operation.id) ?? operation;
     Object.assign(operation, latest);
     const existing = latest.steps.filter(item => item.phase === phase && item.publisherRoot === publisherRoot);
-    assertArkiv(existing.length <= 1, 'conflict', 'conflicting_heads', 'This operation has ambiguous phase checkpoints.');
-    let step = existing[0];
+    assertArkiv(existing.slice(0, -1).every(item => item.status === 'reverted'),
+      'conflict', 'conflicting_heads', 'Only a proven reverted phase may have a later attempt checkpoint.');
+    let step = existing.at(-1);
     let record = step ? controller.getStep(operation.id, step.id) : undefined;
-    if (record?.step.status === 'reverted') throw new ArkivRepositoryError('reverted', 'evidence_unavailable', 'This operation reverted. Start a corrected operation instead of resending it.');
+    if (record?.step.status === 'reverted') {
+      const partial = MULTI_STEP_KINDS.includes(operation.kind) && latest.steps.some(item => item.status === 'confirmed');
+      assertArkiv(partial, 'reverted', 'evidence_unavailable', 'This transaction reverted before any phase completed. Prepare a new corrected operation.');
+      // Reverify the original canonical revert before creating a different attempt. This happens
+      // only on a later explicit resume call, never as an automatic retry after the failed send.
+      const reverted = await verifyOperationStep(this.reader, record);
+      assertArkiv(reverted?.reverted, 'unverified', 'evidence_unavailable', 'The prior phase revert could not be verified. Retain the original request.');
+      step = undefined; record = undefined;
+    }
     if (record?.admission && record.step.status !== 'failed-before-send') return this.verify(record, record.step.status !== 'confirmed');
     await preflight();
     if (!step) {
@@ -474,15 +488,23 @@ export class ArkivWriter {
         const verified = await verifyOperationStep(this.reader, record);
         if (!verified) return { status: 'unverified', operation, error: { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: true } };
         if (verified.reverted) {
-          await controller.markReverted(operation.id, step.id, verified.receipt);
-          return { status: 'reverted', operation: controller.getOperation(operation.id)!, receipt: verified.receipt,
-            error: { code: 'reverted', reasons: [{ code: 'evidence_unavailable' }], retryable: false } };
+          if (record.step.status !== 'reverted') await controller.markReverted(operation.id, step.id, verified.receipt);
+          continue;
         }
         if (record.step.status !== 'confirmed') await controller.markConfirmed(operation.id, step.id, verified.receipt);
         lastReceipt = verified.receipt;
       } catch (error) { return { status: 'unverified', operation: controller.getOperation(operation.id) ?? operation, error: { ...repositoryError(error), code: 'unverified' } }; }
     }
     const latest = controller.getOperation(operation.id) ?? operation;
+    const attempts = new Map(latest.steps.map(step => [phaseIdentity(step.phase, step.publisherRoot), step]));
+    const failed = [...attempts.values()].find(step => step.status === 'reverted');
+    if (failed) {
+      const receipt = controller.getStep(operation.id, failed.id)?.receipt;
+      assertArkiv(receipt, 'unverified', 'evidence_unavailable', 'The reverted phase has no verified receipt.');
+      const partial = MULTI_STEP_KINDS.includes(latest.kind) && latest.steps.some(step => step.status === 'confirmed');
+      return { status: partial ? 'partial_reverted' : 'reverted', operation: latest, receipt,
+        error: { code: 'reverted', reasons: [{ code: 'evidence_unavailable' }], retryable: partial } };
+    }
     if (lastReceipt && latest.phase === 'complete') return { status: 'confirmed', operation: latest, receipt: lastReceipt };
     return { status: admitted ? 'pending' : 'not_sent', operation: latest };
   }

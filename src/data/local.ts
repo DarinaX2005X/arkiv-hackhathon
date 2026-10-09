@@ -26,6 +26,8 @@ export interface LocalRepositoryOptions {
   storage?: LocalStorageLike | null;
   namespace?: string;
   now?: () => number;
+  /** Advance synthetic practice time after persisted events, including across reloads. */
+  logicalClock?: boolean;
   id?: () => string;
 }
 interface StoredEntity { entity: EntityRecord; expiresAt: number }
@@ -94,7 +96,9 @@ export class LocalRepository implements Repository {
   readonly namespace: string;
   readonly storageKey: string;
   private readonly storage: LocalStorageLike;
-  private readonly now: () => number;
+  private readonly baseNow: () => number;
+  private readonly logicalClock: boolean;
+  private lastTime = 0;
   private readonly id: () => string;
   private store = emptyStore();
   private raw: string | null = null;
@@ -106,8 +110,49 @@ export class LocalRepository implements Repository {
     this.namespace = options.namespace ?? 'custom';
     if (!/^[A-Za-z0-9._-]+$/.test(this.namespace)) throw new Error('Invalid local namespace');
     this.storageKey = `partfolk:local:${this.namespace}`;
-    this.now = options.now ?? Date.now;
+    this.baseNow = options.now ?? Date.now;
+    this.logicalClock = options.logicalClock ?? false;
     this.id = options.id ?? randomId;
+  }
+
+  /** Use the same clock for authored events and repository snapshots. Storage errors remain visible. */
+  currentTime(): number {
+    this.refresh();
+    return this.now();
+  }
+
+  private now(): number {
+    const base = this.baseNow();
+    if (!this.logicalClock) return base;
+    if (!integer(base)) reject('invalid_input', 'invalid_input', 'Local clock must return a nonnegative safe integer.');
+    let latest = Math.max(base, this.lastTime);
+    const observe = (time: number): void => { latest = Math.max(latest, time); };
+    // Only authored event times advance practice. Future schedules, grant deadlines and
+    // entity expiration must not fast-forward the workspace or expire its records.
+    for (const { entity } of Object.values(this.store.records)) {
+      const payload = entity.payload;
+      observe(payload.createdAt);
+      if (payload.entityType === 'book_state') {
+        payload.decisions.forEach(value => observe(value.decidedAt));
+        payload.grants.forEach(value => observe(value.acceptedAt));
+        payload.attestations.forEach(value => observe(value.recordedAt));
+        payload.custodyHolds.forEach(value => { observe(value.createdAt); if (value.release) observe(value.release.at); });
+      } else if (payload.entityType === 'project_state') {
+        payload.completedWork.forEach(value => observe(value.recordedAt));
+        if (payload.completion) {
+          observe(payload.completion.recordedAt);
+          payload.completion.completedWork.forEach(value => observe(value.recordedAt));
+        }
+      }
+    }
+    for (const { operation, receipt } of Object.values(this.store.operations)) {
+      observe(operation.createdAt);
+      if (receipt) observe(receipt.confirmedAt);
+    }
+    for (const draft of Object.values(this.store.drafts)) { observe(draft.createdAt); observe(draft.updatedAt); }
+    if (!integer(latest + 1)) reject('invalid_input', 'invalid_input', 'Local logical clock exceeded its supported range.');
+    this.lastTime = latest + 1;
+    return this.lastTime;
   }
 
   private result<T>(action: () => T): Result<T> {

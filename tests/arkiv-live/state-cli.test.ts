@@ -1,0 +1,224 @@
+import { resolve } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hashCanonical } from '../../src/domain/canonical';
+import { deriveReadiness } from '../../src/domain/readiness';
+import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
+import type { AccountAddress } from '../../src/domain/types';
+import type { ExportPacket, WriteAuthority } from '../../src/data/types';
+import { ArkivReader } from '../../src/data/arkiv/reader';
+import { KEYS, NOW, entityKey, threeProposalFixture } from '../../src/data/__tests__/arkiv-fixture';
+import { verifyInFreshProcess } from './cli';
+import type { RunCli } from './cli';
+import { ACTOR_IDS } from './scenario';
+import { ROOT_ACCOUNT, freezeAction, parseOptions, validateState } from './state';
+import type { MutationMethod, ProofState, SignerName } from './state';
+
+const COMMIT = 'a1'.repeat(20);
+const OTHER_COMMIT = 'b2'.repeat(20);
+const address = (number: number): AccountAddress => `0x${number.toString(16).padStart(40, '0')}`;
+const authority = (): Extract<WriteAuthority, { mode: 'public' }> => ({ mode: 'public', actor: { kind: 'wallet', address: ROOT_ACCOUNT }, chainId: TIRAMISU_CHAIN_ID });
+
+function stateFixture(): ProofState {
+  return { version: 1, runId: 'unit-proof', chainId: TIRAMISU_CHAIN_ID, genesisHash: entityKey(999), initializedAt: NOW,
+    initialCodeCommit: COMMIT, rootAccount: ROOT_ACCOUNT,
+    actors: Object.fromEntries(ACTOR_IDS.map((actor, index) => [actor, address(index + 1)])) as ProofState['actors'],
+    projectRoot: null, publisherRoots: {}, proposals: {}, actions: {}, completedPhases: [], observationIds: [] };
+}
+
+function freezeFixture(state = stateFixture()) {
+  const input = { lifetimeSeconds: 3_600, expectedHeads: [entityKey(400)], projectRoot: KEYS.project, label: 'Original reviewed material.' };
+  const frozen = freezeAction(state, 'project:edit', 'coordinator', 'replaceProject', 'replace_project', authority(), input, COMMIT, NOW);
+  return { state, input, frozen };
+}
+
+async function packetFixture(): Promise<ExportPacket> {
+  // The reader uses only an in-memory RPC fixture. No live runner or actual child process is invoked.
+  const { rpc } = threeProposalFixture();
+  const reader = new ArkivReader({ request: rpc.request, now: () => NOW });
+  const project = await reader.loadProject(KEYS.project);
+  return { format: 'partfolk-export', version: 1, exportedAt: NOW, mode: 'public', project,
+    readiness: deriveReadiness(project, NOW), snapshot: project.snapshot };
+}
+
+afterEach(() => { vi.unstubAllEnvs(); });
+
+describe('live proof option parsing is read only unless explicitly gated', () => {
+  it('defaults to a bounded read-only prepare invocation', () => {
+    expect(parseOptions([])).toEqual({ phase: 'prepare', broadcast: false, initialize: false, maxTransactions: 1, studioStopped: false });
+    expect(parseOptions(['--phase', 'verify'])).toMatchObject({ phase: 'verify', broadcast: false, initialize: false });
+  });
+
+  it('permits separate local preparation without enabling broadcast', () => {
+    expect(parseOptions(['--initialize', '--studio-stopped'])).toMatchObject({ phase: 'prepare', initialize: true, studioStopped: true, broadcast: false });
+  });
+
+  it('binds an explicit mutation phase to an exact reviewed commit and a per-invocation transaction bound', () => {
+    expect(parseOptions(['--phase', 'p1-accept', '--broadcast', '--reviewed-commit', COMMIT.toUpperCase(), '--max-transactions', '7']))
+      .toEqual({ phase: 'p1-accept', broadcast: true, initialize: false, maxTransactions: 7, studioStopped: false, reviewedCommit: COMMIT });
+  });
+
+  it('requires an explicit destination for export and keeps it read only', () => {
+    expect(parseOptions(['--phase', 'export', '--output', 'public proof.json']))
+      .toMatchObject({ phase: 'export', output: 'public proof.json', broadcast: false });
+  });
+
+  it.each([
+    ['--unknown'], ['--phase'], ['--phase', 'all'], ['--phase', 'verify', '--phase', 'prepare'],
+    ['--broadcast', '--broadcast'], ['--initialize', '--initialize'], ['--studio-stopped', '--studio-stopped'],
+    ['--reviewed-commit'], ['--reviewed-commit', 'HEAD'], ['--reviewed-commit', 'abc123'],
+    ['--max-transactions'], ['--max-transactions', '0'], ['--max-transactions', '33'],
+    ['--max-transactions', '-1'], ['--max-transactions', '1.5'], ['--max-transactions', '9007199254740993'],
+    ['--broadcast'], ['--broadcast', '--phase', 'fund'], ['--broadcast', '--reviewed-commit', COMMIT],
+    ['--broadcast', '--phase', 'verify', '--reviewed-commit', COMMIT],
+    ['--initialize', '--phase', 'fund'], ['--initialize', '--broadcast'],
+    ['--output', 'proof.json'], ['--phase', 'export'], ['--phase', 'export', '--output'],
+    ['--phase', 'export', '--output', '--broadcast'],
+  ].map(args => ({ args })))('rejects malformed, duplicated or ungated options: $args', ({ args }) => {
+    expect(() => parseOptions(args)).toThrow();
+  });
+});
+
+describe('frozen action and persisted state integrity', () => {
+  it('freezes exact input, lifetime, authority and predecessor keys before any signer action', () => {
+    const { state, input, frozen } = freezeFixture();
+    expect(frozen).toMatchObject({ actor: 'coordinator', method: 'replaceProject', codeCommit: COMMIT, confirmed: false, confirmedKeys: [] });
+    expect(frozen.command.operation).toMatchObject({ id: 'pfp:unit-proof:project:edit', kind: 'replace_project', authority: authority(),
+      createdAt: NOW, inputHash: hashCanonical(input), expectedHeads: [entityKey(400)], phase: 'prepared', transactionHash: null, steps: [] });
+    expect(frozen.command.lifetimeSeconds).toBe(3_600);
+    input.label = 'Changed after freezing'; input.expectedHeads.push(entityKey(401));
+    frozen.command.lifetimeSeconds = 1;
+    frozen.command.operation.authority = { mode: 'public', actor: { kind: 'wallet', address: address(999) }, chainId: TIRAMISU_CHAIN_ID };
+    expect(state.actions['project:edit']!.command).toMatchObject({ label: 'Original reviewed material.', lifetimeSeconds: 3_600,
+      expectedHeads: [entityKey(400)], operation: { authority: authority() } });
+  });
+
+  it('resumes the same original intent and reviewed commit when caller input, clock and current commit have changed', () => {
+    const { state } = freezeFixture();
+    const original = structuredClone(state.actions['project:edit']);
+    const resumed = freezeAction(state, 'project:edit', 'coordinator', 'replaceProject', 'replace_project', authority(),
+      { lifetimeSeconds: 8_000, expectedHeads: [entityKey(402)], label: 'New values are not a new authorization.' }, OTHER_COMMIT, NOW + 60_000);
+    expect(resumed).toEqual(original);
+    resumed.confirmed = true; resumed.confirmedKeys.push(entityKey(403)); resumed.command.operation.steps.push({
+      id: 'injected-step', phase: 'book_pending', status: 'prepared', transactionHash: null, confirmedKeys: [], expectedHeads: [], inputHash: entityKey(404),
+    });
+    expect(state.actions['project:edit']).toEqual(original);
+  });
+
+  it.each(['actor', 'method', 'kind', 'authority'] as const)('rejects a changed %s binding for an existing action ID', changed => {
+    const { state } = freezeFixture();
+    const actor: SignerName = changed === 'actor' ? 'oak' : 'coordinator';
+    const method: MutationMethod = changed === 'method' ? 'replaceBook' : 'replaceProject';
+    const changedAuthority = authority();
+    if (changed === 'authority') changedAuthority.actor.address = address(999);
+    expect(() => freezeAction(state, 'project:edit', actor, method, changed === 'kind' ? 'replace_book' : 'replace_project',
+      changedAuthority, { lifetimeSeconds: 3_600 }, COMMIT, NOW)).toThrow('saved action binding changed');
+  });
+
+  it('validates and returns an independent copy of a legitimate frozen journal', () => {
+    const { state } = freezeFixture();
+    state.projectRoot = KEYS.project; state.publisherRoots.oak = KEYS.publisher;
+    state.completedPhases = ['fund']; state.observationIds = ['after-fund'];
+    const validated = validateState(state);
+    expect(validated).toEqual(state);
+    validated.actions['project:edit']!.confirmedKeys.push(entityKey(405));
+    validated.completedPhases.push('publish-core');
+    expect(state.actions['project:edit']!.confirmedKeys).toEqual([]);
+    expect(state.completedPhases).toEqual(['fund']);
+  });
+
+  it.each<[string, (state: ProofState) => void]>([
+    ['wrong chain', state => { (state as { chainId: number }).chainId = 1; }],
+    ['malformed genesis', state => { state.genesisHash = '0x1234'; }],
+    ['wrong root account', state => { state.rootAccount = address(999); }],
+    ['duplicate actor', state => { state.actors.oak = state.actors.cedar; }],
+    ['actor reusing root signer', state => { state.actors.oak = ROOT_ACCOUNT; }],
+    ['invalid actor address', state => { state.actors.oak = '0x1234'; }],
+    ['local project root', state => { (state as { projectRoot: string }).projectRoot = 'local:project'; }],
+    ['local publisher root', state => { (state.publisherRoots as Record<string, string>).oak = 'local:oak'; }],
+    ['unknown publisher', state => { (state.publisherRoots as Record<string, string>).unknown = entityKey(406); }],
+    ['duplicate completed phase', state => { state.completedPhases = ['fund', 'fund']; }],
+    ['invalid observation ID', state => { state.observationIds = ['../arbitrary-file']; }],
+    ['changed action input', state => { state.actions['project:edit']!.command.lifetimeSeconds++; }],
+    ['changed operation hash', state => { state.actions['project:edit']!.command.operation.inputHash = entityKey(407); }],
+    ['changed operation input', state => { state.actions['project:edit']!.command.operation.input = { lifetimeSeconds: 1 }; }],
+    ['changed operation identity', state => { state.actions['project:edit']!.command.operation.id = 'another-operation'; }],
+    ['malformed confirmed key', state => { state.actions['project:edit']!.confirmedKeys.push('0x1234'); }],
+  ])('rejects persisted state with %s without resetting the original journal', (_name, mutate) => {
+    const { state } = freezeFixture(); mutate(state);
+    const before = structuredClone(state);
+    expect(() => validateState(state)).toThrow();
+    expect(state).toEqual(before);
+  });
+});
+
+describe('independent CLI verifier with an injected executor', () => {
+  it('requests the exact public root and block in a new process with an allowlisted environment', async () => {
+    const expected = await packetFixture();
+    const repositoryRoot = resolve('synthetic repo with spaces');
+    vi.stubEnv('PATH', 'synthetic-tool-path'); vi.stubEnv('TEMP', 'synthetic-temp');
+    for (const variable of ['ARKIV_RPC_URL', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'PARTFOLK_WALLET', 'CODEX_HOME']) {
+      vi.stubEnv(variable, 'do-not-forward');
+    }
+    const execute = vi.fn<RunCli>(async () => JSON.stringify(expected));
+    const received = await verifyInFreshProcess(expected, repositoryRoot, execute);
+    expect(received).toEqual(expected);
+    expect(execute).toHaveBeenCalledTimes(1);
+    const [executable, args, options] = execute.mock.calls[0]!;
+    expect(executable).toBe(process.execPath);
+    expect(args).toEqual([resolve(repositoryRoot, 'node_modules/tsx/dist/cli.mjs'), resolve(repositoryRoot, 'src/cli/verify.ts'),
+      KEYS.project, '--json', '--block', '100']);
+    expect(options).toMatchObject({ cwd: repositoryRoot, timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
+      env: { PATH: 'synthetic-tool-path', TEMP: 'synthetic-temp' } });
+    expect(Object.keys(options.env).every(name => ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE'].includes(name))).toBe(true);
+    expect(Object.values(options.env)).not.toContain('do-not-forward');
+  });
+
+  it('allows independent fetch/export times when the exact canonical snapshot and agreement match', async () => {
+    const expected = await packetFixture(); const received = structuredClone(expected);
+    received.exportedAt += 2_000; received.snapshot.fetchedAt += 2_000;
+    expect(await verifyInFreshProcess(expected, '.', async () => JSON.stringify(received))).toEqual(received);
+  });
+
+  it.each<[string, (packet: ExportPacket) => void]>([
+    ['format', packet => { (packet as { format: string }).format = 'other'; }],
+    ['version', packet => { (packet as { version: number }).version = 2; }],
+    ['local mode', packet => { packet.mode = 'local'; }],
+    ['chain', packet => { packet.snapshot.chainId = null; }],
+    ['source', packet => { packet.snapshot.source = 'local'; }],
+    ['incomplete snapshot', packet => { packet.snapshot.completeness = 'incomplete'; }],
+    ['stale snapshot', packet => { packet.snapshot.freshness = 'stale'; }],
+    ['block number', packet => { packet.snapshot.blockNumber = '101'; }],
+    ['block hash', packet => { packet.snapshot.blockHash = entityKey(500); }],
+    ['block time', packet => { packet.snapshot.blockTimestamp++; }],
+    ['public root identity', packet => { packet.project.root.key = entityKey(501); }],
+    ['local root identity', packet => { packet.project.root.key = 'local:project'; }],
+    ['proposal identity', packet => { packet.project.proposal!.key = entityKey(502); }],
+    ['proposal hash', packet => { packet.project.proposal!.payload.proposalHash = entityKey(503); }],
+    ['activation identity', packet => { if (packet.project.activation.status === 'unique') packet.project.activation.entity.key = entityKey(504); }],
+    ['missing activation', packet => { packet.project.activation = { status: 'missing', reason: 'expired_or_deleted' }; }],
+    ['readiness', packet => { packet.readiness.status = 'changed'; }],
+    ['missing accepted owner', packet => { packet.readiness.acceptedApprovers = []; }],
+    ['different accepted owner', packet => { packet.readiness.acceptedApprovers = [entityKey(505)]; }],
+    ['duplicate accepted owner', packet => { packet.readiness.acceptedApprovers.push(packet.readiness.acceptedApprovers[0]!); }],
+    ['truncated history', packet => { packet.project.proposalHistory.pop(); }],
+    ['reordered history', packet => { packet.project.proposalHistory.reverse(); }],
+    ['changed historical hash', packet => { packet.project.proposalHistory[0]!.payload.proposalHash = entityKey(506); }],
+    ['local snapshot mode', packet => { packet.snapshot.mode = 'local'; }],
+    ['aggregate snapshot block', packet => { packet.project.snapshot = { ...packet.project.snapshot, blockNumber: '101' }; }],
+    ['readiness snapshot block', packet => { packet.readiness.snapshot = { ...packet.readiness.snapshot, blockNumber: '101' }; }],
+  ])('rejects an independent packet with mismatched %s', async (_name, mutate) => {
+    const expected = await packetFixture(); const different = structuredClone(expected); mutate(different);
+    let failure: unknown;
+    try { await verifyInFreshProcess(expected, '.', async () => JSON.stringify(different)); }
+    catch (error) { failure = error; }
+    expect(failure, 'A mismatched independent packet must be rejected.').toBeInstanceOf(Error);
+  });
+
+  it('rejects malformed JSON and propagates execution failure without another process attempt', async () => {
+    const expected = await packetFixture();
+    await expect(verifyInFreshProcess(expected, '.', async () => 'not a JSON packet')).rejects.toThrow('not JSON');
+    const execute = vi.fn<RunCli>(async () => { throw new Error('Synthetic verifier failure'); });
+    await expect(verifyInFreshProcess(expected, '.', execute)).rejects.toThrow('Synthetic verifier failure');
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+});

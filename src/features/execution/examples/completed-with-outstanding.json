@@ -2868,6 +2868,6 @@
       "proposalKey": "local:export-example:proposal",
       "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
     },
-    "status": "Closed record · completed with outstanding"
+    "status": "Closed record, completed with outstanding"
   }
 }

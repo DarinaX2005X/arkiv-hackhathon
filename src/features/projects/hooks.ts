@@ -1,36 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useApp, useAppSession } from '../../app/context';
-import type { EntityKey, ProjectAggregate } from '../../domain/types';
-import type { RepositoryError } from '../../data/types';
+import type { EntityKey } from '../../domain/types';
 import { createProjectDrafts, draftScope } from './drafts';
+import { createProjectReader } from './projectReader';
 
 export function useProject(root: EntityKey) {
-  const { repository } = useApp();
-  const [project, setProject] = useState<ProjectAggregate | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<RepositoryError | null>(null);
-  const sequence = useRef(0);
-  const refresh = useCallback(async () => {
-    const request = ++sequence.current;
-    if (!repository) { setError({ code: 'unsupported', reasons: [{ code: 'unsupported' }], retryable: false }); return; }
-    setLoading(true);
-    try {
-      const result = await repository.loadProject(root);
-      if (request !== sequence.current) return;
-      if (result.ok) { setProject(result.value); setError(null); }
-      else {
-        setError(result.error);
-        setProject(previous => previous === null ? null : { ...previous, snapshot: { ...previous.snapshot, freshness: 'stale', completeness: 'incomplete', reasons: [...previous.snapshot.reasons, { code: 'rpc_error' }] } });
-      }
-    } catch {
-      if (request === sequence.current) {
-        setError({ code: 'network', reasons: [{ code: 'rpc_error' }], retryable: true });
-        setProject(previous => previous === null ? null : { ...previous, snapshot: { ...previous.snapshot, freshness: 'stale', completeness: 'incomplete', reasons: [...previous.snapshot.reasons, { code: 'rpc_error' }] } });
-      }
-    } finally { if (request === sequence.current) setLoading(false); }
-  }, [repository, root]);
-  useEffect(() => { setProject(null); void refresh(); const timer = setInterval(() => { void refresh(); }, 15000); return () => { clearInterval(timer); sequence.current++; }; }, [refresh]);
-  return { project, loading, error, refresh };
+  const runtime = useApp(), session = useAppSession();
+  const reader = useMemo(() => createProjectReader(signal => runtime.repository
+    ? runtime.repository.loadProject(root, { signal })
+    : Promise.resolve({ ok: false, error: { code: 'unsupported', reasons: [{ code: 'unsupported' }], retryable: false } }), runtime.now), [runtime, root]);
+  const state = useSyncExternalStore(reader.subscribe, reader.getSnapshot, reader.getSnapshot);
+  useEffect(() => {
+    reader.start(session.mode === 'public', typeof window === 'undefined' ? undefined : window);
+    return reader.stop;
+  }, [reader, session.mode]);
+  return { ...state, refresh: reader.refresh };
 }
 
 export function useProjectDrafts() {

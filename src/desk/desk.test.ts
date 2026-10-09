@@ -64,6 +64,30 @@ describe('Partner Desk invitation boundary', () => {
     expect(invitationStatus(read.value, { activationKey: entityKey(987) })).toBe('different');
     expect(invitationStatus({ ...read.value, activation: { status: 'missing', reason: 'not_found' } }, { proposalKey: KEYS.proposal })).toBe('unavailable');
   });
+  it('keeps project needs available before a proposal and mounts them outside agreement gating', async () => {
+    const fixture = readyFixture();
+    fixture.rpc.remove(KEYS.proposal); fixture.rpc.remove(KEYS.activation);
+    const read = await createArkivRepository({ request: fixture.rpc.request, now: () => NOW }).loadProject(KEYS.project);
+    if (!read.ok || read.value.state.status !== 'unique') throw new Error('Preproposal project could not be read');
+    expect(read.value.proposal).toBeNull();
+    expect(read.value.state.entity.payload.recipe).toEqual(fixture.state.recipe);
+    expect(read.value.state.entity.payload.recipe.variants.flatMap(variant => variant.requirements).length).toBeGreaterThan(0);
+    expect(parseDeskRoute(`#/projects/${KEYS.project}/needs`)).toMatchObject({ name: 'project', projectRoot: KEYS.project });
+    const source = readFileSync(resolve(import.meta.dirname, 'DeskApp.tsx'), 'utf8');
+    const parsed = ts.createSourceFile('DeskApp.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const view = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'ProjectView');
+    const needsGates: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === 'ProjectNeeds') {
+        const conditional = node.parent;
+        if (ts.isBinaryExpression(conditional) && conditional.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) needsGates.push(conditional.left.getText(parsed));
+      }
+      ts.forEachChild(node, visit);
+    };
+    if (!view) throw new Error('The project route is missing'); visit(view);
+    expect(needsGates).toEqual(['visibleProject']);
+    expect(source).toContain("from '../features/projects/ProjectNeeds'");
+  });
 });
 
 describe('independent Desk runtime and invitation restoration', () => {
@@ -123,6 +147,7 @@ describe('standalone production source graph', () => {
     const files = [...visited].map(path => relative(root, path).replaceAll('\\', '/'));
     expect(files).toContain('src/app/network.ts'); expect(files).toContain('src/data/arkiv/repository.ts');
     expect(files).toContain('src/features/contributions/Agreement.tsx');
+    expect(files).toContain('src/features/projects/ProjectNeeds.tsx');
     expect(files.some(path => /src\/app\/(?:main|App|Studio|studio)\./.test(path) || path.startsWith('src/data/local') || path === 'src/domain/fixtures.ts')).toBe(false);
   });
 });

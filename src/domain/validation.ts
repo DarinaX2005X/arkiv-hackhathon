@@ -1,7 +1,7 @@
-import { canonicalConditions, canonicalJson, compareText, hashOffer, hashPlan, hashRequirements, offerIdentity, resourceIdentity } from './canonical';
+import { canonicalConditions, canonicalJson, compareText, hashCanonical, hashOffer, hashPlan, hashRequirements, offerIdentity, resourceIdentity } from './canonical';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from './types';
 import type {
-  Allocation, BookState, Condition, DomainReason, EntityKey, EntityPayload, Interval,
+  Allocation, Attestation, BookState, Condition, DomainReason, EntityKey, EntityPayload, Interval,
   ContentHash, Offer, PlanDocument, ProjectRecipe, PublisherAggregate, Requirement, Resource,
   Snapshot, SolverInput, SolverPin, ValidationResult,
 } from './types';
@@ -267,12 +267,43 @@ export function validatePlanDocument(value: unknown): ValidationResult {
   unique(item.requiredApprovers, entry => entry, reasons, '$.requiredApprovers');
   if (!equal([...item.requiredApprovers].sort(), deriveRequiredApprovers(item))) problem(reasons, '$.requiredApprovers', 'invalid_input');
   const taskIds = new Map(item.runbook.map(entry => [entry.id, entry]));
+  const tasksByAllocation = new Map<string, string[]>();
+  for (const obligation of item.runbook) if (obligation.kind === 'task') for (const allocationId of obligation.allocationIds) {
+    tasksByAllocation.set(allocationId, [...(tasksByAllocation.get(allocationId) ?? []), obligation.id]);
+  }
+  const dependsTransitively = (obligationId: string, prerequisiteId: string): boolean => {
+    const pending = [...(taskIds.get(obligationId)?.dependsOn ?? [])], visited = new Set<string>();
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (id === prerequisiteId) return true;
+      if (!visited.has(id)) { visited.add(id); pending.push(...(taskIds.get(id)?.dependsOn ?? [])); }
+    }
+    return false;
+  };
+  unique(item.runbook.filter(entry => entry.kind !== 'task'), entry => entry.transferId, reasons, '$.runbook.transferId');
   for (const obligation of item.runbook) {
     unique(obligation.allocationIds, entry => entry, reasons, `$.runbook.${obligation.id}.allocationIds`);
     unique(obligation.dependsOn, entry => entry, reasons, `$.runbook.${obligation.id}.dependsOn`);
     for (const id of obligation.allocationIds) if (!item.allocations.some(entry => entry.id === id)) reasons.push({ code: 'attestation_mismatch', obligationId: obligation.id });
     if (obligation.kind === 'task' && obligation.allocationIds.some(id => item.allocations.find(entry => entry.id === id)?.publisherRoot !== obligation.publisherRoot)) {
       reasons.push({ code: 'foreign_author', publisherRoot: obligation.publisherRoot, obligationId: obligation.id });
+    }
+    if (obligation.kind === 'task') {
+      const linked = item.allocations.filter(allocation => obligation.allocationIds.includes(allocation.id));
+      if (!linked.length) reasons.push({ code: 'attestation_mismatch', obligationId: obligation.id });
+      for (const allocation of linked) {
+        const requirement = item.variant.requirements.find(entry => entry.id === allocation.requirementId);
+        if (!requirement || !equal(obligation.interval, requirement.interval) || (tasksByAllocation.get(allocation.id)?.length ?? 0) !== 1) {
+          reasons.push({ code: 'attestation_mismatch', obligationId: obligation.id, requirementId: allocation.requirementId });
+        }
+        for (const prerequisiteId of requirement?.dependsOn ?? []) {
+          const prerequisites = item.allocations.filter(entry => entry.requirementId === prerequisiteId)
+            .flatMap(entry => tasksByAllocation.get(entry.id) ?? []);
+          if (!prerequisites.length || prerequisites.some(id => !dependsTransitively(obligation.id, id))) {
+            reasons.push({ code: 'dependency_unsatisfied', obligationId: obligation.id, requirementId: allocation.requirementId, params: { dependency: prerequisiteId } });
+          }
+        }
+      }
     }
     for (const id of obligation.dependsOn) {
       const prior = taskIds.get(id);
@@ -420,6 +451,73 @@ export function checkConditions(conditions: readonly Condition[], selected: read
   return reasons;
 }
 
+/** Transfers move one conserved inventory, including quantities already held from an older plan. */
+function transferConservation(plan: PlanDocument, books: ReadonlyMap<EntityKey, BookState>): DomainReason[] {
+  const transfers = plan.runbook.filter(obligation => obligation.kind !== 'task');
+  if (!transfers.length) return [];
+  const reasons: DomainReason[] = [], proposalHash = hashPlan(plan);
+  const groups = new Map<string, typeof transfers>();
+  for (const transfer of transfers) {
+    const owner = transfer.kind === 'handover' ? transfer.giver : transfer.receiver;
+    const identity = canonicalJson([owner, transfer.resourceId, transfer.unit]);
+    groups.set(identity, [...(groups.get(identity) ?? []), transfer]);
+  }
+  for (const group of groups.values()) {
+    const first = group[0]!, owner = first.kind === 'handover' ? first.giver : first.receiver;
+    const allocations = plan.allocations.filter(allocation => allocation.publisherRoot === owner
+      && allocation.resourceId === first.resourceId && allocation.unit === first.unit);
+    const book = books.get(owner);
+    const holdings = new Map<EntityKey, number>(), carried = new Map<string, number>();
+    let openingHeld = 0;
+    for (const hold of book?.custodyHolds ?? []) {
+      if (hold.status !== 'outstanding' || hold.projectRoot !== plan.projectRoot || hold.resourceId !== first.resourceId
+        || hold.unit !== first.unit || hold.source.proposalHash === proposalHash) continue;
+      openingHeld += hold.quantity;
+      // A hold reserves stock even if its old recipient evidence is unavailable. Only an
+      // intact, effective owner statement establishes which party may return that stock.
+      const reports = (book?.attestations ?? []).filter((statement): statement is Extract<Attestation, { kind: 'transfer_report' }> => statement.kind === 'transfer_report'
+        && statement.action === 'handover' && statement.author === owner && statement.giver === owner
+        && statement.transferId === hold.transferId && statement.projectRoot === hold.source.projectRoot
+        && statement.activationKey === hold.source.activationKey && statement.proposalKey === hold.source.proposalKey
+        && statement.proposalHash === hold.source.proposalHash && statement.resourceId === hold.resourceId && statement.unit === hold.unit)
+        .filter(statement => {
+          const { statementHash, ...content } = statement;
+          return statementHash === hashCanonical({ protocol: 'partfolk/1', purpose: 'transfer_statement', statement: content })
+            && !book?.attestations.some(correction => correction.correctsAttestationId === statement.id
+              && correction.author === statement.author && correction.kind === statement.kind
+              && correction.obligationId === statement.obligationId && correction.recordedAt > statement.recordedAt
+              && correction.projectRoot === statement.projectRoot && correction.activationKey === statement.activationKey
+              && correction.proposalKey === statement.proposalKey && correction.proposalHash === statement.proposalHash);
+        });
+      const receivers = new Set(reports.map(report => report.receiver));
+      if (receivers.size !== 1 || reports.reduce((sum, report) => sum + report.quantity, 0) < hold.quantity) continue;
+      const receiver = reports[0]!.receiver;
+      holdings.set(receiver, (holdings.get(receiver) ?? 0) + hold.quantity);
+      const continuation = canonicalJson([hold.transferId, receiver]);
+      carried.set(continuation, (carried.get(continuation) ?? 0) + hold.quantity);
+    }
+    const stock = Math.max(openingHeld, peakLoad(allocations.map(allocation => ({ ...allocation, projectRoot: plan.projectRoot })), 0));
+    holdings.set(owner, stock - openingHeld);
+    const events: { at: number; delta: number; party: EntityKey; obligationId: string }[] = [];
+    for (const transfer of group) {
+      const continuing = transfer.kind === 'handover' ? carried.get(canonicalJson([transfer.transferId, transfer.receiver])) ?? 0 : 0;
+      const quantity = Math.max(0, transfer.quantity - continuing);
+      if (!quantity) continue;
+      events.push({ at: transfer.interval.start, delta: -quantity, party: transfer.giver, obligationId: transfer.id },
+        { at: transfer.interval.end, delta: quantity, party: transfer.receiver, obligationId: transfer.id });
+    }
+    // A completed delivery can fund an adjacent return. Goods in transit cannot be used twice.
+    events.sort((left, right) => left.at - right.at || right.delta - left.delta || compareText(left.obligationId, right.obligationId));
+    for (const event of events) {
+      const balance = (holdings.get(event.party) ?? 0) + event.delta;
+      holdings.set(event.party, balance);
+      if (balance < 0) reasons.push({ code: 'attestation_mismatch', obligationId: event.obligationId,
+        publisherRoot: event.party, resourceId: first.resourceId, params: { available: balance - event.delta, required: -event.delta } });
+    }
+  }
+  return reasons;
+}
+
 export function independentlyValidatePlan(plan: PlanDocument, publishers: readonly PublisherAggregate[], now: number, pins: readonly SolverPin[] = []): ValidationResult {
   const shape = validatePlanDocument(plan);
   if (!shape.valid) return shape;
@@ -474,17 +572,8 @@ export function independentlyValidatePlan(plan: PlanDocument, publishers: readon
       && allocation.publisherRoot === owner && allocation.resourceId === obligation.resourceId && allocation.unit === obligation.unit);
     const covered = reservations.filter(allocation => coversInterval([allocation.interval], obligation.interval)).reduce((sum, allocation) => sum + allocation.quantity, 0);
     if (covered < obligation.quantity) reasons.push({ code: 'outside_availability', obligationId: obligation.id, publisherRoot: owner, resourceId: obligation.resourceId });
-    if (obligation.kind === 'return') {
-      const matchingHandover = plan.runbook.some(prior => prior.kind === 'handover' && prior.giver === obligation.receiver && prior.receiver === obligation.giver
-        && prior.resourceId === obligation.resourceId && prior.unit === obligation.unit && prior.interval.end <= obligation.interval.start);
-      const ownerBook = books.get(owner);
-      const heldEarlier = ownerBook?.custodyHolds.some(hold => hold.projectRoot === plan.projectRoot && hold.resourceId === obligation.resourceId
-        && hold.status === 'outstanding' && ownerBook.attestations.some(statement => statement.kind === 'transfer_report' && statement.action === 'handover'
-          && statement.transferId === hold.transferId && statement.projectRoot === plan.projectRoot && statement.resourceId === obligation.resourceId
-          && statement.giver === obligation.receiver && statement.receiver === obligation.giver));
-      if (!matchingHandover && !heldEarlier) reasons.push({ code: 'attestation_mismatch', obligationId: obligation.id });
-    }
   }
+  reasons.push(...transferConservation(plan, books));
   const expectedOffers = [...usedOffers.values()].map(({ publisherRoot, offer }) => ({ publisherRoot, offerId: offer.id, offerHash: hashOffer(publisherRoot, offer) }));
   if (!equal([...plan.offers].sort((a, b) => compareText(offerIdentity(a), offerIdentity(b))), expectedOffers.sort((a, b) => compareText(offerIdentity(a), offerIdentity(b))))) {
     reasons.push({ code: 'offer_changed' });

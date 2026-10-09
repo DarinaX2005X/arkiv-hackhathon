@@ -218,9 +218,12 @@ export function remainingWork(project: ProjectAggregate): { plan: PlanDocument; 
   });
   const conditionMap = new Map(selected.flatMap(offer => offer?.conditions ?? []).map(condition => [canonicalJson(condition), condition]));
   const conditions = selected.every(offer => offer !== null) ? canonicalConditions([...conditionMap.values()]) : previous.conditions;
+  const outstandingTaskRequirements = new Set(runbook.filter(obligation => obligation.kind === 'task')
+    .flatMap(obligation => allocations.filter(allocation => obligation.allocationIds.includes(allocation.id)).map(allocation => allocation.requirementId)));
   const requirements = previous.variant.requirements.filter(r => requirementIds.has(r.id)).map(r => ({ ...r,
     quantity: allocations.filter(a => a.requirementId === r.id).reduce((sum, a) => sum + a.quantity, 0),
-    dependsOn: r.dependsOn.filter(id => requirementIds.has(id)) }));
+    // A completed prerequisite may retain an equipment allocation solely for its return.
+    dependsOn: r.dependsOn.filter(id => outstandingTaskRequirements.has(id)) }));
   const plan: PlanDocument = structuredClone({ ...previous, predecessor: source, runbook, allocations, offers, conditions,
     resourceAssumptions: previous.resourceAssumptions.filter(r => allocations.some(a => a.publisherRoot === r.publisherRoot && a.resourceId === r.resourceId)),
     variant: { ...previous.variant, requirements }, requiredApprovers: [] });

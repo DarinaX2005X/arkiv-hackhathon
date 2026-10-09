@@ -19,7 +19,7 @@ function changeRows(before: PlanDocument, after: PlanDocument, project: ProjectA
   const text = (plan: PlanDocument, id: string) => {
     const requirement = plan.variant.requirements.find(item => item.id === id);
     if (!requirement) return 'Already reported complete; retained in history';
-    return `${plan.allocations.filter(allocation => allocation.requirementId === id).map(allocation => `${publisherName(project, allocation.publisherRoot)}: ${allocation.quantity} ${allocation.unit}`).join('; ')} · ${formatDateTime(requirement.interval.start, plan.variant.timeZone)}–${formatDateTime(requirement.interval.end, plan.variant.timeZone)}`;
+    return `${plan.allocations.filter(allocation => allocation.requirementId === id).map(allocation => `${publisherName(project, allocation.publisherRoot)}: ${allocation.quantity} ${allocation.unit}`).join('; ')}, ${formatDateTime(requirement.interval.start, plan.variant.timeZone)}–${formatDateTime(requirement.interval.end, plan.variant.timeZone)}`;
   };
   return ids.map(id => ({ id, label: after.variant.requirements.find(item => item.id === id)?.title ?? before.variant.requirements.find(item => item.id === id)?.title ?? id,
     before: text(before, id), after: text(after, id) }));
@@ -71,7 +71,7 @@ export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate;
         onChange={event => { const value = event.target.value; setPins(current => [...current.filter(pin => pin.requirementId !== requirement.id), ...(value ? [JSON.parse(value) as SolverPin] : [])]); }}>
         <option value="">Prefer existing assignments when feasible</option>{input.publishers.flatMap(publisher => publisher.book.status === 'unique' ? publisher.book.entity.payload.offers.filter(offer => offer.kind === requirement.kind && offer.unit === requirement.unit && offer.capabilities.includes(requirement.capability)).map(offer => {
           const pin: SolverPin = { requirementId: requirement.id, publisherRoot: publisher.root.key, offerId: offer.id };
-          return <option key={`${publisher.root.key}:${offer.id}`} value={JSON.stringify(pin)}>{publisherName(project, publisher.root.key)} · {offer.title}</option>;
+          return <option key={`${publisher.root.key}:${offer.id}`} value={JSON.stringify(pin)}>{publisherName(project, publisher.root.key)}, {offer.title}</option>;
         }) : [])}</Select>)}
     </details>
     <Button disabled={!input || blocked || state.running} onClick={() => { controller.update(project, pins); void controller.run(); }}>{state.running ? 'Checking remaining work…' : 'Find a replacement'}</Button>
@@ -79,8 +79,8 @@ export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate;
     {state.stale && <Notice tone="warning">The previous result describes older input. Run the search again. Your selected pins are retained.</Notice>}
     {state.failure && <Notice tone="warning">{state.failure}</Notice>}
     {state.result && !state.stale && !candidate && <Notice tone="warning" title={state.result.status === 'exhausted' ? 'The search did not finish' : 'No complete replacement was found'}><ul>{state.result.reasons.map((reason, index) => <li key={index}>{reason.requirementId ? `${input?.recipe.variants.flatMap(variant => variant.requirements).find(requirement => requirement.id === reason.requirementId)?.title ?? reason.requirementId}: ` : ''}{reasonText(reason)}{reason.resourceId ? ` Resource: ${reason.resourceId}.` : ''}</li>)}</ul><p>Change an actual offer or requirement before recalculating. No new participant has been invented.</p></Notice>}
-    {candidate && <><Notice title="Replacement found · awaiting a new agreement"><p>Preference: keep compatible contributors, then the date and place, then assignments and quantities. {state.result?.optimality === 'proven' ? 'The search checked its full space.' : 'This is a feasible result; minimum change has not been proved.'}</p><p>Everyone in the new plan must agree again, including unchanged contributors.</p></Notice>
-      {(state.result?.candidates.length ?? 0) > 1 && <Select label="Replacement option" value={state.selected} onChange={event => { controller.select(Number(event.target.value)); setReviewed(false); }} options={state.result!.candidates.map((item, index) => ({ value: String(index), label: `Option ${index + 1} · ${item.rank.removedPublishers} contributor changes · ${item.rank.changedAssignments} assignment changes` }))} />}
+    {candidate && <><Notice title="Replacement found, awaiting a new agreement"><p>Preference: keep compatible contributors, then the date and place, then assignments and quantities. {state.result?.optimality === 'proven' ? 'The search checked its full space.' : 'This is a feasible result; minimum change has not been proved.'}</p><p>Everyone in the new plan must agree again, including unchanged contributors.</p></Notice>
+      {(state.result?.candidates.length ?? 0) > 1 && <Select label="Replacement option" value={state.selected} onChange={event => { controller.select(Number(event.target.value)); setReviewed(false); }} options={state.result!.candidates.map((item, index) => ({ value: String(index), label: `Option ${index + 1}, ${item.rank.removedPublishers} contributor changes, ${item.rank.changedAssignments} assignment changes` }))} />}
       {project.proposal && <PlanDiff title="What changes in the remaining work" labels={{ requirement: 'Need', before: 'Previous plan', after: 'Replacement plan' }} rows={changeRows(project.proposal.payload.plan, candidate.plan, project)} />}
       {changes && <p>Added: {changes.addedPublishers.map(root => publisherName(project, root)).join(', ') || 'none'}. Removed: {changes.removedPublishers.map(root => publisherName(project, root)).join(', ') || 'none'}. Earlier decisions stay in history.</p>}
       <ProjectPlan project={project} plan={candidate.plan} title="Review the replacement plan" />
@@ -90,8 +90,8 @@ export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate;
       <Button disabled={!authority || !ownsProject(project, session.actor) || !reviewed || !explanation.trim() || blocked} disabledReason="The organizer reviews and proposes the exact replacement." onClick={() => void propose()}>Ask everyone to agree to the replacement</Button>
     </>}
     {error && <Notice tone="warning" role="alert">{error}</Notice>}
-    <ActionFeedback state={checkpoint.state} onReconcile={() => void checkpoint.reconcile().then(() => onRefresh())} />
-    <ActionFeedback state={proposalAction.state} onReconcile={() => void proposalAction.reconcile().then(() => onRefresh())}
+    <ActionFeedback state={checkpoint.state} action={checkpoint} onReconcile={() => void checkpoint.reconcile().then(() => onRefresh())} />
+    <ActionFeedback state={proposalAction.state} action={proposalAction} onReconcile={() => void proposalAction.reconcile().then(() => onRefresh())}
       onResume={() => void proposalAction.resume<PublishPlanCommand, unknown>((repository, command) => repository.publishPlan(command)).then(() => onRefresh())} />
   </section>;
 }

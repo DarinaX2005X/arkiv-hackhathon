@@ -401,7 +401,7 @@ export function ContributionRow({ title, owner, community, conditions, status, a
     <article className={classes('pf-contribution-row', selected && 'pf-contribution-row--selected', className)} aria-labelledby={titleId}>
       <div className="pf-contribution-details">
         <h4 className="pf-row-title" id={titleId}>{title}</h4>
-        <p className="pf-contribution-owner">{owner}{community && <><span aria-hidden="true"> · </span>{community}</>}</p>
+        <p className="pf-contribution-owner"><span>{owner}</span>{community && <>{' '}<span className="pf-contribution-community">from {community}</span></>}</p>
         {conditions && <div className="pf-row-conditions">{conditions}</div>}
       </div>
       {(status || action) && <div className="pf-row-outcome">{status}{action && <div className="pf-row-action">{action}</div>}</div>}

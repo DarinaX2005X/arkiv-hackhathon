@@ -21,7 +21,7 @@ export interface RecipeEditorProps {
   onValidityChange?: (valid: boolean) => void;
 }
 
-const humanReview = 'Notes for people to review. These instructions are not checked by the plan search.';
+const humanReview = 'People must review these notes. They are not checked automatically.';
 const occurrences = [
   { value: 'reject', label: 'Choose an occurrence' },
   { value: 'earlier', label: 'First occurrence, before clocks move back' },
@@ -78,15 +78,15 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
       <div className="pf-recipe-fields">
         <Field label="Project title" value={draft.title} error={errors.title} onChange={event => change({ ...draft, title: event.target.value })} autoComplete="off" />
         <Textarea label="Outcome" hint="Describe what the finished project should achieve." value={draft.outcome} error={errors.outcome} rows={2} onChange={event => change({ ...draft, outcome: event.target.value })} />
-        <Field label="Project time zone" hint="Use a named time zone, such as Asia/Qyzylorda, Europe/London or UTC. New variants start with this zone." value={draft.timeZone} error={errors.timeZone} onChange={event => change({ ...draft, timeZone: event.target.value })} autoComplete="off" spellCheck={false} />
-        <Textarea label="Project instructions · human review" hint={humanReview} value={draft.instructions} error={errors.instructions} rows={3} onChange={event => change({ ...draft, instructions: event.target.value })} />
+        <Field label="Project time zone" hint="Use a named zone, such as Europe/London or UTC. New options use this zone." value={draft.timeZone} error={errors.timeZone} onChange={event => change({ ...draft, timeZone: event.target.value })} autoComplete="off" spellCheck={false} />
+        <Textarea label="Project instructions" hint={humanReview} value={draft.instructions} error={errors.instructions} rows={3} onChange={event => change({ ...draft, instructions: event.target.value })} />
       </div>
     </fieldset>
 
     <section className="pf-recipe-variants" aria-labelledby={`${baseId}-variants`}>
       <div className="pf-recipe-section-heading">
-        <div><h3 id={`${baseId}-variants`}>Ways this project could happen</h3><p className="pf-secondary">Each variant has its own venue, time zone and complete list of requirements.</p></div>
-        <Button variant="secondary" disabled={disabled || draft.variants.length >= 64} onClick={() => change(addVariant(draft, newId('variant')))}>Add variant</Button>
+        <div><h3 id={`${baseId}-variants`}>Date and place options</h3><p className="pf-secondary">For each option, add the people, place and equipment you need.</p></div>
+        <Button variant="secondary" disabled={disabled || draft.variants.length >= 64} onClick={() => change(addVariant(draft, newId('variant')))}>Add option</Button>
       </div>
       {errors.variants && <FieldMessage tone="danger">{errors.variants}</FieldMessage>}
       {draft.variants.map((variant, variantIndex) => {
@@ -94,20 +94,20 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
         const variantHeading = `${baseId}-variant-${variantIndex}`;
         return <section className="pf-recipe-variant" key={variant.id} aria-labelledby={variantHeading}>
           <div className="pf-recipe-section-heading">
-            <h3 id={variantHeading}>{variant.title.trim() || `Variant ${variantIndex + 1}`}</h3>
+            <h3 id={variantHeading}>{variant.title.trim() || `Option ${variantIndex + 1}`}</h3>
             <div className="pf-actions">
-              <Button variant="quiet" size="compact" disabled={disabled || draft.variants.length >= 64} aria-label={`Copy ${variant.title || `variant ${variantIndex + 1}`}`} onClick={() => change(copyVariant(draft, variant.id, newId('variant'), () => newId('requirement')))}>Copy variant</Button>
-              <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${variant.title || `variant ${variantIndex + 1}`}`} onClick={() => change(removeVariant(draft, variant.id))}>Remove variant</Button>
+              <Button variant="quiet" size="compact" disabled={disabled || draft.variants.length >= 64} aria-label={`Copy ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(copyVariant(draft, variant.id, newId('variant'), () => newId('requirement')))}>Copy option</Button>
+              <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(removeVariant(draft, variant.id))}>Remove option</Button>
             </div>
           </div>
           <fieldset className="pf-recipe-fieldset" disabled={disabled}>
-            <legend className="pf-visually-hidden">Variant details</legend>
+            <legend className="pf-visually-hidden">Option details</legend>
             <div className="pf-recipe-grid">
-              <Field label="Variant title" value={variant.title} error={errors[`${path}.title`]} onChange={event => changeVariant(variant.id, { title: event.target.value })} />
-              <Field label="Venue reference" hint="Use the same name or reference as offers restricted to this venue." value={variant.venueId} error={errors[`${path}.venueId`]} onChange={event => changeVariant(variant.id, { venueId: event.target.value })} />
-              <Field label="Variant time zone" hint="All requirement dates below use this zone. Changing it keeps the displayed clock times." value={variant.timeZone} error={errors[`${path}.timeZone`]} onChange={event => changeVariant(variant.id, { timeZone: event.target.value })} autoComplete="off" spellCheck={false} />
+              <Field label="Option name" value={variant.title} error={errors[`${path}.title`]} onChange={event => changeVariant(variant.id, { title: event.target.value })} />
+              <Field label="Place" hint="Use the exact place name or reference shown in matching offers." value={variant.venueId} error={errors[`${path}.venueId`]} onChange={event => changeVariant(variant.id, { venueId: event.target.value })} />
+              <Field label="Time zone for this option" hint="Dates below use this zone. Changing the zone keeps the clock times you entered." value={variant.timeZone} error={errors[`${path}.timeZone`]} onChange={event => changeVariant(variant.id, { timeZone: event.target.value })} autoComplete="off" spellCheck={false} />
             </div>
-            <Textarea label="Variant instructions · human review" hint={humanReview} value={variant.instructions} error={errors[`${path}.instructions`]} rows={2} onChange={event => changeVariant(variant.id, { instructions: event.target.value })} />
+            <Textarea label="Option instructions" hint={humanReview} value={variant.instructions} error={errors[`${path}.instructions`]} rows={2} onChange={event => changeVariant(variant.id, { instructions: event.target.value })} />
           </fieldset>
 
           <div className="pf-recipe-requirements">
@@ -121,35 +121,35 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
               return <section key={requirement.id} className="pf-recipe-requirement" aria-labelledby={requirementHeading}>
                 <div className="pf-recipe-section-heading">
                   <h4 id={requirementHeading}>{requirement.title.trim() || `Requirement ${requirementIndex + 1}`}</h4>
-                  <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${requirement.title || `requirement ${requirementIndex + 1}`} from ${variant.title || `variant ${variantIndex + 1}`}`} onClick={() => change(removeRequirement(draft, variant.id, requirement.id))}>Remove requirement</Button>
+                  <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${requirement.title || `requirement ${requirementIndex + 1}`} from ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(removeRequirement(draft, variant.id, requirement.id))}>Remove requirement</Button>
                 </div>
                 <fieldset className="pf-recipe-fieldset" disabled={disabled}>
                   <legend className="pf-visually-hidden">Requirement details</legend>
                   <div className="pf-recipe-grid">
-                    <Field label="Requirement title" value={requirement.title} error={errors[`${itemPath}.title`]} onChange={event => changeRequirement(variant.id, requirement.id, { title: event.target.value })} />
-                    <Select label="Kind" value={requirement.kind} options={[{ value: 'person', label: 'Person' }, { value: 'place', label: 'Place' }, { value: 'equipment', label: 'Equipment' }]} onChange={event => changeRequirement(variant.id, requirement.id, { kind: event.target.value as ResourceKind })} />
-                    <Field label="Capability" hint="Use the exact capability supplied by matching offers, such as installation or transport." value={requirement.capability} error={errors[`${itemPath}.capability`]} onChange={event => changeRequirement(variant.id, requirement.id, { capability: event.target.value })} />
+                    <Field label="What do you need?" value={requirement.title} error={errors[`${itemPath}.title`]} onChange={event => changeRequirement(variant.id, requirement.id, { title: event.target.value })} />
+                    <Select label="Type" value={requirement.kind} options={[{ value: 'person', label: 'Person' }, { value: 'place', label: 'Place' }, { value: 'equipment', label: 'Equipment' }]} onChange={event => changeRequirement(variant.id, requirement.id, { kind: event.target.value as ResourceKind })} />
+                    <Field label="Needed skill or use" hint="Match the capability written in an offer, such as installation or transport." value={requirement.capability} error={errors[`${itemPath}.capability`]} onChange={event => changeRequirement(variant.id, requirement.id, { capability: event.target.value })} />
                     <Field label="Quantity" hint="Whole numbers from 1 to 1,000,000." type="text" inputMode="numeric" value={requirement.quantity} error={errors[`${itemPath}.quantity`]} onChange={event => changeRequirement(variant.id, requirement.id, { quantity: event.target.value })} />
                     <Field label="Unit" hint="Must match the offer unit exactly, such as person, room or board." value={requirement.unit} error={errors[`${itemPath}.unit`]} onChange={event => changeRequirement(variant.id, requirement.id, { unit: event.target.value })} />
                   </div>
                   <div className="pf-recipe-grid">
                     <div className="pf-recipe-fields">
-                      <Field label="Start · local date and time" hint={`Use YYYY-MM-DDTHH:mm, for example 2026-10-17T09:00. Time zone: ${variant.timeZone || 'not set'}.`} type="text" placeholder="YYYY-MM-DDTHH:mm" value={requirement.startLocal} error={errors[`${itemPath}.startLocal`]} onChange={event => changeRequirement(variant.id, requirement.id, { startLocal: event.target.value, startDisambiguation: 'reject' })} autoComplete="off" spellCheck={false} />
-                      {needsOccurrence(requirement.startLocal, variant.timeZone) && <Select label="Start clock occurrence" value={requirement.startDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { startDisambiguation: event.target.value as TimeDisambiguation })} />}
+                      <Field label="Starts" hint={`Use YYYY-MM-DDTHH:mm, for example 2026-10-17T09:00. Time zone: ${variant.timeZone || 'not set'}.`} type="text" placeholder="YYYY-MM-DDTHH:mm" value={requirement.startLocal} error={errors[`${itemPath}.startLocal`]} onChange={event => changeRequirement(variant.id, requirement.id, { startLocal: event.target.value, startDisambiguation: 'reject' })} autoComplete="off" spellCheck={false} />
+                      {needsOccurrence(requirement.startLocal, variant.timeZone) && <Select label="Which repeated start time?" value={requirement.startDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { startDisambiguation: event.target.value as TimeDisambiguation })} />}
                     </div>
                     <div className="pf-recipe-fields">
-                      <Field label="End · local date and time" hint="Use the same date and time format. End must be after start." type="text" placeholder="YYYY-MM-DDTHH:mm" value={requirement.endLocal} error={errors[`${itemPath}.endLocal`]} onChange={event => changeRequirement(variant.id, requirement.id, { endLocal: event.target.value, endDisambiguation: 'reject' })} autoComplete="off" spellCheck={false} />
-                      {needsOccurrence(requirement.endLocal, variant.timeZone) && <Select label="End clock occurrence" value={requirement.endDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { endDisambiguation: event.target.value as TimeDisambiguation })} />}
+                      <Field label="Ends" hint="Use YYYY-MM-DDTHH:mm. End must be after start." type="text" placeholder="YYYY-MM-DDTHH:mm" value={requirement.endLocal} error={errors[`${itemPath}.endLocal`]} onChange={event => changeRequirement(variant.id, requirement.id, { endLocal: event.target.value, endDisambiguation: 'reject' })} autoComplete="off" spellCheck={false} />
+                      {needsOccurrence(requirement.endLocal, variant.timeZone) && <Select label="Which repeated end time?" value={requirement.endDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { endDisambiguation: event.target.value as TimeDisambiguation })} />}
                     </div>
                   </div>
                   <fieldset className="pf-recipe-dependencies" aria-describedby={errors[`${itemPath}.dependsOn`] ? dependencyErrorId : undefined}>
                     <legend className="pf-field-label">Starts after these requirements</legend>
                     <p className="pf-field-message">Selected requirements must finish before this one starts.</p>
-                    {candidates.length ? candidates.map(candidate => <Checkbox key={candidate.id} label={candidate.title || 'Untitled requirement'} checked={requirement.dependsOn.includes(candidate.id)} onChange={event => changeRequirement(variant.id, requirement.id, { dependsOn: event.target.checked ? [...requirement.dependsOn, candidate.id] : requirement.dependsOn.filter(id => id !== candidate.id) })} />) : <p className="pf-field-message">Add another requirement to set a dependency.</p>}
+                    {candidates.length ? candidates.map(candidate => <Checkbox key={candidate.id} label={candidate.title || 'Untitled requirement'} checked={requirement.dependsOn.includes(candidate.id)} onChange={event => changeRequirement(variant.id, requirement.id, { dependsOn: event.target.checked ? [...requirement.dependsOn, candidate.id] : requirement.dependsOn.filter(id => id !== candidate.id) })} />) : <p className="pf-field-message">Add another requirement to choose what must finish first.</p>}
                     {requirement.dependsOn.some(id => !candidates.some(candidate => candidate.id === id)) && <Button variant="quiet" size="compact" onClick={() => changeRequirement(variant.id, requirement.id, { dependsOn: requirement.dependsOn.filter(id => candidates.some(candidate => candidate.id === id)) })}>Clear unavailable dependencies</Button>}
                     {errors[`${itemPath}.dependsOn`] && <FieldMessage id={dependencyErrorId} role="alert" tone="danger">{errors[`${itemPath}.dependsOn`]}</FieldMessage>}
                   </fieldset>
-                  <Textarea label="Requirement instructions · human review" hint={humanReview} value={requirement.instructions} error={errors[`${itemPath}.instructions`]} rows={2} onChange={event => changeRequirement(variant.id, requirement.id, { instructions: event.target.value })} />
+                  <Textarea label="Requirement instructions" hint={humanReview} value={requirement.instructions} error={errors[`${itemPath}.instructions`]} rows={2} onChange={event => changeRequirement(variant.id, requirement.id, { instructions: event.target.value })} />
                 </fieldset>
               </section>;
             })}
@@ -157,7 +157,7 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
         </section>;
       })}
     </section>
-    {!!issueCount && <Notice tone="warning" title="Finish the recipe before planning">
+    {!!issueCount && <Notice tone="warning" title="Complete these details before finding a plan">
       <p>{issueCount === 1 ? 'One field or section needs attention.' : `${issueCount} fields or sections need attention.`} Your unfinished input stays in this draft.</p>
       {errors.$ && <p>{errors.$}</p>}
     </Notice>}

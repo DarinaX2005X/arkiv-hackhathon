@@ -1,15 +1,141 @@
-import { hashPlan } from './canonical';
+import { canonicalJson, hashCanonical, hashPlan } from './canonical';
 import { deriveExecution, transferStatementHash } from './execution';
 import { activeSource, deriveReadiness, lastAcceptedDuty, sameActor, sameSource, sourcePlanRef, validateCurrentEntity } from './readiness';
-import { deriveRequiredApprovers, independentlyValidatePlan, validateBookState } from './validation';
+import { deriveRequiredApprovers, independentlyValidatePlan, validateBookCapacity, validateBookState } from './validation';
 import type {
   Actor, Attestation, BookState, Decision, DomainReason, EntityKey, Grant, ProjectAggregate,
-  ProjectState, PublisherAggregate, RecordedOutcome, SourcePlanRef,
+  ProjectState, PublisherAggregate, RecordedOutcome, Resource, SourcePlanRef,
 } from './types';
 
 export type OperationResult<T> = { ok: true; value: T } | { ok: false; reasons: DomainReason[] };
 export interface PreparedBookChange { book: BookState; expectedHeads: EntityKey[] }
 export interface DecisionInput { status: Decision['status']; operationId: string; now: number; validUntil?: number; reason?: string }
+
+export interface BookConflictDecision {
+  key: string; source: SourcePlanRef;
+  records: { headKey: EntityKey; decision: Decision }[];
+  liveGrants: Grant[];
+}
+export interface BookConflictResource { id: string; records: { headKey: EntityKey; resource: Resource }[] }
+export interface BookConflictReview { heads: EntityKey[]; decisions: BookConflictDecision[]; resources: BookConflictResource[] }
+export type BookDecisionChoice = { key: string; kind: 'recorded'; headKey: EntityKey }
+  | { key: string; kind: 'withdraw'; reason: string };
+export interface ResolveBookInput {
+  /** Exact complete head set that the owner inspected, never a latest-head heuristic. */
+  reviewedHeads: EntityKey[]; availabilityHeadKey: EntityKey;
+  decisions: BookDecisionChoice[];
+  resources?: { resourceId: string; headKey: EntityKey }[];
+  operationId: string; now: number;
+}
+const decisionScope = (source: SourcePlanRef): string => hashCanonical([source.projectRoot, source.activationKey]);
+const sameJson = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
+
+/** Presentation data only. Authoritative validation happens again in prepareResolveBook. */
+export function inspectBookConflict(publisher: PublisherAggregate): BookConflictReview {
+  if (publisher.book.status !== 'conflict') return { heads: [], decisions: [], resources: [] };
+  const decisions = new Map<string, BookConflictDecision>();
+  const resources = new Map<string, BookConflictResource>();
+  for (const head of publisher.book.entities) {
+    for (const decision of head.payload.decisions) {
+      const key = decisionScope(decision);
+      const group = decisions.get(key) ?? { key, source: sourcePlanRef(decision), records: [], liveGrants: [] };
+      if (!group.records.some(item => sameJson(item.decision, decision))) group.records.push({ headKey: head.key, decision: structuredClone(decision) });
+      decisions.set(key, group);
+    }
+    for (const grant of head.payload.grants.filter(g => g.validUntil > publisher.snapshot.blockTimestamp)) {
+      const key = decisionScope(grant);
+      const group = decisions.get(key) ?? { key, source: sourcePlanRef(grant), records: [], liveGrants: [] };
+      if (!group.liveGrants.some(item => sameJson(item, grant))) group.liveGrants.push(structuredClone(grant));
+      decisions.set(key, group);
+    }
+    for (const resource of head.payload.resources) {
+      const group = resources.get(resource.id) ?? { id: resource.id, records: [] };
+      if (!group.records.some(item => sameJson(item.resource, resource))) group.records.push({ headKey: head.key, resource: structuredClone(resource) });
+      resources.set(resource.id, group);
+    }
+  }
+  return { heads: publisher.book.entities.map(head => head.key).sort(), decisions: [...decisions.values()], resources: [...resources.values()] };
+}
+
+/** Consume every reviewed fork, preserving facts and live promises unless explicitly withdrawn. */
+export function prepareResolveBook(publisher: PublisherAggregate, actor: Actor, input: ResolveBookInput): OperationResult<PreparedBookChange> {
+  if (!sameActor(actor, publisher.root.payload.publisher) || !sameActor(actor, publisher.root.provenance.creator)) return failure({ code: 'foreign_author', publisherRoot: publisher.root.key });
+  if (publisher.book.status !== 'conflict' || publisher.book.entities.length < 2) return failure({ code: 'conflicting_heads', publisherRoot: publisher.root.key });
+  const heads = publisher.book.entities;
+  const expectedHeads = heads.map(head => head.key).sort();
+  if (new Set(input.reviewedHeads).size !== input.reviewedHeads.length || !sameJson(expectedHeads, [...input.reviewedHeads].sort())) return failure({ code: 'conflicting_heads', publisherRoot: publisher.root.key });
+  if (publisher.snapshot.completeness !== 'complete' || publisher.snapshot.freshness !== 'fresh') return failure({ code: 'incomplete_snapshot' });
+  if (!Number.isSafeInteger(input.now) || input.now < publisher.snapshot.blockTimestamp || !input.operationId.trim()) return failure({ code: 'invalid_input' });
+  const authority = [...validateCurrentEntity(publisher.root, publisher.snapshot, actor).reasons,
+    ...heads.flatMap(head => validateCurrentEntity(head, publisher.snapshot, actor).reasons)];
+  if (heads.some(head => head.payload.publisherRoot !== publisher.root.key)) authority.push({ code: 'projection_mismatch' });
+  if (authority.length) return { ok: false, reasons: authority };
+  const base = heads.find(head => head.key === input.availabilityHeadKey);
+  if (!base) return failure({ code: 'invalid_input', path: 'availabilityHeadKey' });
+  const review = inspectBookConflict(publisher);
+  if (new Set(input.decisions.map(choice => choice.key)).size !== input.decisions.length
+    || input.decisions.some(choice => !review.decisions.some(group => group.key === choice.key))) return failure({ code: 'invalid_input', path: 'decisions' });
+  const book = structuredClone(base.payload);
+  book.retentionDays = Math.max(...heads.map(head => head.payload.retentionDays));
+  book.decisions = []; book.grants = []; book.attestations = []; book.custodyHolds = [];
+  // Same-ID facts with different contents have no truthful automatic merge. Retain nothing by guesswork.
+  for (const head of heads) {
+    for (const attestation of head.payload.attestations) {
+      const prior = book.attestations.find(item => item.id === attestation.id);
+      if (prior && !sameJson(prior, attestation)) return failure({ code: 'attestation_mismatch', path: 'attestations', obligationId: attestation.obligationId });
+      if (!prior) book.attestations.push(structuredClone(attestation));
+    }
+    for (const hold of head.payload.custodyHolds) {
+      const prior = book.custodyHolds.find(item => item.id === hold.id);
+      if (prior && !sameJson(prior, hold)) return failure({ code: 'custody_outstanding', path: 'custodyHolds', resourceId: hold.resourceId });
+      if (!prior) book.custodyHolds.push(structuredClone(hold));
+    }
+  }
+  for (const group of review.decisions) {
+    const sources = [...group.records.map(item => item.decision), ...group.liveGrants];
+    if (sources.some(source => !sameSource(source, group.source))) return failure({ code: 'proposal_mismatch', path: 'decisions', publisherRoot: publisher.root.key });
+    const choice = input.decisions.find(item => item.key === group.key);
+    if (choice?.kind === 'withdraw') {
+      if (!choice.reason.trim()) return failure({ code: 'invalid_input', path: `decisions.${group.key}.reason` });
+      book.decisions.push({ ...group.source, status: 'withdrawn', reason: choice.reason.trim(), decidedAt: input.now, operationId: input.operationId });
+      continue;
+    }
+    const selected = choice?.kind === 'recorded'
+      ? heads.find(head => head.key === choice.headKey)?.payload.decisions.find(d => decisionScope(d) === group.key)
+      : group.records.length === 1 ? group.records[0]!.decision : undefined;
+    if (!selected) return failure({ code: 'contradictory_decision', path: `decisions.${group.key}` });
+    book.decisions.push(structuredClone(selected));
+    // Picking a recorded decline/withdrawal is an explicit release only when the owner chose it.
+    if (group.liveGrants.length && selected.status !== 'accepted' && !choice) return failure({ code: 'contradictory_decision', path: `decisions.${group.key}` });
+    if (selected.status === 'accepted') book.grants.push(...structuredClone(group.liveGrants));
+  }
+  const neededResources = new Set([...book.resources.map(resource => resource.id), ...book.grants.flatMap(grant => grant.allocations.map(allocation => allocation.resourceId)), ...book.custodyHolds.map(hold => hold.resourceId)]);
+  if (new Set(input.resources?.map(choice => choice.resourceId)).size !== (input.resources?.length ?? 0)
+    || input.resources?.some(choice => !review.resources.some(group => group.id === choice.resourceId))) return failure({ code: 'invalid_input', path: 'resources' });
+  book.resources = [];
+  for (const resourceId of neededResources) {
+    const choice = input.resources?.find(item => item.resourceId === resourceId);
+    const records = review.resources.find(group => group.id === resourceId)?.records ?? [];
+    const selected = choice ? heads.find(head => head.key === choice.headKey)?.payload.resources.find(resource => resource.id === resourceId)
+      : base.payload.resources.find(resource => resource.id === resourceId) ?? (records.length === 1 ? records[0]!.resource : undefined);
+    if (!selected) return failure({ code: 'invalid_input', path: 'resources', resourceId });
+    // Resources retained solely for old promises are not newly offered as available.
+    const retainedOnly = !base.payload.resources.some(resource => resource.id === resourceId);
+    book.resources.push({ ...structuredClone(selected), ...(retainedOnly ? { availability: [] } : {}) });
+  }
+  for (const allocation of book.grants.flatMap(grant => grant.allocations)) {
+    if (book.resources.find(resource => resource.id === allocation.resourceId)?.unit !== allocation.unit) return failure({ code: 'unit_mismatch', resourceId: allocation.resourceId });
+  }
+  book.resources.sort((a, b) => a.id.localeCompare(b.id));
+  book.decisions.sort((a, b) => decisionScope(a).localeCompare(decisionScope(b)));
+  book.grants.sort((a, b) => a.id.localeCompare(b.id));
+  book.attestations.sort((a, b) => a.id.localeCompare(b.id));
+  book.custodyHolds.sort((a, b) => a.id.localeCompare(b.id));
+  const candidate: PublisherAggregate = { ...publisher, book: { status: 'unique', entity: { ...base, payload: book } } };
+  const capacity = validateBookCapacity(candidate, book, publisher.snapshot.blockTimestamp);
+  if (!capacity.valid) return { ok: false, reasons: capacity.reasons };
+  return finalizeBook({ book, expectedHeads }, input.operationId, input.now);
+}
 
 function failure<T>(...reasons: DomainReason[]): OperationResult<T> { return { ok: false, reasons }; }
 

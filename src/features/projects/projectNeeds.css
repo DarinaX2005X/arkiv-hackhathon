@@ -1,0 +1,8 @@
+.project-needs { min-width: 0; }
+.project-needs-requirement { border-top: 1px solid var(--border-quiet); padding-top: var(--space-4); }
+.project-needs-facts { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; }
+.project-needs-facts dt { font-weight: 500; }
+.project-needs-facts dd { margin: 0; overflow-wrap: anywhere; }
+.project-needs code, .project-needs header p, .project-needs h3, .project-needs h4 { overflow-wrap: anywhere; }
+.project-needs-instructions { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 479px) { .project-needs-facts { grid-template-columns: minmax(0, 1fr); } .project-needs-facts dd { margin-bottom: var(--space-2); } }

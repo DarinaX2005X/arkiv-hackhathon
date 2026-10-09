@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createRepositoryActionController } from './actions';
+import { createRepositoryActionController, validRepositoryActionRecord } from './actions';
+import { createDraftStore } from './storage';
+import { createOperationIntent } from '../data/operations';
 import type { Actor } from '../domain/types';
 import type { CommandBase, OperationIntent, ReconciliationResult, Repository, Result } from '../data/types';
 
@@ -25,6 +27,21 @@ function repository(reconcile: (operation: OperationIntent) => Promise<Result<Re
 const pendingRepository = () => repository(async operation => ({ ok: true, value: { status: 'pending', operation } }));
 
 describe('shared request persistence and reconciliation', () => {
+  it('keeps confirmed roots through a reverted later step and resumes the same request', async () => {
+    const partial = { ...intent(), kind: 'create_project' as const, phase: 'root_confirmed' as const, confirmedKeys: ['local:root' as const] };
+    const error = { code: 'reverted' as const, reasons: [], retryable: false };
+    const repo = repository(async () => ({ ok: true, value: { status: 'partial_reverted', operation: partial, receipt: receipt(partial), error } }));
+    const controller = createRepositoryActionController({ repository: repo, store: store(), getActor: () => actor });
+    await controller.run({ ...command(), operation: partial }, async () => ({ ok: false, error }));
+    await controller.reconcile();
+    expect(controller.getSnapshot().status).toBe('needs-verification');
+    expect(controller.clear()).toBe(false);
+    let resumed: CommandBase | undefined;
+    await controller.resume<CommandBase, unknown>(async (_, saved) => { resumed = saved; return { ok: true, value: { operation: { ...partial, phase: 'complete' } } }; });
+    expect(resumed?.operation.id).toBe('one');
+    expect(resumed?.operation.confirmedKeys).toEqual(['local:root']);
+    expect(controller.getSnapshot().status).toBe('confirmed');
+  });
   it('does not invoke the repository mutation when durable persistence fails', async () => {
     let sends = 0;
     const controller = createRepositoryActionController({ repository: pendingRepository(), store: store(false), getActor: () => actor });
@@ -82,5 +99,49 @@ describe('shared request persistence and reconciliation', () => {
     let sends = 0;
     await controller.resume(async () => { sends++; return { ok: true, value: null }; });
     expect(sends).toBe(0); expect(controller.recoverableCommand?.operation.id).toBe('one');
+  });
+});
+
+describe('unreadable request recovery', () => {
+  const goodRecord = () => {
+    const input = { lifetimeSeconds: 3600 };
+    const operation = createOperationIntent('replace_book', { mode: 'local', actor: actor as { kind: 'local'; id: `local-actor:${string}` }, chainId: null }, input, { id: 'saved-one', now: 1 });
+    return { status: 'needs-verification' as const, command: { ...input, operation }, operation } as unknown as Record;
+  };
+  function setup() {
+    const values = new Map<string, string>([['saved', '{corrupt original']]);
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
+    const journal = createDraftStore({ storage, key: 'saved', kind: 'repository-action', validate: validRepositoryActionRecord, now: () => 1 });
+    const backup = journal.export(goodRecord());
+    let current = actor;
+    const reconciled: string[] = [];
+    const controller = createRepositoryActionController({ store: journal, getActor: () => current,
+      repository: repository(async operation => { reconciled.push(operation.id); return { ok: true, value: { status: 'pending', operation } }; }) });
+    return { controller, backup, values, reconciled, setActor: (next: Actor) => { current = next; } };
+  }
+  it('retains original bytes, restores a validated backup, and checks the same original request', async () => {
+    const { controller, backup, values, reconciled } = setup();
+    expect(controller.recoveryText).toBe('{corrupt original');
+    expect(controller.clear()).toBe(false);
+    let sends = 0;
+    await controller.run(command(), async () => { sends++; return { ok: true, value: null }; });
+    expect(sends).toBe(0);
+    expect(controller.restoreRecovery(backup).ok).toBe(true);
+    expect(controller.recoveryText).toBeNull();
+    expect(values.get('saved')).not.toBe('{corrupt original');
+    expect(controller.getSnapshot().status).toBe('needs-verification');
+    await controller.reconcile();
+    expect(reconciled).toEqual(['saved-one']);
+    expect(sends).toBe(0);
+  });
+  it('rejects changed command data and another owner without overwriting the unreadable file', () => {
+    const { controller, backup, values, setActor } = setup();
+    const changed = JSON.parse(backup); changed.payload.command.lifetimeSeconds++;
+    expect(controller.restoreRecovery(JSON.stringify(changed)).ok).toBe(false);
+    setActor({ kind: 'local', id: 'local-actor:another' });
+    expect(controller.restoreRecovery(backup).ok).toBe(false);
+    expect(controller.restoreRecovery('{broken').ok).toBe(false);
+    expect(values.get('saved')).toBe('{corrupt original');
+    expect(controller.recoveryText).toBe('{corrupt original');
   });
 });

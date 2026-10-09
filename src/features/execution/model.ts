@@ -67,16 +67,16 @@ export function runbookRows(project: ProjectAggregate, proposal: EntityRecord<Pr
 }
 export const rowLabels: Record<RunbookRow['status'], string> = {
   not_reported: 'Not reported', reported_not_done: 'Owner reported incomplete', reported_done: 'Owner reported done',
-  awaiting_acknowledgement: 'Reported · awaiting recipient acknowledgement', partially_acknowledged: 'Partly acknowledged · still outstanding',
+  awaiting_acknowledgement: 'Reported, awaiting recipient acknowledgement', partially_acknowledged: 'Partly acknowledged, still outstanding',
   confirmed_handover: 'Handover confirmed by both sides', confirmed_return: 'Return confirmed by both sides', evidence_unavailable: 'Evidence needs verification',
 };
 export function versionStatus(project: ProjectAggregate, proposal: EntityRecord<Proposal>, now: number): string {
   const closed = project.state.status === 'unique' && project.state.entity.payload.lifecycle === 'closed';
-  if (closed && project.state.status === 'unique') return `${project.state.entity.payload.completion?.source?.proposalKey === proposal.key ? 'Closed record' : 'Historical version · project closed'} · ${project.state.entity.payload.completion?.outcome.replaceAll('_', ' ') ?? 'outcome unavailable'}`;
-  if (activeSource(project)?.proposalKey !== proposal.key) return 'Historical version · not the current agreement';
+  if (closed && project.state.status === 'unique') return `${project.state.entity.payload.completion?.source?.proposalKey === proposal.key ? 'Closed record' : 'Historical version, project closed'}, ${project.state.entity.payload.completion?.outcome.replaceAll('_', ' ') ?? 'outcome unavailable'}`;
+  if (activeSource(project)?.proposalKey !== proposal.key) return 'Historical version, not the current agreement';
   const readiness = deriveReadiness(project, now);
-  return { ready: 'Agreed by everyone', possible: 'Proposed · agreement not recorded', awaiting_approval: 'Proposed · awaiting everyone’s agreement',
-    declined: 'Declined · not ready', changed: 'Changed · needs repair', conflict: 'Conflicting records · not verified', unverified: 'Current status unverified' }[readiness.status];
+  return { ready: 'Agreed by everyone', possible: 'Proposed, agreement not recorded', awaiting_approval: 'Proposed, awaiting everyone’s agreement',
+    declined: 'Declined, not ready', changed: 'Changed, needs repair', conflict: 'Conflicting records, not verified', unverified: 'Current status unverified' }[readiness.status];
 }
 
 export type ProgressInput =

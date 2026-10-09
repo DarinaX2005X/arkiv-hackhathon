@@ -4,7 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { key } from '@arkiv-network/sdk/attr';
 import { eq } from '@arkiv-network/sdk/query';
 import { deriveReadiness } from '../domain/readiness';
-import type { ExportPacket } from '../data/types';
+import type { ExportPacket, ReadOptions } from '../data/types';
+import { TIRAMISU_CHAIN_ID } from '../domain/types';
 import { ArkivReader } from '../data/arkiv/reader';
 import { publicKey, sameIdentity } from '../data/arkiv/envelope';
 import { repositoryError, assertArkiv } from '../data/arkiv/errors';
@@ -16,10 +17,10 @@ const CAPABILITIES = {
 } as const;
 const CAPABILITY_CREATOR = '0x6267ab770266da229130a2a75a52a9d578fb0a5b';
 
-export async function verifyProject(reader: ArkivReader, root: string): Promise<ExportPacket> {
-  const project = await reader.loadProject(publicKey(root));
+export async function verifyProject(reader: ArkivReader, root: string, options?: ReadOptions): Promise<ExportPacket> {
+  const project = await reader.loadProject(publicKey(root), options);
   return { format: 'partfolk-export', version: 1, exportedAt: reader.now(), mode: 'public', project,
-    readiness: deriveReadiness(project, project.snapshot.blockTimestamp), snapshot: project.snapshot };
+    readiness: deriveReadiness(project, reader.now()), snapshot: project.snapshot };
 }
 
 /** Explicitly named feasibility records are not interpreted as Partfolk projects. */
@@ -46,7 +47,7 @@ export async function inspectCapability(reader: ArkivReader, name: string): Prom
 }
 
 export async function runCli(args: string[], output: (text: string) => void = console.log): Promise<number> {
-  const usage = 'Usage: node node_modules/tsx/dist/cli.mjs src/cli/verify.ts <project-root> [--json] [--export <file>]\n       node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability bootstrap|atomic [--json]';
+  const usage = 'Usage: node node_modules/tsx/dist/cli.mjs src/cli/verify.ts <project-root> [--json] [--block <number>] [--export <file>]\n       node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability bootstrap|atomic [--json]\n--block verifies a dated historical snapshot, not current readiness.';
   if (!args.length || args.includes('--help')) { output(usage); return args.length ? 0 : 2; }
   const reader = new ArkivReader();
   try {
@@ -54,19 +55,27 @@ export async function runCli(args: string[], output: (text: string) => void = co
       assertArkiv(args.length >= 2 && args.slice(2).every(arg => arg === '--json'), 'invalid_input', 'invalid_input', usage);
       output(json(await inspectCapability(reader, args[1]!))); return 0;
     }
-    const root = args[0]!; let jsonOutput = false; let exportPath: string | undefined;
+    const root = args[0]!; let jsonOutput = false; let exportPath: string | undefined; let requestedBlock: bigint | undefined;
     for (let index = 1; index < args.length; index++) {
       if (args[index] === '--json') jsonOutput = true;
+      else if (args[index] === '--block' && /^\d+$/.test(args[index + 1] ?? '')) requestedBlock = BigInt(args[++index]!);
       else if (args[index] === '--export' && args[index + 1]) exportPath = resolve(args[++index]!);
       else throw new Error(usage);
     }
-    const packet = await verifyProject(reader, root);
+    let options: ReadOptions | undefined;
+    if (requestedBlock !== undefined) {
+      const block = await reader.client.getBlock({ blockNumber: requestedBlock });
+      assertArkiv(block.number === requestedBlock && block.hash, 'unverified', 'incomplete_snapshot', 'The requested historical block is unavailable.');
+      options = { snapshot: { mode: 'public', source: 'arkiv', chainId: TIRAMISU_CHAIN_ID, blockNumber: requestedBlock.toString() as `${bigint}`,
+        blockHash: block.hash, blockTimestamp: Number(block.timestamp * 1_000n), fetchedAt: reader.now(), completeness: 'complete', freshness: 'fresh', reasons: [] } };
+    }
+    const packet = await verifyProject(reader, root, options);
     if (exportPath) await writeFile(exportPath, `${json(packet)}\n`, { encoding: 'utf8', flag: 'wx' });
     if (jsonOutput) output(json(packet));
     else {
       const title = packet.project.proposal?.payload.plan.outcome
         ?? (packet.project.state.status === 'unique' ? packet.project.state.entity.payload.recipe.title : 'Project');
-      output(`${title}\nAgreement: ${packet.readiness.status}\nLifecycle: ${packet.readiness.lifecycle}\nArkiv block: ${packet.snapshot.blockNumber}\nBlock time: ${new Date(packet.snapshot.blockTimestamp).toISOString()}\nApprovals: ${packet.readiness.acceptedApprovers.length}/${packet.readiness.requiredApprovers.length}\nHistory: ${packet.project.proposalHistoryStatus?.complete === false ? 'contains gaps' : 'complete within the verified lineage'}\nReasons: ${packet.readiness.reasons.map(reason => reason.code).join(', ') || 'none'}${exportPath ? `\nExport: ${exportPath}` : ''}\nSource: direct official Tiramisu RPC; no Studio server or browser cache.`);
+      output(`${title}\nAgreement${requestedBlock !== undefined ? ' at requested block' : ''}: ${packet.readiness.status}\nLifecycle: ${packet.readiness.lifecycle}\nArkiv block: ${packet.snapshot.blockNumber}\nBlock time: ${new Date(packet.snapshot.blockTimestamp).toISOString()}\nApprovals: ${packet.readiness.acceptedApprovers.length}/${packet.readiness.requiredApprovers.length}\nHistory: ${packet.project.proposalHistoryStatus?.complete === false ? 'contains gaps' : 'complete within the verified lineage'}\nReasons: ${packet.readiness.reasons.map(reason => reason.code).join(', ') || 'none'}${exportPath ? `\nExport: ${exportPath}` : ''}\nSource: direct official Tiramisu RPC; no Studio server or browser cache.`);
     }
     return packet.readiness.status === 'unverified' ? 1 : 0;
   } catch (error) {

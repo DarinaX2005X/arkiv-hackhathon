@@ -191,6 +191,18 @@ describe('remaining-work repair', () => {
 });
 
 describe('portable execution exports and recipe reuse', () => {
+  it('includes shared and venue instructions as escaped text in the printable run sheet', () => {
+    const project = fixture();
+    project.proposal!.payload.plan.instructions = 'Everyone: <bring water> & share the lift.';
+    project.proposal!.payload.plan.variant.instructions = 'Venue: use the <side door> & ring once.';
+    project.proposal!.payload.proposalHash = hashPlan(project.proposal!.payload.plan);
+    if (project.activation.status === 'unique') project.activation.entity.payload.proposalHash = project.proposal!.payload.proposalHash;
+    const exported = buildExecutionExports(packetFromProject(project, project.snapshot.fetchedAt));
+    expect(exported.html.text).toContain('Everyone: &lt;bring water&gt; &amp; share the lift.');
+    expect(exported.html.text).toContain('Venue: use the &lt;side door&gt; &amp; ring once.');
+    expect(exported.html.text).not.toContain('<side door>');
+    expect(JSON.parse(exported.json.text).project.proposal.payload.plan.instructions).toContain('<bring water>');
+  });
   it('exports exact English status, timezone, integer units, reports and escaped standalone HTML', () => {
     const project = fixture(true); if (project.state.status === 'unique') project.state.entity.payload.recipe.title = 'Café <script>alert(1)</script>';
     const exported = buildExecutionExports(packetFromProject(project, project.snapshot.fetchedAt), project.proposal!.key);

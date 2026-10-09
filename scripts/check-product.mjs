@@ -5,6 +5,9 @@ const checks = [
   ['node_modules/typescript/bin/tsc', '--noEmit'],
   ['node_modules/vitest/vitest.mjs', 'run'],
   ['--test', 'tests/first-write.test.mjs', 'tests/atomic-transition.test.mjs'],
+  ['node_modules/typescript/bin/tsc', '--noEmit', '-p', 'tests/arkiv-live/tsconfig.json'],
+  ['--import', 'tsx', '--test', 'tests/arkiv-live/safety.test.ts'],
+  ['node_modules/vitest/vitest.mjs', 'run', '--config', 'tests/arkiv-live/vitest.config.ts'],
   ['node_modules/vite/bin/vite.js', 'build'],
   ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.desk.config.ts'],
 ];

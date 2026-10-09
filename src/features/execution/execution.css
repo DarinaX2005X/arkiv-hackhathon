@@ -7,7 +7,7 @@
 .execution-duty-content header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3); }
 .execution-duty-content header h3 { flex: 1; min-width: 180px; }
 .execution-detail { display: block; font-size: .875rem; color: var(--text-secondary); }
-.execution-statement { padding: var(--space-4); border-left: 3px solid var(--border-control); background: var(--surface-inset); overflow-wrap: anywhere; }
+.execution-statement { padding: var(--space-4); border-radius: var(--radius-control); background: var(--surface-inset); overflow-wrap: anywhere; }
 .execution-outstanding { color: var(--warning-text); font-weight: 500; }
 .execution-resource-list { padding-left: var(--space-6); }
 .execution-id { overflow-wrap: anywhere; font-size: .85rem; }

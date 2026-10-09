@@ -4,6 +4,8 @@ import type { Actor, JsonValue } from '../domain/types';
 import type { CommandBase, OperationIntent, Repository, RepositoryError, Result } from '../data/types';
 import { useApp, useAppSession, type AppRuntime } from './context';
 import type { LoadResult, SaveResult } from './storage';
+import { canonicalJson, hashCanonical } from '../domain/canonical';
+import { createOperationIntent } from '../data/operations';
 
 export type RepositoryActionStatus = 'idle' | 'submitting' | 'needs-verification' | 'confirmed' | 'rejected' | 'reverted';
 export interface RepositoryActionState {
@@ -19,24 +21,48 @@ interface ActionRecord {
 }
 interface ActionStore {
   load(): LoadResult<ActionRecord>;
-  save(value: ActionRecord): SaveResult<ActionRecord>;
+  save(value: ActionRecord, options?: { replaceRecovery: boolean }): SaveResult<ActionRecord>;
+  exportRecovery?(): string | null;
+  inspectImport?(raw: string): LoadResult<ActionRecord>;
 }
 type Submit<C extends CommandBase, T> = (repository: Repository, command: C) => Promise<Result<T>>;
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const actorKey = (actor: Actor | null): string => !actor ? 'disconnected' : actor.kind === 'wallet' ? `wallet:${actor.address.toLowerCase()}` : actor.id;
 const failure = (code: RepositoryError['code'], diagnostic: string): Result<never> => ({ ok: false, error: { code, diagnostic, reasons: [], retryable: false } });
 
-function validRecord(value: unknown): value is ActionRecord {
+export function validRepositoryActionRecord(value: unknown): value is ActionRecord {
   if (!object(value) || !['idle', 'needs-verification', 'confirmed', 'rejected', 'reverted'].includes(String(value.status))) return false;
   if (value.status === 'idle') return value.command === null && value.operation === null;
   if (!object(value.command) || !object(value.operation)) return false;
   const operation = value.operation;
-  return typeof operation.id === 'string' && operation.id.length > 0 && typeof operation.kind === 'string'
-    && object(operation.authority) && object(operation.authority.actor)
-    && typeof operation.inputHash === 'string' && Number.isSafeInteger(operation.createdAt)
-    && Array.isArray(operation.steps) && Array.isArray(operation.expectedHeads)
-    && Array.isArray(operation.confirmedKeys) && typeof operation.phase === 'string'
-    && object(value.command.operation) && value.command.operation.id === operation.id;
+  const phases = ['prepared', 'root_pending', 'root_confirmed', 'initial_state_pending', 'initialized', 'proposal_pending', 'proposal_confirmed', 'activation_pending', 'activation_confirmed', 'book_pending', 'book_confirmed', 'link_pending', 'fanout_pending', 'complete'];
+  const kinds = ['create_project', 'register_publisher', 'replace_project', 'replace_book', 'publish_proposal', 'activate_proposal', 'publish_project_link', 'close_project', 'renew_entity', 'publish_plan', 'share_offer'];
+  const hash = (entry: unknown) => typeof entry === 'string' && /^0x[\da-fA-F]{64}$/.test(entry);
+  const keys = (entry: unknown) => Array.isArray(entry) && entry.every(key => typeof key === 'string' && /^(0x[\da-fA-F]{64}|local:.+)$/.test(key));
+  if (!kinds.includes(String(operation.kind)) || !phases.includes(String(operation.phase))
+    || !object(operation.authority) || !object(operation.authority.actor)
+    || !object(operation.input) || !hash(operation.inputHash)
+    || !keys(operation.expectedHeads) || !keys(operation.confirmedKeys) || !keys(operation.pendingPublisherRoots)
+    || (operation.transactionHash !== null && !hash(operation.transactionHash))
+    || !Number.isSafeInteger(value.command.lifetimeSeconds) || Number(value.command.lifetimeSeconds) <= 0
+    || !Array.isArray(operation.steps) || operation.steps.some(step => !object(step)
+      || typeof step.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(step.id)
+      || !phases.includes(String(step.phase)) || !['prepared', 'submitted', 'confirmed', 'unverified', 'failed-before-send', 'reverted'].includes(String(step.status))
+      || !hash(step.inputHash) || !keys(step.expectedHeads) || !keys(step.confirmedKeys)
+      || (step.transactionHash !== null && !hash(step.transactionHash)))) return false;
+  const authority = operation.authority, actor = authority.actor;
+  if (!object(actor)) return false;
+  if (!(authority.mode === 'local' && actor.kind === 'local' && typeof actor.id === 'string' && /^local-actor:.+/.test(actor.id) && authority.chainId === null)
+    && !(authority.mode === 'public' && actor.kind === 'wallet' && typeof actor.address === 'string' && /^0x[\da-fA-F]{40}$/.test(actor.address)
+      && Number.isSafeInteger(authority.chainId) && Number(authority.chainId) > 0)) return false;
+  try {
+    const typed = operation as unknown as OperationIntent;
+    const rebuilt = createOperationIntent(typed.kind, typed.authority, typed.input, { id: typed.id, now: typed.createdAt });
+    const { operation: savedOperation, ...fields } = value.command;
+    return rebuilt.inputHash === operation.inputHash && hashCanonical(fields) === operation.inputHash
+      && canonicalJson(rebuilt.expectedHeads) === canonicalJson(operation.expectedHeads)
+      && canonicalJson(savedOperation) === canonicalJson(operation);
+  } catch { return false; }
 }
 
 /** UI persistence and duplicate-submit control. The repository remains the signing authority. */
@@ -46,6 +72,7 @@ export function createRepositoryActionController({ repository, store, getActor }
   let state: RepositoryActionState = { status: 'idle', operation: null, message: '' };
   let record: ActionRecord = { status: 'idle', command: null, operation: null };
   let busy = false;
+  let recoveryText: string | null = null;
   const listeners = new Set<() => void>();
   const emit = (next: RepositoryActionState) => { state = next; for (const listener of listeners) listener(); };
   const loaded = store.load();
@@ -54,6 +81,7 @@ export function createRepositoryActionController({ repository, store, getActor }
     state = { status: record.status, operation: record.operation,
       message: record.status === 'needs-verification' ? 'A previous request needs verification before another can be sent.' : '' };
   } else if (loaded.status === 'recovery') {
+    recoveryText = loaded.issue.recoverableText;
     state = { status: 'needs-verification', operation: null,
       message: 'Saved request data needs recovery. Keep its recovery export before starting another request.' };
   }
@@ -101,6 +129,22 @@ export function createRepositoryActionController({ repository, store, getActor }
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     get recoverableCommand(): CommandBase | null { return object(record.command) ? structuredClone(record.command) as unknown as CommandBase : null; },
+    get recoveryText(): string | null { return recoveryText ?? store.exportRecovery?.() ?? null; },
+    restoreRecovery(raw: string): Result<void> {
+      if (busy || !recoveryText || !store.inspectImport) return failure('unsupported', 'There is no unreadable saved request to recover here.');
+      const inspected = store.inspectImport(raw);
+      if (inspected.status !== 'ready' || !validRepositoryActionRecord(inspected.value) || !inspected.value.operation || !inspected.value.command)
+        return failure('invalid_input', 'Choose a valid saved request backup. The original record has been kept.');
+      if (!sameActor(inspected.value.operation)) return failure('unauthorized', 'Select the account that owns this saved request first.');
+      const restored = { ...inspected.value, status: 'needs-verification' as const };
+      const saved = store.save(restored, { replaceRecovery: true });
+      if (!saved.persisted) return failure('storage', 'The recovered request could not be saved. The original record remains available for export.');
+      record = structuredClone(restored);
+      recoveryText = null;
+      emit({ status: 'needs-verification', operation: record.operation,
+        message: 'The saved request is readable again. Check its original transaction before continuing.' });
+      return { ok: true, value: undefined };
+    },
     async run<C extends CommandBase, T>(command: C, submit: Submit<C, T>): Promise<Result<T>> {
       if (busy || state.status === 'needs-verification' || state.status === 'submitting') return failure('unverified', 'Resolve the existing request before sending a new one.');
       if (!repository || !sameActor(command.operation)) return failure('unauthorized', 'Connect the account that owns this request.');
@@ -121,7 +165,10 @@ export function createRepositoryActionController({ repository, store, getActor }
         const value = result.value;
         if (value.status === 'confirmed' && value.operation.phase === 'complete') finish('confirmed', value.operation, 'Your original request is confirmed.');
         else if (value.status === 'confirmed') finish('needs-verification', value.operation, 'A step is confirmed. Continue the remaining steps of this saved request.');
-        else if (value.status === 'reverted') finish('reverted', value.operation, 'The transaction did not apply. Review the latest data before creating a new request.', value.error);
+        else if (value.status === 'partial_reverted') finish('needs-verification', value.operation, 'Earlier steps are confirmed. The latest transaction reverted. Continue this saved request to retry only its remaining step after a fresh check.', value.error);
+        else if (value.status === 'reverted' && (value.operation.confirmedKeys.length > 0 || value.operation.steps.some(step => step.status === 'confirmed')))
+          finish('needs-verification', value.operation, 'Earlier steps are confirmed. The failed step needs recovery; keep this saved request and its original identities.', value.error);
+        else if (value.status === 'reverted') finish('reverted', value.operation, 'This transaction reverted. Review the latest data before creating a new request.', value.error);
         else if (value.status === 'not_sent' && (value.operation.confirmedKeys.length > 0 || value.operation.steps.some(step => step.status === 'confirmed')))
           finish('needs-verification', value.operation, 'Earlier steps are already recorded. Continue this saved request to finish publishing.');
         else if (value.status === 'not_sent') finish('rejected', value.operation, 'No transaction was sent. You can review your input and try again.');
@@ -157,7 +204,7 @@ export function useRepositoryAction(channel: string) {
     let existing = registry.get(key);
     if (!existing) {
       existing = createRepositoryActionController({ repository: runtime.repository,
-        store: runtime.drafts(`action:${keccak256(toBytes(key)).slice(2)}`, 'repository-action', validRecord),
+        store: runtime.drafts(`action:${keccak256(toBytes(key)).slice(2)}`, 'repository-action', validRepositoryActionRecord),
         getActor: () => runtime.session.getSnapshot().actor });
       registry.set(key, existing);
     }
@@ -165,5 +212,6 @@ export function useRepositoryAction(channel: string) {
   }, [runtime, key]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   return { state, run: controller.run, reconcile: controller.reconcile, resume: controller.resume,
-    clear: controller.clear, recoverableCommand: controller.recoverableCommand };
+    clear: controller.clear, recoverableCommand: controller.recoverableCommand,
+    recoveryText: controller.recoveryText, restoreRecovery: controller.restoreRecovery };
 }

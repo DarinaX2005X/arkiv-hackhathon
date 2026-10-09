@@ -4,31 +4,46 @@ Approval: approved
 Active stage: 04
 Active task: 04.1
 
-## Сейчас
+## Граница сессии
 
-Пользователь9October2026 явно одобрил концепцию и полный масштаб: «План Partfolk в целом сильный, концепцию и масштаб сохраняем»; «Продолжай разработку Partfolk по существующему плану и `$vibemachina`». Четыре точечных исправления включены в существующие задачи без нового цикла планирования и без сокращений. PROTOCOL переписан как единый контракт; DESIGN/PLAN/stages синхронизированы с activation, отсутствием глобального каталога и English-only.
+Пользователь9October2026 попросил завершить уже начатый функционал и переработку дизайна по десяти референсам, затем остановиться до его сообщения завтра. Уточнение: «цвет не имеет значения я про стиль». Новые этапы, реальные product broadcasts и deployment сегодня не выполняются. Автоматический запуск/напоминание не назначены. Полный утверждённый масштаб сохраняется.
 
-01.1 foundation передал shared DTO/Repository, context/storage/router/UI/fonts; пути возвращены MAIN. 01.2 domain/local готов к интеграции:79 domain tests, generic solver и независимые validation/consent/execution/recovery. 01.3 direct Arkiv adapter/wallet/CLI реализованы; fault review продолжается. 02.1 projects и02.2 contributions готовы к первой интеграции, работники заканчивают controller tests. 03.1 execution и03.3 landing/help в работе после передачи стабильных контрактов. MAIN подключает route registry, раздельные practice/custom/public runtimes и wallet controls; затем самостоятельный Desk.
+Все работники передали текущие пути MAIN и остановили редактирование. MAIN завершает единый проверяемый checkpoint и push в уже авторизованный private origin; результат команды хранится в .vibemachina/runtime/checks и Git HEAD. После этого работа ждёт нового сообщения пользователя.
 
-Точечные гарантии: immutable predecessor chain с fresh P1→P2→P3/diffs; same-live-root empty-book recovery после явного owner acknowledgement, иначе new publisher/readmission; изменённый draft recipe не получает старое Agreed; equipment reservation занимает время до возврата. Каждая новая активация требует всех fresh decisions. Closure consumes activation atomically. Domain audit fixes cover forged completion, transfer/return credit association and cross-project custody isolation.
+## Текущая реализация
 
-## Авторизация и треки
+01–03 связаны в работающий продукт: отдельные practice/custom/public runtimes, прямой Arkiv reader/writer, проекты и предложения, exact agreement, run sheet/returns/repair/export/reuse, самостоятельная сборка contributor view и CLI. Предыдущий code checkpoint876e5eda13388b78c58aaba6ab9ada02e7d5d08c прошёл общий gate и pushed.
 
-Open Source primary + Censorship Resistance secondary, по официальной rubric и external research/partfolk-dual-track.md. Один нормальный самостоятельный Desk/CLI и существующее доказательство03.2/04.2 служат обоим трекам. CR ограничен независимостью от Studio host/API; общая Arkiv/RPC инфраструктура, истечение и права владельцев остаются явными. India исключена. Весь продукт English-only. Русский чат/planning prose допустимы.
+Сегодня завершены текущие исправления: полный read-only просмотр потребностей до плана; сохранение visitor/wallet drafts при переходах; безопасное копирование только editable recipe в public draft; восстановление unreadable request из валидного backup с проверкой original operation; возобновление partial-reverted публикации с сохранением подтверждённой identity; chronological equipment conservation и task/requirement binding; ограниченный solver budget; последовательные timestamps локальной practice; review ALL book heads без latest-wins и union сохранением promises/work/custody; owner root/book renewal.
 
-Push в private origin разрешён. Пользователь сам меняет GitHub visibility и отправляет Devfolio. Визуальные/browser проверки целиком пользовательские. NO CUA/browser-control/headless/renderers/screenshots/UI automation и никаких автоматических tabs у всех работников. Невизуальная проверка не подменяет эти статусы.
+Guided example выполняет пять настоящих локальных действий: Oak делает план возможным, каждый sample owner согласует P1, Oak отзывает согласие, Juniper позволяет P2, все дают fresh P2 decisions. Перезагрузка и повтор действий сохраняют состояние; custom/public namespaces не затрагиваются. Полный ручной проект остаётся доступен отдельно. Public views читают каждые15s/приfocus с одним in-flight запросом и expiry confidence после60s; ошибки оставляют stale данные.
 
-## Проверено
+DESIGN обновлён: светлые мягкие объёмные поверхности, согласованные грани/свет/тени, округлые кнопки и утопленные поля, исходная SVG-сцена выставки. Палитра не копируется из референсов. Навигация проекта Plan/People/Run sheet; история/идентификаторы под More; contributor view под брендом Partfolk. Landing даёт одно главное действие. V01–V07 реализованы в исходниках, но визуальная приёмка пользователем ещё не подтверждена.
 
-SDK0.8.1/viem2.57.4; Node22.13/npm10.9.2. Bootstrap tx0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3. Atomic createA block352006 tx0x0170cf0c6534e5b1bdaf470a8acc119f45949629283cd751e332f668f84069fd; replaceAwithB block352065 tx0x80e46f7b11e8e413f75a696484524b976f95bb4da695816ed56cd6737268925a; staleA estimate exactEntityNotFound, onlyB block352164. No paid stale send/mined rollback proof. Total actual0.000326176000652352testGLM within0.1 ceiling. Public evidence under arkiv/evidence. Secrets/journals remain ignored.local, never printed/committed. Rootalonebroadcast.
+## Проверки и доказательства
 
-Foundation14tests +19bootstrapguards/build/HTTP assets passed earlier. Domain79tests passed. Arkiv reader50, wallet/controller23, verification/error52 mocked tests passed; these are not live product proof. Shared action6tests passed. Contributions8controller tests passed. Project editor47tests passed. Full integration suite will run after worker handoff; no shipped/UI quality claim from partial checks.
+TypeScript и целевые suites workers passed; общий checkpoint запускает полную unit suite,19 bootstrap guards, отдельный helper TypeScript,42 safety tests,92 helper tests и обе production builds. Отдельный HTTP контроль проверяет доступность server/assets; он не является browser/UI QA. Existing shared bundle-size warning требует помнить о размере загрузки, сборку не ломает.
 
-## Сервисы и следующие действия
+tests/arkiv-live/runner.ts и README готовы как код для следующей сессии. Никакой invocation runner, initialization публичных signer files или product send сегодня не выполнялись. Сценарий имеет explicit phase/count, clean reviewed HEAD, frozen commands/journal/hash, independent same-block fresh CLI и общий предел0.1testGLM. Planned92sends по фазам. Перед первым использованием MAIN читает runner/safety и выполняет readonly/estimate; реальные записи только MAIN после проверки, без автоматического перехода между фазами.
 
-VibeMachina dashboard http://127.0.0.1:4177/ работает. Studio http://127.0.0.1:5173/ and standalone Desk http://127.0.0.1:4174/desk.html are running. Root/desk/module/font/logo HTTP200 verified; no browser opened. User has links for visual review. Complete03execution/Desk/landing; then04integration/realnetwork proof,05blindoriginalbrief review/fixes,06cleanlaunch/docs/deploy/submissiondraft. Existing full six-stage plan retained. Hosting authentication still unresolved; prepare concrete release first.
+Существуют только прежние capability evidence: bootstrap tx0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3; atomic A create block352006 и A→B block352065; stale-A estimate rejected. Потрачено0.000326176000652352testGLM. Продуктовое публичное P1→withdraw→P2→P3 доказательство ещё НЕ выполнено. .local secrets/journals ignored, никогда не печатать/коммитить.
 
-MAIN owns canonical docs/shared paths/package/Git/checkpoints/integration. Workers own bounded feature/domain/data paths. Read TESTING at boundaries; currently no user findings. Product/Git stays arkiv/; external suppliedinstructions/research/devfolio stay outside. Last pushed37c93e1 planning; product implementation currently uncommitted while modules converge. Do not add unrelated unfinished files into scoped checkpoints.
+MIT LICENSE, docs/protocol.md, docs/operations.md готовы. Финальный README, clean checkout, итоговый независимый review, hosting и внешний submission draft ещё предстоят.
 
-Current integrated handoff:01–03code complete; rootStudio route/runtime/wallet wiring complete, independentDesk built. Fullcheck339unit+19bootstrap and bothbuilds passed, then23 additionalruntime tests and targetedfeatureupdates passed. Corecheckpoint runs currentfullsuite beforecommit. Publicproof runner design underway, no productbroadcast yet. Fresh blindoriginalbrief reviewer active, read-only. Runtime reset now creates a fresh practice app namespace so old pendingcommands/drafts cannotreplay against reseededkeys.
+## Продолжение после сообщения пользователя
 
+1. Прочитать весь TESTING и новые замечания пользователя. Не начинать новую работу автоматически.
+2. Проверить Git HEAD, процессы и текущие адреса; сохранить полный scope и новую дизайн-систему. Не переделывать уже завершённый код без новой причины.
+3. Закончить04: read-only review/run будущего public proof helper, реальные public lifecycle/evidence под имеющимся capped authorization, fresh independent Desk/CLI при выключенном Studio. Обновить canonical facts доказательством.
+4. Закончить05: независимый code review и сравнение с original brief, исправить подтверждённые дефекты.
+5. Закончить06: substantial README, clean clone launch, конкретный deployment artifact/provider login, HTTPS/API verification, внешний devfolio/ANSWERS и сценарий видео. Пользователь самостоятельно делает визуальную проверку, открывает GitHub visibility и отправляет Devfolio.
+
+## Постоянные ограничения и сервисы
+
+Продукт English-only. Русский чат/planning допустимы. Пользователь полностью владеет visual/browser testing: никакого CUA/browsercontrol/Playwright/Selenium/Puppeteer/headless/renderers/screenshots/UI automation и автоматических tabs. Это относится ко всем работникам.
+
+Open Source primary + Censorship Resistance secondary; claim ограничен независимостью от Studio host/API, не от Arkiv/RPC/indexer и полномочий владельцев. Артефакты/тексты не утверждают реальные физические события или пользователей.
+
+Последние адреса: Studio http://127.0.0.1:5173/ ; standalone contributor view http://127.0.0.1:4174/desk.html ; VibeMachina dashboard http://127.0.0.1:4177/ . Vite standalone preview обслуживает dist-desk после последней сборки. Пользователь открывает ссылки самостоятельно. Deployment отсутствует; Vercel global shim существует, но target module отсутствует, authentication пока не проверена рабочим CLI. Не выдавать local URLs за public demo.
+
+Product/Git folder arkiv/; внешние исходные instructions/research/devfolio остаются за его пределами. MAIN owns Git/checkpoints/integration и broadcasts. Existing private origin push разрешён; user owns GitHub public visibility/final submission.

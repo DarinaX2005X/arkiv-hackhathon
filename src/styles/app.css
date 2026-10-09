@@ -1,19 +1,76 @@
-.pf-app-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; max-width: 1440px; margin: 0 auto; padding: 16px 32px; }
-.pf-app-navigation { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.pf-app-navigation a { display: flex; align-items: center; min-height: 44px; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight: 500; color: var(--text-primary); }
-.pf-app-navigation a[aria-current='page'] { background: var(--selected-surface); color: var(--selected-text); text-decoration: underline; text-underline-offset: 4px; }
-.pf-mode-line { display: flex; justify-content: space-between; gap: 16px; padding: 8px 32px; background: var(--surface-inset); color: var(--text-secondary); }
-.pf-app-main { display: grid; gap: 24px; min-height: 65vh; align-content: start; padding-top: 48px; padding-bottom: 64px; }
-.pf-foundation-intro { max-width: 850px; padding: 24px 0; }
-.pf-workspace-controls { background: var(--surface-inset); padding: 16px max(16px, calc((100vw - 1376px) / 2)); display: grid; gap: 12px; }
-.pf-workspace-controls > p { margin: 0; }
-.pf-workspace-controls-row { display: flex; flex-wrap: wrap; align-items: end; gap: 16px 24px; }
-.pf-workspace-controls-row > .pf-field { min-width: min(100%, 280px); }
-.pf-app-footer { max-width: 1440px; margin: 0 auto; padding: 24px 32px; display: flex; flex-wrap: wrap; gap: 16px 32px; border-top: 1px solid var(--border-quiet); color: var(--text-secondary); }
-.pf-practice-steps { display: grid; gap: 12px; padding-inline-start: 24px; max-width: 76ch; }
-.pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(36px, 4.6vw, 64px); line-height: 1.03; font-weight: 500; color: var(--brand-ink); }
+.pf-app-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  max-width: 1440px; margin-inline: auto; padding: 22px var(--page-gutter);
+}
+.pf-app-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pf-app-navigation a {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 10px 16px; border: 1px solid transparent; border-radius: var(--radius-pill);
+  text-decoration: none; font-weight: 500; line-height: 24px; color: var(--text-secondary);
+  transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease), transform var(--motion-press) var(--motion-ease);
+}
+.pf-app-navigation a[aria-current='page'] { color: var(--selected-text); background: var(--surface-work); border-color: var(--edge-light); box-shadow: var(--shadow-control); }
+.pf-app-navigation a:active { transform: translateY(1px); box-shadow: var(--shadow-inset); transition-duration: var(--motion-press); }
+
+.pf-mode-line {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px;
+  max-width: 1376px; margin-inline: auto; padding: 12px var(--page-gutter);
+  color: var(--text-secondary); background: var(--surface-soft); border-radius: var(--radius-control);
+}
+.pf-app-main { display: grid; gap: 32px; min-height: 65vh; align-content: start; padding-block: 40px 80px; }
+.pf-app-main > * { min-width: 0; }
+.pf-foundation-intro { max-width: 850px; padding-block: 24px; }
+.pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(36px, 4.6vw, 64px); line-height: 1.03; font-weight: 500; color: var(--text-primary); }
 .pf-foundation-intro > p { max-width: 62ch; }
-.pf-skip { position: absolute; left: 16px; top: -100px; z-index: 50; min-height: 44px; padding: 10px 16px; background: var(--surface-work); color: var(--text-primary); }
+
+.pf-workspace-bar { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 12px; width: calc(100% - var(--page-gutter) * 2); max-width: 1376px; margin-inline: auto; }
+.pf-workspace-controls { flex: 1; min-width: min(100%, 280px); padding: 0 18px; background: var(--surface-soft); border-radius: var(--radius-control); box-shadow: var(--shadow-inset); }
+.pf-workspace-controls[open] { padding-bottom: 18px; }
+.pf-workspace-controls > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 48px; }
+.pf-workspace-controls > summary::after { display: none; }
+.pf-workspace-change { margin-inline-start: auto; text-decoration: underline; text-underline-offset: 4px; font-weight: 500; }
+.pf-workspace-bar > .pf-notice { flex-basis: 100%; }
+.pf-workspace-controls > p { margin: 0; }
+.pf-workspace-controls > summary { width: 100%; }
+.pf-workspace-controls-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; }
+.pf-workspace-controls-row > .pf-field { min-width: min(100%, 280px); }
+.pf-workspace-controls-row > * { min-width: 0; }
+.pf-workspace-controls-row .pf-actions { align-items: flex-start; }
+.pf-workspace-controls > summary + .pf-workspace-controls-row { padding-block: 12px 8px; }
+
+.pf-app-footer {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 32px;
+  max-width: 1440px; margin-inline: auto; padding: 28px var(--page-gutter) 36px;
+  border-top: 1px solid var(--border-quiet); color: var(--text-secondary);
+}
+.pf-app-footer a { min-height: 44px; display: inline-flex; align-items: center; }
+.pf-practice-steps { display: grid; gap: 16px; padding-inline-start: 24px; max-width: 76ch; }
+.pf-skip {
+  position: absolute; inset-inline-start: 16px; top: -100px; z-index: 50;
+  min-height: 44px; padding: 10px 16px; border-radius: var(--radius-control);
+  background: var(--surface-work); color: var(--text-primary);
+}
 .pf-skip:focus { top: 8px; }
-@media (max-width: 959px) { .pf-app-header { align-items: flex-start; padding-inline: 24px; } .pf-mode-line { padding-inline: 24px; } }
-@media (max-width: 599px) { .pf-app-header { display: grid; gap: 12px; padding: 12px 16px; } .pf-app-navigation { gap: 4px; } .pf-app-navigation a { padding-inline: 8px; } .pf-mode-line { flex-direction: column; gap: 4px; padding-inline: 16px; } .pf-app-main { padding-top: 24px; } }
+
+@media (hover: hover) and (pointer: fine) {
+  .pf-app-navigation a:hover { color: var(--selected-text); background: var(--surface-hover); }
+  .pf-app-navigation a[aria-current='page']:hover { color: var(--selected-text); background: var(--surface-work); box-shadow: var(--shadow-control-hover); }
+}
+@media (max-width: 959px) {
+  .pf-app-header { align-items: flex-start; }
+  .pf-mode-line { margin-inline: var(--page-gutter); }
+  .pf-workspace-controls { padding-inline: 12px; }
+}
+@media (max-width: 599px) {
+  .pf-app-header { display: grid; gap: 16px; padding-block: 16px; }
+  .pf-app-navigation { gap: 4px; }
+  .pf-app-navigation a { padding-inline: 12px; }
+  .pf-mode-line { flex-direction: column; gap: 8px; padding: 12px 16px; }
+  .pf-app-main { gap: 24px; padding-block: 28px 48px; }
+  .pf-workspace-controls-row > .pf-field { flex: 1 1 100%; }
+  .pf-app-footer { gap: 8px 24px; padding-block: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-app-navigation a { transition: none; }
+  .pf-app-navigation a:active { transform: none; }
+}

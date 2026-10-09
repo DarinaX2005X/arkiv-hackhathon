@@ -10,6 +10,8 @@ Depends on: 05.2
 Owner: SUBAGENT to assign
 Paths: README.md, LICENSE, arkiv/schema.md, arkiv/friction.md, docs/protocol.md, docs/operations.md
 
+Подготовленные фактические материалы9October2026: MIT LICENSE, docs/protocol.md и docs/operations.md уже написаны по текущим контрактам; schema/friction актуализированы. Это частичная подготовка, не завершение06.1: финальный README, clean checkout launch и подтверждённые live/deployment ссылки ожидают оставшихся04/05. По прямому запросу пользователя сегодня новые этапы не запускаются.
+
 **Результат.** README объясняет Partfolk одной понятной фразой, затем показывает реальную полезную работу, способы запуска обоих клиентов, проверку Arkiv и точные ограничения. Документация является инструкцией к финальной реализации, не альтернативным планом. Документировать факты известных записей/операций, не придумывать friction задним числом ради конкурса.
 
 **Вход и владение.** Читать финальные code/scripts, public schema, evidence manifests, реальный review, официальные требования hackathon и текущий repo state. Писать перечисленные public documentation paths; manifests, CI, package scripts и shared code исправляет владелец по loan MAIN. README links заполнять реальными доступными URL; не создавать «успешный» demo address из желаемого имени. LICENSE — MIT с фактическим правообладателем, не вымышленным автором. Copyright owner брать из подтверждённых данных проекта; если они отсутствуют, это конкретное поле handoff, а не автоматически приписанная личность.

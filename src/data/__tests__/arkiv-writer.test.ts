@@ -35,6 +35,7 @@ function harness(account: AccountAddress = PUBLISHER) {
   const control = {
     account, sends: 0, sentTypes: [] as string[][],
     failBeforeAt: new Map<number, unknown>(), loseResponseAt: new Set<number>(),
+    revertAt: new Set<number>(),
     hideReceipts: false, afterEstimate: undefined as (() => void) | undefined,
     reads: [] as string[],
   };
@@ -94,21 +95,21 @@ function harness(account: AccountAddress = PUBLISHER) {
         transactionIndex: '0x0', logIndex: toHex(logs.length), removed: false });
     };
     const types: string[] = [];
-    for (const create of record.batch.creates ?? []) {
+    for (const create of control.revertAt.has(control.sends) ? [] : record.batch.creates ?? []) {
       const payload = JSON.parse(create.payloadJson) as EntityPayload; const key = entityKey(nextKey++);
       const expiry = BigInt(rpc.block + create.lifetimeSeconds / 2); types.push(payload.entityType);
       rpc.put(rawEntity(key, payload, sent.from, { createdAt: toHex(rpc.block), expiresAt: toHex(expiry) }));
       addLog('EntityCreated', key, expiry);
     }
-    for (const key of record.batch.deletes ?? []) { rpc.remove(key); addLog('EntityDeleted', key); }
-    for (const extension of record.batch.extensions ?? []) {
+    for (const key of control.revertAt.has(control.sends) ? [] : record.batch.deletes ?? []) { rpc.remove(key); addLog('EntityDeleted', key); }
+    for (const extension of control.revertAt.has(control.sends) ? [] : record.batch.extensions ?? []) {
       rpc.row(extension.entityKey).expiresAt = toHex(BigInt(extension.expiresAtBlock));
       addLog('ExpiryExtended', extension.entityKey, BigInt(extension.expiresAtBlock));
     }
     control.sentTypes.push(types); saveSnapshot();
     receipts.set(hash, { transactionHash: hash, transactionIndex: '0x0', blockHash: rpc.blockHash, blockNumber: toHex(rpc.block),
       from: sent.from, to: ARKIV_ADDRESS, cumulativeGasUsed: toHex(100000), gasUsed: toHex(100000),
-      effectiveGasPrice: '0x2', contractAddress: null, status: '0x1', type: '0x0', logsBloom: '0x', logs });
+      effectiveGasPrice: '0x2', contractAddress: null, status: control.revertAt.has(control.sends) ? '0x0' : '0x1', type: '0x0', logsBloom: '0x', logs });
     transactions.set(hash, { hash, blockHash: rpc.blockHash, blockNumber: toHex(rpc.block), transactionIndex: '0x0',
       from: sent.from, to: sent.to, chainId: toHex(TIRAMISU_CHAIN_ID), value: '0x0', input: sent.data,
       gas: toHex(120000), gasPrice: '0x2', nonce: toHex(control.sends), type: '0x0', r: entityKey(1), s: entityKey(2), v: '0x1b' });
@@ -188,6 +189,46 @@ describe('writer preflight and facade error boundaries', () => {
 });
 
 describe('writer confirmation and resumable operations', () => {
+  it('resumes only a mined-reverted initialization phase while retaining the original root and failed attempt', async () => {
+    const f = harness(COORDINATOR); f.control.revertAt.add(2);
+    const command = f.command('create_project', { recipe: f.state.recipe, lifetimeSeconds: LIFETIME });
+    expect(await f.repository.createProject(command)).toMatchObject({ ok: false, error: { code: 'reverted' } });
+    const saved = f.controller.getOperation(command.operation.id)!;
+    const root = saved.confirmedKeys[0]!;
+    expect(await f.repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'partial_reverted', operation: { confirmedKeys: [root] } } });
+    expect(f.control.sends).toBe(2);
+    const resumed = await f.repository.createProject(command);
+    expect(resumed).toMatchObject({ ok: true, value: { value: { root: { key: root } } } });
+    expect(f.control.sentTypes).toEqual([['project_root'], [], ['project_state']]);
+    const attempts = f.controller.getOperation(command.operation.id)!.steps;
+    expect(attempts.map(step => step.status)).toEqual(['confirmed', 'reverted', 'confirmed']);
+    expect(attempts[1]!.id).not.toBe(attempts[2]!.id);
+    expect(await f.repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'confirmed' } });
+    expect(await f.repository.createProject(command)).toMatchObject({ ok: true });
+    expect(f.control.sends).toBe(3);
+  });
+  it('retains the proposal and activation when an explicitly resumed request fanout follows a mined revert', async () => {
+    const f = harness(COORDINATOR);
+    const plan = { ...structuredClone(f.plan), predecessor: f.source, instructions: 'Revised synthetic workshop.' };
+    const proposal = { ...structuredClone(f.proposal), plan, proposalHash: hashPlan(plan), changeExplanation: 'Updated instructions.' };
+    const command = f.command('publish_plan', { projectRoot: KEYS.project, proposal, expectedActivationHeads: [KEYS.activation],
+      requestPublisherRoots: [KEYS.publisher], lifetimeSeconds: LIFETIME });
+    f.control.revertAt.add(3);
+    expect(await f.repository.publishPlan(command)).toMatchObject({ ok: false, error: { code: 'reverted' } });
+    const prior = f.controller.getOperation(command.operation.id)!;
+    expect(await f.repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'partial_reverted' } });
+    expect(await f.repository.publishPlan(command)).toMatchObject({ ok: true, value: { proposalKey: prior.confirmedKeys[0], activationKey: prior.confirmedKeys[1] } });
+    expect(f.control.sentTypes).toEqual([['proposal'], ['plan_activation'], [], ['project_link']]);
+    expect(f.controller.getOperation(command.operation.id)!.steps.map(step => step.status)).toEqual(['confirmed', 'confirmed', 'reverted', 'confirmed']);
+    expect(await f.repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'confirmed' } });
+  });
+  it('keeps a first-phase or single-transaction mined revert terminal', async () => {
+    const f = harness(); f.control.revertAt.add(1); const command = f.replacement();
+    expect(await f.repository.replaceBook(command)).toMatchObject({ ok: false, error: { code: 'reverted' } });
+    expect(await f.repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'reverted' } });
+    expect(await f.repository.replaceBook(command)).toMatchObject({ ok: false, error: { code: 'reverted' } });
+    expect(f.control.sends).toBe(1);
+  });
   it('resumes an interrupted root creation into exactly one initialized project', async () => {
     const f = harness(COORDINATOR);
     const command = f.command('create_project', { recipe: f.state.recipe, lifetimeSeconds: LIFETIME });

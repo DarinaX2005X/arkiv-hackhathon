@@ -58,7 +58,7 @@ export function AppShell({ children, controls }: { children: ReactNode; controls
       </Notice>}
       {children}
     </main>
-    <footer className="pf-app-footer"><span>Partfolk · Everyone brings a part.</span><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>Public data and privacy</a><a href="./desk.html">Partner Desk</a></footer>
+    <footer className="pf-app-footer"><span>Everyone brings a part.</span><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>About public projects</a><a href="./desk.html">Open the contributor view</a></footer>
   </>;
 }
 

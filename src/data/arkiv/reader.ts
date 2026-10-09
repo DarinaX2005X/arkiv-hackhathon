@@ -141,7 +141,9 @@ export class ArkivReader {
     rootKey: EntityKey, creator: AccountAddress): Promise<ScopeState<T>> {
     const attribute = type === 'book_state' ? 'book_key' : 'project_key';
     // Do not filter schema_version: malformed authored heads must not disappear behind a valid one.
-    const rows = await this.query(context, [eq('project', NAMESPACE), eq('entity_type', type), eq(attribute, key(publicKey(rootKey)))], creator, true);
+    // A publisher must be able to review every fork before consuming the complete set.
+    // The same explicit page/entity budgets still fail closed for oversized scopes.
+    const rows = await this.query(context, [eq('project', NAMESPACE), eq('entity_type', type), eq(attribute, key(publicKey(rootKey)))], creator, type !== 'book_state');
     if (!rows.length) return { status: 'missing', reason: 'expired_or_deleted' };
     const records: EntityRecord<T>[] = []; const invalid: DomainReason[] = [];
     for (const row of rows) {

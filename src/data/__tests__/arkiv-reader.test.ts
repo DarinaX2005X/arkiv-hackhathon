@@ -29,6 +29,15 @@ function attribute(row: RawEntity, name: string) {
 }
 
 describe('strict Arkiv reader through the real SDK and a readonly RPC provider', () => {
+  it('returns the complete bounded book fork set so its owner can review every consumed head', async () => {
+    const { rpc, book } = readyFixture(); rpc.pageSize = 1;
+    rpc.put(rawEntity(entityKey(90), { ...book, operationId: 'fork-two' }, PUBLISHER));
+    rpc.put(rawEntity(entityKey(91), { ...book, operationId: 'fork-three' }, PUBLISHER));
+    const publisher = await reader(rpc).loadPublisher(KEYS.publisher);
+    expect(publisher.book.status).toBe('conflict');
+    if (publisher.book.status === 'conflict') expect(publisher.book.entities.map(item => item.key).sort()).toEqual([KEYS.book, entityKey(90), entityKey(91)].sort());
+    expect(publisher.snapshot.completeness).toBe('complete');
+  });
   it('recovers a fully agreed plan from public entities with one canonical block and independent domain checks', async () => {
     const { rpc } = readyFixture();
     const project = await reader(rpc).loadProject(KEYS.project);

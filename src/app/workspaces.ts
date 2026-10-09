@@ -22,11 +22,11 @@ export function workspaceForRoute(route: Route, current: WorkspaceKind): Workspa
 export function createStudioWorkspaces({ storage, provider, request, now = Date.now }: {
   storage: StoragePort | null; provider?: InjectedWalletProvider; request?: RpcRequest; now?: () => number;
 }) {
-  const practiceRepository = new LocalRepository({ storage, namespace: 'practice', now: () => SMALL_WORKS_NOW });
+  const practiceRepository = new LocalRepository({ storage, namespace: 'practice', now: () => SMALL_WORKS_NOW, logicalClock: true });
   const localRepository = new LocalRepository({ storage, namespace: 'custom', now });
   let practiceEpoch = 0;
   try { const saved = storage?.getItem('partfolk:studio:practice-epoch'); if (saved && /^\d{1,8}$/.test(saved)) practiceEpoch = Number(saved); } catch { /* Preserve data if storage cannot be read. */ }
-  const newPracticeRuntime = () => createAppRuntime({ repository: practiceRepository, storage, namespace: `partfolk:studio:practice:${practiceEpoch}`, now: () => SMALL_WORKS_NOW });
+  const newPracticeRuntime = () => createAppRuntime({ repository: practiceRepository, storage, namespace: `partfolk:studio:practice:${practiceEpoch}`, now: () => practiceRepository.currentTime() });
   let practice = newPracticeRuntime();
   const local = createAppRuntime({ repository: localRepository, storage, namespace: 'partfolk:studio:local', now });
   const publicBinding = createPublicRuntime({ storage, namespace: 'partfolk:studio:public', provider, request, now });

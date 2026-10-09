@@ -42,14 +42,14 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
       if (result.ok && result.value.operation.phase === 'complete') { setSelected(null); await onRefresh(); window.location.hash = routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' }).slice(1); }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'These terms could not be prepared for a new version.'); }
   };
-  return <section className="pf-stack"><h2>{copy.history}</h2><p>These records are read from proposal links and available evidence. Earlier decisions remain attached to their original activation.</p>
+  return <section className="pf-stack"><h2>{copy.history}</h2><p>Review earlier plans and how they changed. Each person’s decision stays with the version they reviewed.</p>
     {project.proposalHistoryStatus?.complete !== true && records.length > 0 && <Notice tone="warning">{copy.historyGap}</Notice>}
     {records.length === 0 ? <p>No published plan history is available for this project yet.</p> : records.map((record, index) => {
       const predecessor = record.payload.plan.predecessor;
       const prior = predecessor ? records.find(item => item.key === predecessor.proposalKey && item.payload.proposalHash === predecessor.proposalHash) : null;
       const current = project.proposal?.key === record.key && project.activation.status === 'unique';
       return <article className="pf-sheet pf-stack" key={record.key}>
-        <header className="project-heading"><div><h3>{project.proposalHistoryStatus?.complete ? `Plan ${index + 1}` : 'Available plan'} · {record.payload.plan.variant.title}</h3><p>{formatDateTime(record.payload.createdAt, record.payload.plan.variant.timeZone)}</p></div><StatusLabel tone={current ? 'neutral' : undefined}>{current ? 'Currently active proposal' : 'Historical proposal'}</StatusLabel></header>
+        <header className="project-heading"><div><h3>{project.proposalHistoryStatus?.complete ? `Plan ${index + 1}` : 'Available plan'}: {record.payload.plan.variant.title}</h3><p>{formatDateTime(record.payload.createdAt, record.payload.plan.variant.timeZone)}</p></div><StatusLabel tone={current ? 'neutral' : undefined}>{current ? 'Current plan' : 'Earlier plan'}</StatusLabel></header>
         {record.payload.changeExplanation && <p>{record.payload.changeExplanation}</p>}
         <details><summary>Read this exact plan</summary><ProjectPlan project={project} plan={record.payload.plan} /><p>Proposal: {record.key}</p><p>Terms hash: {record.payload.proposalHash}</p></details>
         {prior && <details><summary>Changes from its predecessor</summary><PlanDiff title="Recorded version changes" labels={{ requirement: 'Requirement', before: 'Predecessor', after: 'This plan' }} rows={comparePlans(prior.payload.plan, record.payload.plan, project)} /></details>}
@@ -57,7 +57,7 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
         {owner && !current && <Button variant="secondary" disabled={!open || waiting || !authority} onClick={() => { setSelected(record); setError(null); }}>{copy.restore}</Button>}
       </article>;
     })}
-    <ActionFeedback state={action.state} onReconcile={() => { void action.reconcile().then(() => onRefresh()); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
+    <ActionFeedback action={action} state={action.state} onReconcile={() => { void action.reconcile().then(() => onRefresh()); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
     <Dialog open={selected !== null} title="Restore terms with fresh agreement" closeLabel="Keep current plan" onClose={() => setSelected(null)} footer={<Button onClick={() => { void publish(); }} disabled={!finalized?.ok || !authority || waiting}>Publish these terms as a new version</Button>}>
       <div className="pf-stack"><Notice>{copy.restoreNote} The editable project recipe remains separate from this active agreement.</Notice>
         {restored && <ProjectPlan project={project} plan={finalized?.ok ? finalized.value.plan : restored} />}

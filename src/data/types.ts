@@ -65,6 +65,7 @@ export interface MutationResult<T> { value: T; receipt: OperationReceipt; operat
 export type ReconciliationResult =
   | { status: 'confirmed'; operation: OperationIntent; receipt: OperationReceipt }
   | { status: 'reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
+  | { status: 'partial_reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
   | { status: 'pending'; operation: OperationIntent }
   | { status: 'not_sent'; operation: OperationIntent }
   | { status: 'unverified'; operation: OperationIntent; error: RepositoryError };

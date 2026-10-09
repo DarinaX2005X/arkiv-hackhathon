@@ -4,7 +4,7 @@ import { deriveExecution, planDiff, remainingWork, reuseRecipe, transferStatemen
 import { prepareAttestation, prepareCloseProject, prepareDecision, prepareReleaseCommitment, prepareReleaseCustodyHold } from '../operations';
 import type { OperationResult, PreparedBookChange } from '../operations';
 import { activeSource, deriveDraftStatus, deriveReadiness } from '../readiness';
-import { deriveRequiredApprovers } from '../validation';
+import { deriveRequiredApprovers, finalizePlan } from '../validation';
 import type { Actor, Attestation, BookState, EntityKey, EntityPayload, EntityRecord, PlanDocument, ProjectAggregate, PublisherAggregate, Snapshot } from '../types';
 
 const NOW = 1_000_000;
@@ -292,6 +292,32 @@ describe('execution, closure and reuse', () => {
     expect(repair.plan.variant.requirements[0]?.quantity).toBe(1);
     book(p).offers[0]!.instructions = 'Owner changed current terms';
     expect(remainingWork(p)?.execution.reasons.some(r => r.code === 'offer_changed')).toBe(true);
+  });
+
+  it('removes completed prerequisite work even when its equipment remains allocated for return', () => {
+    const p = fixture(true);
+    if (p.activation.status !== 'unique') throw new Error('fixture');
+    const plan = p.proposal!.payload.plan;
+    const offer = book(p, RECEIVER).offers[0]!;
+    const offerHash = hashOffer(RECEIVER, offer);
+    const interval = { start: NOW + 900, end: NOW + 950 };
+    plan.variant.requirements.push({ id: 'late-work', title: 'Follow-up work', kind: 'person', capability: 'work',
+      quantity: 1, unit: 'person', interval, instructions: '', dependsOn: ['r'] });
+    plan.allocations.push({ id: 'late-allocation', requirementId: 'late-work', publisherRoot: RECEIVER,
+      offerId: offer.id, offerHash, resourceId: offer.resourceId, quantity: 1, unit: 'person', interval });
+    plan.offers.push({ publisherRoot: RECEIVER, offerId: offer.id, offerHash });
+    plan.resourceAssumptions.push({ publisherRoot: RECEIVER, resourceId: 'self', capacity: 1, unit: 'person' });
+    plan.runbook.push({ kind: 'task', id: 'late-task', title: 'Follow-up work', publisherRoot: RECEIVER,
+      interval, allocationIds: ['late-allocation'], dependsOn: ['task'], instructions: '' });
+    p.proposal!.payload.proposalHash = hashPlan(plan);
+    p.proposal!.payload.requirementsHash = hashRequirements(ROOT, plan.variant.requirements);
+    p.activation.entity.payload.proposalHash = p.proposal!.payload.proposalHash;
+    apply(p, OWNER, prepareAttestation(p, OWNER, owner, { ...activeSource(p)!, id: 'work-complete', operationId: 'work-complete',
+      kind: 'task_report', obligationId: 'task', author: OWNER, recordedAt: NOW, status: 'done', note: '' }));
+    const repair = remainingWork(p)!;
+    expect(repair.plan.allocations.some(allocation => allocation.id === 'a')).toBe(true);
+    expect(repair.plan.variant.requirements.find(requirement => requirement.id === 'late-work')!.dependsOn).toEqual([]);
+    expect(finalizePlan(repair.plan, p.publishers, p.snapshot).ok).toBe(true);
   });
 
   it('removes conditions belonging solely to completed offers from a remaining-work package', () => {

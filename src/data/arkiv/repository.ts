@@ -53,7 +53,7 @@ export class ArkivRepository implements Repository {
     return asResult(async () => {
       const project = await this.reader.loadProject(root, options);
       return { format: 'partfolk-export' as const, version: 1 as const, exportedAt: this.reader.now(), mode: this.mode,
-        project, readiness: deriveReadiness(project, project.snapshot.blockTimestamp), snapshot: project.snapshot };
+        project, readiness: deriveReadiness(project, this.reader.now()), snapshot: project.snapshot };
     });
   }
 }

@@ -1,0 +1,22 @@
+.guided-practice {
+  display: grid; gap: 0; border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet);
+  overflow: hidden; background: var(--surface-work); box-shadow: var(--shadow-surface, var(--shadow-layer));
+}
+.guided-practice-intro { padding: 24px 28px; background: var(--art-sand); }
+.guided-practice-intro h2 { margin: 0 0 8px; color: var(--brand-ink); font-size: clamp(20px, 2vw, 24px); line-height: 1.2; font-weight: 500; }
+.guided-practice-intro p { max-width: 76ch; margin: 0; }
+.guided-practice-step { padding: 24px 28px; }
+.guided-practice-step h3 { color: var(--brand-ink); margin: 0 0 12px; font-size: clamp(21px, 2.4vw, 27px); line-height: 1.25; font-weight: 500; }
+.guided-practice-step > p { max-width: 76ch; margin: 0 0 16px; }
+.guided-practice-step > p:last-child { margin-bottom: 0; }
+.guided-practice-changes { display: grid; gap: 6px; margin: 16px 0; padding-inline-start: 22px; }
+.guided-practice-owners { color: var(--text-secondary); }
+.guided-practice-action { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 20px; }
+.guided-practice-action > span { color: var(--text-secondary); font-size: 14px; }
+.guided-practice-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 12px 24px; border-top: 1px solid var(--border-quiet); }
+.guided-practice-error { color: var(--danger-text); padding-top: 16px; }
+@media (max-width: 599px) {
+  .guided-practice-intro, .guided-practice-step { padding: 20px 18px; }
+  .guided-practice-tools { padding-inline: 14px; }
+  .guided-practice-action > .pf-button { width: 100%; }
+}

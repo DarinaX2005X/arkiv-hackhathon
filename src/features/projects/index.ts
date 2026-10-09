@@ -2,7 +2,7 @@ export { WorkspaceRoute } from './Workspace';
 export { NewProjectRoute } from './NewProject';
 export { DemoRoute } from './Demo';
 export { ProjectRoute, ProjectPage } from './ProjectPage';
-export type { ProjectPanelProps, ProjectSlots, ProjectPageProps } from './ProjectPage';
+export type { ProjectPanelProps, ProjectSlots, ProjectActions, ProjectPageProps } from './ProjectPage';
 export { ProjectPlan } from './ProjectPlan';
 export { PlanReviewEditor } from './PlanReview';
 export { projectsCopy } from './catalog';

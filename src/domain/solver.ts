@@ -102,15 +102,20 @@ function assemblePlan(input: SolverInput, variant: ProjectVariant, allocations: 
   return plan;
 }
 
-function allChoices(publishers: PublisherAggregate[]): Choice[] {
-  return publishers.flatMap(publisher => publisher.book.status === 'unique' ? publisher.book.entity.payload.offers.flatMap(offer => {
-    const resource = publisher.book.status === 'unique' ? publisher.book.entity.payload.resources.find(resource => resource.id === offer.resourceId) : undefined;
-    return resource ? [{ publisherRoot: publisher.root.key, offer, resource }] : [];
-  }) : []).sort((a, b) => compareText(choiceId(a), choiceId(b)));
-}
-
-function uniqueReasons(reasons: DomainReason[]): DomainReason[] {
-  return [...new Map(reasons.map(reason => [canonicalJson(reason), reason])).values()];
+function allChoices(publishers: PublisherAggregate[], step: () => void, checkpoint: () => void): Choice[] {
+  const choices: Choice[] = [];
+  for (const publisher of publishers) {
+    step();
+    if (publisher.book.status !== 'unique') continue;
+    const resources = new Map<string, Resource>();
+    for (const resource of publisher.book.entity.payload.resources) { step(); resources.set(resource.id, resource); }
+    for (const offer of publisher.book.entity.payload.offers) {
+      step();
+      const resource = resources.get(offer.resourceId);
+      if (resource) choices.push({ publisherRoot: publisher.root.key, offer, resource });
+    }
+  }
+  return choices.sort((a, b) => { checkpoint(); return compareText(choiceId(a), choiceId(b)); });
 }
 
 /** Finite integer search. Every emitted candidate passes the independent evaluator. */
@@ -119,133 +124,246 @@ export function solve(input: SolverInput, pins: SolverPin[] = [], budget: Solver
 }
 
 function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudget, explain: boolean): SolverResult {
-  const initial = validateSolverInput(input);
-  const invalidPins = pins.some(pin => typeof pin.requirementId !== 'string' || typeof pin.offerId !== 'string' || (pin.quantity !== undefined && (!Number.isSafeInteger(pin.quantity) || pin.quantity <= 0)));
-  if (!initial.valid || invalidPins || !Number.isSafeInteger(budget.maxNodes) || budget.maxNodes < 0 || !Number.isSafeInteger(budget.maxCandidates) || budget.maxCandidates < 1
-    || (budget.maxMilliseconds !== undefined && (!Number.isSafeInteger(budget.maxMilliseconds) || budget.maxMilliseconds <= 0))) {
-    return { status: 'unverified', candidates: [], reasons: [...initial.reasons, ...(!initial.valid ? [] : [{ code: 'invalid_input' as const }])], nodesVisited: 0, exhausted: false, optimality: 'not_proven' };
-  }
-  const pinKeys = pins.map(pin => canonicalJson([pin.requirementId, pin.publisherRoot, pin.offerId]));
-  if (new Set(pinKeys).size !== pins.length) return { status: 'impossible', candidates: [], reasons: [{ code: 'pin_conflict' }], nodesVisited: 0, exhausted: false, optimality: 'proven' };
-  const now = input.snapshot.blockTimestamp;
-  const choices = allChoices(input.publishers);
-  let nodesVisited = 0, exhausted = false;
+  // Validation and preprocessing are part of the elapsed budget, too. Synchronous
+  // domain helpers cannot be interrupted, so check both sides of every such call.
   const start = Date.now();
+  if (!Number.isSafeInteger(budget.maxNodes) || budget.maxNodes < 0 || !Number.isSafeInteger(budget.maxCandidates) || budget.maxCandidates < 1
+    || (budget.maxMilliseconds !== undefined && (!Number.isSafeInteger(budget.maxMilliseconds) || budget.maxMilliseconds <= 0))) {
+    return { status: 'unverified', candidates: [], reasons: [{ code: 'invalid_input' }], nodesVisited: 0, exhausted: false, optimality: 'not_proven' };
+  }
+  let nodesVisited = 0, exhausted = false;
   const candidates: PlanCandidate[] = [];
   const seen = new Set<string>();
   const reasons: DomainReason[] = [];
-  const enter = (): boolean => {
-    if (nodesVisited >= budget.maxNodes || (budget.maxMilliseconds !== undefined && Date.now() - start >= budget.maxMilliseconds)) { exhausted = true; return false; }
-    nodesVisited++; return true;
+  const reasonKeys = new Set<string>();
+  const addReason = (reason: DomainReason): void => {
+    // Retain bounded diagnostics while searching, rather than constructing an
+    // unbounded rejection history and slicing it only after search completes.
+    if (reasons.length >= 128) return;
+    const key = canonicalJson(reason);
+    if (!reasonKeys.has(key)) { reasonKeys.add(key); reasons.push(reason); }
   };
-  for (const variant of [...input.recipe.variants].sort((a, b) => compareText(a.id, b.id))) {
-    if (exhausted) break;
-    const eligible = new Map(variant.requirements.map(requirement => [requirement.id, choices.filter(choice => offerFits(choice.offer, choice.resource, requirement, input.projectRoot, variant.id, variant.venueId))]));
-    const variantPins = pins.filter(pin => !variant.requirements.some(requirement => requirement.id === pin.requirementId));
-    if (variantPins.length) { reasons.push(...variantPins.map(pin => ({ code: 'pin_conflict' as const, requirementId: pin.requirementId, params: { variantId: variant.id } }))); continue; }
-    let trivialShortage = false;
-    for (const requirement of variant.requirements) {
-      const available = eligible.get(requirement.id)!;
-      // Upper bound intentionally ignores shared resource contention. It never proves feasibility.
-      const upper = available.reduce((total, choice) => total + Math.min(choice.offer.quantity, choice.resource.capacity), 0);
-      if (upper < requirement.quantity) {
-        reasons.push({ code: 'shortage', requirementId: requirement.id, params: { variantId: variant.id, required: requirement.quantity, available: upper, missing: requirement.quantity - upper } });
-        trivialShortage = true;
+  const stopped = Symbol('solver budget exhausted');
+  const checkpoint = (): void => {
+    if (budget.maxMilliseconds !== undefined && Date.now() - start >= budget.maxMilliseconds) throw stopped;
+  };
+  const step = (): void => {
+    checkpoint();
+    if (nodesVisited >= budget.maxNodes) throw stopped;
+    nodesVisited++;
+  };
+  const work = <T>(operation: () => T): T => {
+    step();
+    const result = operation();
+    checkpoint();
+    return result;
+  };
+  try {
+    const initial = work(() => validateSolverInput(input));
+    let invalidPins = false;
+    const pinKeys = new Set<string>();
+    const pinsByRequirement = new Map<string, SolverPin[]>();
+    const pinsByChoice = new Map<string, SolverPin>();
+    let duplicatePins = false;
+    for (const pin of pins) {
+      step();
+      if (typeof pin.requirementId !== 'string' || typeof pin.publisherRoot !== 'string' || typeof pin.offerId !== 'string'
+        || (pin.quantity !== undefined && (!Number.isSafeInteger(pin.quantity) || pin.quantity <= 0))) {
+        invalidPins = true;
+        continue;
       }
-      for (const pin of pins.filter(pin => pin.requirementId === requirement.id)) {
-        if (!available.some(choice => choice.publisherRoot === pin.publisherRoot && choice.offer.id === pin.offerId)) {
-          reasons.push({ code: 'pin_conflict', requirementId: pin.requirementId, publisherRoot: pin.publisherRoot, offerId: pin.offerId, params: { variantId: variant.id } });
+      const key = canonicalJson([pin.requirementId, pin.publisherRoot, pin.offerId]);
+      if (pinKeys.has(key)) duplicatePins = true;
+      pinKeys.add(key);
+      pinsByChoice.set(key, pin);
+      const requirementPins = pinsByRequirement.get(pin.requirementId) ?? [];
+      requirementPins.push(pin);
+      pinsByRequirement.set(pin.requirementId, requirementPins);
+    }
+    if (!initial.valid || invalidPins) {
+      for (const reason of initial.reasons) { checkpoint(); addReason(reason); }
+      if (invalidPins) addReason({ code: 'invalid_input' });
+      return { status: 'unverified', candidates: [], reasons, nodesVisited, exhausted: false, optimality: 'not_proven' };
+    }
+    if (duplicatePins) return { status: 'impossible', candidates: [], reasons: [{ code: 'pin_conflict' }], nodesVisited, exhausted: false, optimality: 'proven' };
+    const now = input.snapshot.blockTimestamp;
+    const choices = allChoices(input.publishers, step, checkpoint);
+    const variants = work(() => [...input.recipe.variants].sort((a, b) => { checkpoint(); return compareText(a.id, b.id); }));
+    for (const variant of variants) {
+      step();
+      const eligible = new Map<string, Choice[]>();
+      const tails = new Map<string, number[]>();
+      const requirementIds = new Set<string>();
+      for (const requirement of variant.requirements) {
+        step();
+        requirementIds.add(requirement.id);
+        const available: Choice[] = [];
+        for (const choice of choices) {
+          if (work(() => offerFits(choice.offer, choice.resource, requirement, input.projectRoot, variant.id, variant.venueId))) available.push(choice);
+        }
+        eligible.set(requirement.id, available);
+        // A suffix bound avoids rescanning all remaining choices at every node.
+        const suffix = new Array<number>(available.length + 1).fill(0);
+        for (let i = available.length - 1; i >= 0; i--) {
+          step();
+          const choice = available[i]!;
+          suffix[i] = suffix[i + 1]! + Math.min(choice.offer.quantity, choice.resource.capacity);
+        }
+        tails.set(requirement.id, suffix);
+      }
+      let conflictingPins = false;
+      for (const pin of pins) {
+        step();
+        if (!requirementIds.has(pin.requirementId)) {
+          addReason({ code: 'pin_conflict', requirementId: pin.requirementId, params: { variantId: variant.id } });
+          conflictingPins = true;
+        }
+      }
+      if (conflictingPins) continue;
+      let trivialShortage = false;
+      for (const requirement of variant.requirements) {
+        step();
+        const available = eligible.get(requirement.id)!;
+        // Upper bound intentionally ignores shared resource contention. It never proves feasibility.
+        const upper = tails.get(requirement.id)![0]!;
+        if (upper < requirement.quantity) {
+          addReason({ code: 'shortage', requirementId: requirement.id, params: { variantId: variant.id, required: requirement.quantity, available: upper, missing: requirement.quantity - upper } });
           trivialShortage = true;
         }
-      }
-    }
-    if (trivialShortage) continue;
-    const requirements = [...variant.requirements].sort((a, b) => eligible.get(a.id)!.length - eligible.get(b.id)!.length || compareText(a.id, b.id));
-    const allocations: Allocation[] = [];
-    let variantFound = false;
-    const exploreRequirement = (index: number): void => {
-      if (!enter()) return;
-      if (index === requirements.length) {
-        const used = choices.filter(choice => allocations.some(allocation => allocation.publisherRoot === choice.publisherRoot && allocation.offerId === choice.offer.id));
-        const conditionReasons = checkConditions(used.flatMap(choice => choice.offer.conditions), used, variant.id, variant.venueId);
-        if (conditionReasons.length) { reasons.push(...conditionReasons.map(reason => ({ ...reason, params: { ...reason.params, variantId: variant.id } }))); return; }
-        const plan = assemblePlan(input, variant, allocations, choices);
-        const validation = independentlyValidatePlan(plan, input.publishers, now, pins);
-        if (!validation.valid) { reasons.push(...validation.reasons); return; }
-        variantFound = true;
-        const proposalHash = hashPlan(plan);
-        if (seen.has(proposalHash)) return;
-        seen.add(proposalHash);
-        candidates.push({ plan, proposalHash, rank: rankPlan(plan, input.predecessor?.payload.plan ?? null) });
-        candidates.sort((a, b) => compareRank(a.rank, b.rank));
-        if (candidates.length > budget.maxCandidates) candidates.pop();
-        return;
-      }
-      const requirement = requirements[index]!;
-      const available = eligible.get(requirement.id)!;
-      const assign = (choiceIndex: number, remaining: number): void => {
-        if (!enter()) return;
-        if (choiceIndex === available.length) { if (remaining === 0) exploreRequirement(index + 1); return; }
-        const choice = available[choiceIndex]!;
-        const pin = pins.find(pin => pin.requirementId === requirement.id && pin.publisherRoot === choice.publisherRoot && pin.offerId === choice.offer.id);
-        const maximum = Math.min(remaining, choice.offer.quantity, choice.resource.capacity);
-        const minimum = pin ? pin.quantity ?? 1 : 0;
-        const upper = pin?.quantity ?? maximum;
-        if (upper > maximum || minimum > upper) return;
-        const tail = available.slice(choiceIndex + 1).reduce((sum, next) => sum + Math.min(next.offer.quantity, next.resource.capacity), 0);
-        for (let amount = upper; amount >= minimum; amount--) {
-          if (exhausted) return;
-          if (remaining - amount > tail) continue;
-          if (amount > 0) allocations.push(makeAllocation(requirement, choice, amount));
-          const conflicts = amount > 0 ? capacityConflicts(allocations, input.publishers, input.projectRoot, now) : [];
-          if (conflicts.length === 0) assign(choiceIndex + 1, remaining - amount);
-          else reasons.push(...conflicts.map(reason => {
-            const conflicting = [...new Set(allocations.filter(allocation => allocation.publisherRoot === reason.publisherRoot
-              && (!reason.resourceId || allocation.resourceId === reason.resourceId)
-              && (!reason.offerId || allocation.offerId === reason.offerId)).map(allocation => allocation.requirementId))].sort(compareText);
-            const publisher = input.publishers.find(publisher => publisher.root.key === reason.publisherRoot);
-            return { ...reason, requirementId: requirement.id, params: { ...reason.params, variantId: variant.id,
-              publisherName: publisher?.book.status === 'unique' ? publisher.book.entity.payload.name : reason.publisherRoot ?? '',
-              conflictingRequirementIds: conflicting.join('|'),
-              conflictingRequirementTitles: conflicting.map(id => variant.requirements.find(item => item.id === id)?.title ?? id).join(' | '),
-            } };
-          }));
-          if (amount > 0) allocations.pop();
+        for (const pin of pinsByRequirement.get(requirement.id) ?? []) {
+          step();
+          let present = false;
+          for (const choice of available) {
+            step();
+            if (choice.publisherRoot === pin.publisherRoot && choice.offer.id === pin.offerId) { present = true; break; }
+          }
+          if (!present) {
+            addReason({ code: 'pin_conflict', requirementId: pin.requirementId, publisherRoot: pin.publisherRoot, offerId: pin.offerId, params: { variantId: variant.id } });
+            trivialShortage = true;
+          }
         }
+      }
+      if (trivialShortage) continue;
+      const requirements = work(() => [...variant.requirements].sort((a, b) => {
+        checkpoint();
+        return eligible.get(a.id)!.length - eligible.get(b.id)!.length || compareText(a.id, b.id);
+      }));
+      const allocations: Allocation[] = [];
+      let variantFound = false;
+      const exploreRequirement = (index: number): void => {
+        step();
+        if (index === requirements.length) {
+          const used = work(() => choices.filter(choice => {
+            step();
+            return allocations.some(allocation => { checkpoint(); return allocation.publisherRoot === choice.publisherRoot && allocation.offerId === choice.offer.id; });
+          }));
+          const conditionReasons = work(() => checkConditions(used.flatMap(choice => choice.offer.conditions), used, variant.id, variant.venueId));
+          if (conditionReasons.length) {
+            for (const reason of conditionReasons) { step(); addReason({ ...reason, params: { ...reason.params, variantId: variant.id } }); }
+            return;
+          }
+          const plan = work(() => assemblePlan(input, variant, allocations, choices));
+          const validation = work(() => independentlyValidatePlan(plan, input.publishers, now, pins));
+          if (!validation.valid) {
+            for (const reason of validation.reasons) { step(); addReason(reason); }
+            return;
+          }
+          variantFound = true;
+          const proposalHash = work(() => hashPlan(plan));
+          if (seen.has(proposalHash)) return;
+          const candidate = work(() => ({ plan, proposalHash, rank: rankPlan(plan, input.predecessor?.payload.plan ?? null) }));
+          const retained = work(() => [...candidates, candidate].sort((a, b) => {
+            checkpoint(); return compareRank(a.rank, b.rank);
+          }).slice(0, budget.maxCandidates));
+          seen.add(proposalHash);
+          candidates.splice(0, candidates.length, ...retained);
+          return;
+        }
+        const requirement = requirements[index]!;
+        const available = eligible.get(requirement.id)!;
+        const assign = (choiceIndex: number, remaining: number): void => {
+          step();
+          if (choiceIndex === available.length) { if (remaining === 0) exploreRequirement(index + 1); return; }
+          const choice = available[choiceIndex]!;
+          const pin = pinsByChoice.get(canonicalJson([requirement.id, choice.publisherRoot, choice.offer.id]));
+          const maximum = Math.min(remaining, choice.offer.quantity, choice.resource.capacity);
+          const minimum = pin ? pin.quantity ?? 1 : 0;
+          const upper = pin?.quantity ?? maximum;
+          if (upper > maximum || minimum > upper) return;
+          const tail = tails.get(requirement.id)![choiceIndex + 1]!;
+          for (let amount = upper; amount >= minimum; amount--) {
+            // Rejected quantities are search attempts, including tail-bound and
+            // capacity rejection paths that never recurse into another node.
+            step();
+            if (remaining - amount > tail) continue;
+            if (amount > 0) allocations.push(work(() => makeAllocation(requirement, choice, amount)));
+            const conflicts = amount > 0 ? work(() => capacityConflicts(allocations, input.publishers, input.projectRoot, now)) : [];
+            if (conflicts.length === 0) assign(choiceIndex + 1, remaining - amount);
+            else for (const reason of conflicts) {
+              step();
+              // Stop collecting once diagnostics are full, while still searching.
+              if (reasons.length >= 128) continue;
+              const conflicting = work(() => [...new Set(allocations.filter(allocation => allocation.publisherRoot === reason.publisherRoot
+                && (!reason.resourceId || allocation.resourceId === reason.resourceId)
+                && (!reason.offerId || allocation.offerId === reason.offerId)).map(allocation => allocation.requirementId))].sort(compareText));
+              const publisher = work(() => input.publishers.find(publisher => publisher.root.key === reason.publisherRoot));
+              addReason({ ...reason, requirementId: requirement.id, params: { ...reason.params, variantId: variant.id,
+                publisherName: publisher?.book.status === 'unique' ? publisher.book.entity.payload.name : reason.publisherRoot ?? '',
+                conflictingRequirementIds: conflicting.join('|'),
+                conflictingRequirementTitles: work(() => conflicting.map(id => variant.requirements.find(item => item.id === id)?.title ?? id).join(' | ')),
+              } });
+            }
+            if (amount > 0) allocations.pop();
+          }
+        };
+        assign(0, requirement.quantity);
       };
-      assign(0, requirement.quantity);
-    };
-    exploreRequirement(0);
-    if (!variantFound && !exhausted && !reasons.some(reason => reason.params?.variantId === variant.id)) reasons.push({ code: 'condition_unsatisfied', params: { variantId: variant.id } });
-  }
-  // Optional explanation uses the same general rules: add one explicitly hypothetical
-  // resource and validate a complete solution. These allocations are never returned as offers.
-  if (explain && candidates.length === 0 && !exhausted) {
-    const targets = new Set<string>();
-    for (const reason of reasons) if (reason.code === 'capacity_exceeded' && typeof reason.params?.variantId === 'string' && typeof reason.params.conflictingRequirementIds === 'string') {
-      for (const requirementId of reason.params.conflictingRequirementIds.split('|').filter(Boolean)) targets.add(canonicalJson([reason.params.variantId, requirementId]));
+      exploreRequirement(0);
+      if (!variantFound && !reasons.some(reason => reason.params?.variantId === variant.id)) addReason({ code: 'condition_unsatisfied', params: { variantId: variant.id } });
     }
-    for (const target of targets) {
-      const [variantId, requirementId] = JSON.parse(target) as [string, string];
-      const variant = input.recipe.variants.find(variant => variant.id === variantId);
-      const requirement = variant?.requirements.find(requirement => requirement.id === requirementId);
-      const remainingBudget = budget.maxNodes - nodesVisited;
-      const remainingTime = budget.maxMilliseconds === undefined ? undefined : budget.maxMilliseconds - (Date.now() - start);
-      if (!variant || !requirement || remainingBudget <= 0 || (remainingTime !== undefined && remainingTime <= 0)) break;
-      const hypothetical = hypotheticalPublisher(input, requirement);
-      const result = solveInternal({ ...input, recipe: { ...input.recipe, variants: [variant] }, publishers: [...input.publishers, hypothetical] }, pins,
-        { maxNodes: Math.min(remainingBudget, 2000), maxCandidates: 1, ...(remainingTime === undefined ? {} : { maxMilliseconds: remainingTime }) }, false);
-      nodesVisited += result.nodesVisited;
-      if (result.candidates.length > 0) reasons.push({ code: 'shortage', requirementId, params: {
-        variantId, missing: 1, unit: requirement.unit, additionalHelpSufficient: true,
-        requirementTitle: requirement.title,
-      } });
+    // Hypothetical explanations share the total budget and never become offers.
+    if (explain && candidates.length === 0) {
+      const targets = new Set<string>();
+      for (const reason of reasons) {
+        step();
+        if (reason.code === 'capacity_exceeded' && typeof reason.params?.variantId === 'string' && typeof reason.params.conflictingRequirementIds === 'string') {
+          for (const requirementId of reason.params.conflictingRequirementIds.split('|').filter(Boolean)) { step(); targets.add(canonicalJson([reason.params.variantId, requirementId])); }
+        }
+      }
+      for (const target of targets) {
+        step();
+        const [variantId, requirementId] = JSON.parse(target) as [string, string];
+        const variant = work(() => input.recipe.variants.find(variant => variant.id === variantId));
+        const requirement = work(() => variant?.requirements.find(requirement => requirement.id === requirementId));
+        if (!variant || !requirement) continue;
+        const hypothetical = work(() => hypotheticalPublisher(input, requirement));
+        const remainingBudget = budget.maxNodes - nodesVisited;
+        const remainingTime = budget.maxMilliseconds === undefined ? undefined : budget.maxMilliseconds - (Date.now() - start);
+        if (remainingBudget <= 0 || (remainingTime !== undefined && remainingTime <= 0)) throw stopped;
+        const result = solveInternal({ ...input, recipe: { ...input.recipe, variants: [variant] }, publishers: [...input.publishers, hypothetical] }, pins,
+          { maxNodes: Math.min(remainingBudget, 2000), maxCandidates: 1, ...(remainingTime === undefined ? {} : { maxMilliseconds: remainingTime }) }, false);
+        nodesVisited += result.nodesVisited;
+        checkpoint();
+        if (result.exhausted) throw stopped;
+        if (result.candidates.length > 0) addReason({ code: 'shortage', requirementId, params: {
+          variantId, missing: 1, unit: requirement.unit, additionalHelpSufficient: true,
+          requirementTitle: requirement.title,
+        } });
+      }
     }
+    checkpoint();
+  } catch (error) {
+    if (error !== stopped) throw error;
+    exhausted = true;
   }
-  if (exhausted) reasons.push({ code: 'search_exhausted', params: { maxNodes: budget.maxNodes } });
+  if (exhausted) {
+    // The truncation reason must remain visible even with 128 distinct failures.
+    if (reasons.length === 128) reasonKeys.delete(canonicalJson(reasons.pop()!));
+    addReason({ code: 'search_exhausted', params: { maxNodes: budget.maxNodes, ...(budget.maxMilliseconds === undefined ? {} : { maxMilliseconds: budget.maxMilliseconds }) } });
+  }
   return {
     status: candidates.length ? 'found' : exhausted ? 'exhausted' : 'impossible', candidates,
-    reasons: candidates.length && !exhausted ? [] : uniqueReasons(reasons).slice(0, 128), nodesVisited, exhausted,
+    reasons: candidates.length && !exhausted ? [] : reasons, nodesVisited, exhausted,
     optimality: exhausted ? 'not_proven' : 'proven',
   };
 }

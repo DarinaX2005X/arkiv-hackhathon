@@ -57,22 +57,33 @@ function makeProjectDraftStore(runtime: AppRuntime, scope: string) {
   const store = runtime.drafts(`projects:${scope}`, 'project-workspace', isDraftCollection);
   const loaded = store.load();
   let drafts = loaded.status === 'ready' ? loaded.value.drafts : [];
+  const memoryOnly = new Map<string, SavedProjectDraft>();
   let issue: StorageIssue | null = loaded.status === 'recovery' || loaded.status === 'unavailable' ? loaded.issue : null;
   let persisted = loaded.status === 'ready' || loaded.status === 'missing';
   const save = () => {
     const result = store.save({ drafts }); issue = result.issue; persisted = result.persisted;
     return result;
   };
+  const retain = (draft: SavedProjectDraft) => {
+    if (!isSavedProjectDraft(draft) || draft.scope !== scope) throw new TypeError('This draft belongs to a different account context.');
+    drafts = [...drafts.filter(item => item.id !== draft.id), structuredClone(draft)].sort((a, b) => b.updatedAt - a.updatedAt);
+  };
   return {
-    list: () => structuredClone(drafts),
-    get: (id: string | null) => drafts.find(draft => draft.id === id),
-    status: () => ({ persisted, issue }),
+    list: () => structuredClone([...drafts.filter(draft => !memoryOnly.has(draft.id)), ...memoryOnly.values()].sort((a, b) => b.updatedAt - a.updatedAt)),
+    get: (id: string | null) => id === null ? undefined : memoryOnly.get(id) ?? drafts.find(draft => draft.id === id),
+    status: () => ({ persisted: persisted && memoryOnly.size === 0, issue }),
     upsert(draft: SavedProjectDraft) {
-      if (!isSavedProjectDraft(draft) || draft.scope !== scope) throw new TypeError('This draft belongs to a different account context.');
-      drafts = [...drafts.filter(item => item.id !== draft.id), structuredClone(draft)].sort((a, b) => b.updatedAt - a.updatedAt);
+      retain(draft);
+      memoryOnly.delete(draft.id);
       return save();
     },
-    remove(id: string) { drafts = drafts.filter(item => item.id !== id); return save(); },
+    /** A draft handoff must save its owner/location claim before persisting a new account copy. */
+    retainInMemory(draft: SavedProjectDraft, reason: StorageIssue | null) {
+      if (!isSavedProjectDraft(draft) || draft.scope !== scope) throw new TypeError('This draft belongs to a different account context.');
+      memoryOnly.set(draft.id, structuredClone(draft)); issue = reason ?? { code: 'write_failed', recoverableText: null };
+      return { value: draft, persisted: false as const, issue };
+    },
+    remove(id: string) { memoryOnly.delete(id); drafts = drafts.filter(item => item.id !== id); return save(); },
     exportDraft(draft: SavedProjectDraft) {
       const single = runtime.drafts(`project-export:${draft.id}`, 'project-draft', isSavedProjectDraft);
       return single.export(draft);

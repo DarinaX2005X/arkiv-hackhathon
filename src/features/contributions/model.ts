@@ -99,7 +99,7 @@ export function addDraftOffer(draft: ContributionDraft, resourceId: string, offe
   return next;
 }
 export function bookLifetime(book: BookState, now: number): number {
-  return Math.max(DEFAULT_LIFETIME, ...book.grants.map(g => Math.ceil((g.validUntil - now) / 1000) + 60));
+  return Math.max(DEFAULT_LIFETIME, book.retentionDays * 86400, ...book.grants.map(g => Math.ceil((g.validUntil - now) / 1000) + 60));
 }
 export function prepareAvailability(publisher: PublisherAggregate, draft: ContributionDraft, authority: WriteAuthority, now: number, id: string): ReplaceBookCommand {
   if (!ownsPublisher(publisher, authority.actor)) throw new Error('Only the current owner can change this contribution.');
