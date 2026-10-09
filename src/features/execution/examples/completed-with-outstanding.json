@@ -1,0 +1,2873 @@
+{
+  "format": "partfolk-export",
+  "version": 1,
+  "exportedAt": 1791536400000,
+  "mode": "local",
+  "project": {
+    "root": {
+      "key": "local:small-works",
+      "payload": {
+        "protocol": "partfolk/1",
+        "schemaVersion": 1,
+        "entityType": "project_root",
+        "coordinator": {
+          "kind": "local",
+          "id": "local-actor:coordinator"
+        },
+        "operationId": "fixture-small-works-root",
+        "createdAt": 1791536400000
+      },
+      "provenance": {
+        "mode": "local",
+        "creator": {
+          "kind": "local",
+          "id": "local-actor:coordinator"
+        },
+        "owner": {
+          "kind": "local",
+          "id": "local-actor:coordinator"
+        },
+        "readonly": true,
+        "permissionlessExtension": false,
+        "contentType": "application/json",
+        "createdAtBlock": null,
+        "expiresAtBlock": null,
+        "transactionHash": null
+      }
+    },
+    "state": {
+      "status": "unique",
+      "entity": {
+        "key": "local:sample-closed-state",
+        "payload": {
+          "protocol": "partfolk/1",
+          "schemaVersion": 1,
+          "entityType": "project_state",
+          "projectRoot": "local:small-works",
+          "predecessorKeys": [
+            "local:small-works:state:initial"
+          ],
+          "operationId": "sample-close",
+          "createdAt": 1791536400000,
+          "recipe": {
+            "title": "Small Works",
+            "outcome": "Hold a community exhibition of small handmade artworks.",
+            "timeZone": "Europe/London",
+            "variants": [
+              {
+                "id": "saturday",
+                "title": "Saturday at the Courtyard",
+                "venueId": "courtyard",
+                "timeZone": "Europe/London",
+                "requirements": [
+                  {
+                    "id": "venue",
+                    "title": "Exhibition space",
+                    "kind": "place",
+                    "capability": "exhibition-space",
+                    "unit": "space",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    },
+                    "instructions": "",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "boards",
+                    "title": "Display boards",
+                    "kind": "equipment",
+                    "capability": "display-board",
+                    "unit": "board",
+                    "quantity": 6,
+                    "interval": {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    },
+                    "instructions": "Boards are already at the venue before setup.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "kit",
+                    "title": "Installation kit",
+                    "kind": "equipment",
+                    "capability": "installation-kit",
+                    "unit": "kit",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    "instructions": "The installation kit is already at the venue.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "installation",
+                    "title": "Install the displays",
+                    "kind": "person",
+                    "capability": "installation",
+                    "unit": "person",
+                    "quantity": 2,
+                    "interval": {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    "instructions": "Build the displays using the boards and installation kit at the venue.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "transport",
+                    "title": "Bring the artworks",
+                    "kind": "person",
+                    "capability": "artwork-transport",
+                    "unit": "person",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    "instructions": "Bring the artworks from the synthetic studio. Transport includes carrying equipment.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "hosting",
+                    "title": "Host the exhibition",
+                    "kind": "person",
+                    "capability": "hosting",
+                    "unit": "person",
+                    "quantity": 2,
+                    "interval": {
+                      "start": 1792234800000,
+                      "end": 1792249200000
+                    },
+                    "instructions": "Welcome visitors after display installation and artwork transport finish.",
+                    "dependsOn": [
+                      "installation",
+                      "transport"
+                    ]
+                  }
+                ],
+                "instructions": "Synthetic public courtyard."
+              },
+              {
+                "id": "sunday",
+                "title": "Sunday at the Library",
+                "venueId": "library-hall",
+                "timeZone": "Europe/London",
+                "requirements": [
+                  {
+                    "id": "venue",
+                    "title": "Exhibition space",
+                    "kind": "place",
+                    "capability": "exhibition-space",
+                    "unit": "space",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    },
+                    "instructions": "",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "boards",
+                    "title": "Display boards",
+                    "kind": "equipment",
+                    "capability": "display-board",
+                    "unit": "board",
+                    "quantity": 6,
+                    "interval": {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    },
+                    "instructions": "Boards are already at the venue before setup.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "kit",
+                    "title": "Installation kit",
+                    "kind": "equipment",
+                    "capability": "installation-kit",
+                    "unit": "kit",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    },
+                    "instructions": "The installation kit is already at the venue.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "installation",
+                    "title": "Install the displays",
+                    "kind": "person",
+                    "capability": "installation",
+                    "unit": "person",
+                    "quantity": 2,
+                    "interval": {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    },
+                    "instructions": "Build the displays using the boards and installation kit at the venue.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "transport",
+                    "title": "Bring the artworks",
+                    "kind": "person",
+                    "capability": "artwork-transport",
+                    "unit": "person",
+                    "quantity": 1,
+                    "interval": {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    },
+                    "instructions": "Bring the artworks from the synthetic studio. Transport includes carrying equipment.",
+                    "dependsOn": []
+                  },
+                  {
+                    "id": "hosting",
+                    "title": "Host the exhibition",
+                    "kind": "person",
+                    "capability": "hosting",
+                    "unit": "person",
+                    "quantity": 2,
+                    "interval": {
+                      "start": 1792321200000,
+                      "end": 1792335600000
+                    },
+                    "instructions": "Welcome visitors after display installation and artwork transport finish.",
+                    "dependsOn": [
+                      "installation",
+                      "transport"
+                    ]
+                  }
+                ],
+                "instructions": "Synthetic library hall."
+              }
+            ],
+            "instructions": "Every publisher reviews the complete exact plan before accepting. This is a synthetic local practice project."
+          },
+          "publisherRoots": [
+            "local:library",
+            "local:courtyard",
+            "local:makerspace",
+            "local:cedar",
+            "local:willow",
+            "local:ash",
+            "local:elm",
+            "local:oak"
+          ],
+          "lifecycle": "closed",
+          "completedWork": [
+            {
+              "obligationId": "task:29598a37c77f7af6ff341ef0",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:29598a37c77f7af6ff341ef0"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:dc732efde6b519c35603b181",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:dc732efde6b519c35603b181"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:4dac8fce0a6a00310d39647d",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:4dac8fce0a6a00310d39647d"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:adb2e080b57f918379fae24e",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:adb2e080b57f918379fae24e"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:ef30ec52c4b2c06d19da0173",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:ef30ec52c4b2c06d19da0173"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:3a22b0e1acc906ec96ba23c2",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:3a22b0e1acc906ec96ba23c2"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:ebfdde385727d9cd1d89a5f2",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:ebfdde385727d9cd1d89a5f2"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "task:2187b13bbd5fa101092a30e3",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-task-task:2187b13bbd5fa101092a30e3"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            },
+            {
+              "obligationId": "handover-boards",
+              "source": {
+                "projectRoot": "local:small-works",
+                "activationKey": "local:export-example:activation",
+                "proposalKey": "local:export-example:proposal",
+                "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+              },
+              "attestationIds": [
+                "report:sample-give",
+                "report:sample-receive"
+              ],
+              "recordedAt": 1791536400000,
+              "evidenceAvailability": "available"
+            }
+          ],
+          "completion": {
+            "outcome": "completed_with_outstanding",
+            "recordedAt": 1791536400000,
+            "statement": "Synthetic example: all tasks were reported done; the equipment owner has not yet acknowledged the six returned boards.",
+            "completedWork": [
+              {
+                "obligationId": "task:29598a37c77f7af6ff341ef0",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:29598a37c77f7af6ff341ef0"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:dc732efde6b519c35603b181",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:dc732efde6b519c35603b181"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:4dac8fce0a6a00310d39647d",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:4dac8fce0a6a00310d39647d"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:adb2e080b57f918379fae24e",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:adb2e080b57f918379fae24e"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:ef30ec52c4b2c06d19da0173",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:ef30ec52c4b2c06d19da0173"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:3a22b0e1acc906ec96ba23c2",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:3a22b0e1acc906ec96ba23c2"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:ebfdde385727d9cd1d89a5f2",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:ebfdde385727d9cd1d89a5f2"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "task:2187b13bbd5fa101092a30e3",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-task-task:2187b13bbd5fa101092a30e3"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              },
+              {
+                "obligationId": "handover-boards",
+                "source": {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                },
+                "attestationIds": [
+                  "report:sample-give",
+                  "report:sample-receive"
+                ],
+                "recordedAt": 1791536400000,
+                "evidenceAvailability": "available"
+              }
+            ],
+            "outstandingObligationIds": [
+              "return-boards"
+            ],
+            "outstandingCustodyHoldIds": [
+              "report:sample-give"
+            ],
+            "source": {
+              "projectRoot": "local:small-works",
+              "activationKey": "local:export-example:activation",
+              "proposalKey": "local:export-example:proposal",
+              "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+            }
+          }
+        },
+        "provenance": {
+          "mode": "local",
+          "creator": {
+            "kind": "local",
+            "id": "local-actor:coordinator"
+          },
+          "owner": {
+            "kind": "local",
+            "id": "local-actor:coordinator"
+          },
+          "readonly": true,
+          "permissionlessExtension": false,
+          "contentType": "application/json",
+          "createdAtBlock": null,
+          "expiresAtBlock": null,
+          "transactionHash": null
+        }
+      }
+    },
+    "activation": {
+      "status": "missing",
+      "reason": "expired_or_deleted"
+    },
+    "proposal": null,
+    "proposalHistory": [
+      {
+        "key": "local:export-example:proposal",
+        "payload": {
+          "protocol": "partfolk/1",
+          "schemaVersion": 1,
+          "entityType": "proposal",
+          "operationId": "sample-proposal",
+          "createdAt": 1791536400000,
+          "projectRoot": "local:small-works",
+          "plan": {
+            "protocol": "partfolk/1",
+            "validationVersion": 1,
+            "chainId": null,
+            "projectRoot": "local:small-works",
+            "outcome": "Hold a community exhibition of small handmade artworks.",
+            "variant": {
+              "id": "sunday",
+              "title": "Sunday at the Library",
+              "venueId": "library-hall",
+              "timeZone": "Europe/London",
+              "requirements": [
+                {
+                  "id": "venue",
+                  "title": "Exhibition space",
+                  "kind": "place",
+                  "capability": "exhibition-space",
+                  "unit": "space",
+                  "quantity": 1,
+                  "interval": {
+                    "start": 1792314000000,
+                    "end": 1792335600000
+                  },
+                  "instructions": "",
+                  "dependsOn": []
+                },
+                {
+                  "id": "boards",
+                  "title": "Display boards",
+                  "kind": "equipment",
+                  "capability": "display-board",
+                  "unit": "board",
+                  "quantity": 6,
+                  "interval": {
+                    "start": 1792314000000,
+                    "end": 1792335600000
+                  },
+                  "instructions": "Boards are already at the venue before setup.",
+                  "dependsOn": []
+                },
+                {
+                  "id": "kit",
+                  "title": "Installation kit",
+                  "kind": "equipment",
+                  "capability": "installation-kit",
+                  "unit": "kit",
+                  "quantity": 1,
+                  "interval": {
+                    "start": 1792314000000,
+                    "end": 1792321200000
+                  },
+                  "instructions": "The installation kit is already at the venue.",
+                  "dependsOn": []
+                },
+                {
+                  "id": "installation",
+                  "title": "Install the displays",
+                  "kind": "person",
+                  "capability": "installation",
+                  "unit": "person",
+                  "quantity": 2,
+                  "interval": {
+                    "start": 1792314000000,
+                    "end": 1792321200000
+                  },
+                  "instructions": "Build the displays using the boards and installation kit at the venue.",
+                  "dependsOn": []
+                },
+                {
+                  "id": "transport",
+                  "title": "Bring the artworks",
+                  "kind": "person",
+                  "capability": "artwork-transport",
+                  "unit": "person",
+                  "quantity": 1,
+                  "interval": {
+                    "start": 1792314000000,
+                    "end": 1792321200000
+                  },
+                  "instructions": "Bring the artworks from the synthetic studio. Transport includes carrying equipment.",
+                  "dependsOn": []
+                },
+                {
+                  "id": "hosting",
+                  "title": "Host the exhibition",
+                  "kind": "person",
+                  "capability": "hosting",
+                  "unit": "person",
+                  "quantity": 2,
+                  "interval": {
+                    "start": 1792321200000,
+                    "end": 1792335600000
+                  },
+                  "instructions": "Welcome visitors after display installation and artwork transport finish.",
+                  "dependsOn": [
+                    "installation",
+                    "transport"
+                  ]
+                }
+              ],
+              "instructions": "Synthetic library hall."
+            },
+            "offers": [
+              {
+                "publisherRoot": "local:ash",
+                "offerId": "hosting",
+                "offerHash": "0x2600cea803dcb2ac69a6b24a25432de816dcca0d761c83005d43bb4a21106caa"
+              },
+              {
+                "publisherRoot": "local:cedar",
+                "offerId": "installation",
+                "offerHash": "0x637674b7a676ab45bda27846f78f1ed76bcbd2a929325843ebbbf40cb10b7fc2"
+              },
+              {
+                "publisherRoot": "local:elm",
+                "offerId": "hosting",
+                "offerHash": "0x6b5fbe385601074c916bb5504d60acabf6a347683f8863e0340a737315afce43"
+              },
+              {
+                "publisherRoot": "local:library",
+                "offerId": "venue",
+                "offerHash": "0x07a0663d6d16e0b6d989ed3588341b08eaa80e68c6da139c613efc8470b228e3"
+              },
+              {
+                "publisherRoot": "local:makerspace",
+                "offerId": "boards-sunday",
+                "offerHash": "0x9e6bc8e22e5657de545dbe5e0aaaa28a7780b7b6becbeff34cfb494f09242ff6"
+              },
+              {
+                "publisherRoot": "local:makerspace",
+                "offerId": "kit",
+                "offerHash": "0xa7430f8c4c86d645e91069240be0f5e5a0635f44ef5ab3c65036500cad04126f"
+              },
+              {
+                "publisherRoot": "local:oak",
+                "offerId": "artwork-transport",
+                "offerHash": "0x8d9f9107099ee48c8cf1b70dfba462eeab1cecd07ca588db0b0de36e6703d8ac"
+              },
+              {
+                "publisherRoot": "local:willow",
+                "offerId": "installation",
+                "offerHash": "0x1cea5ac6917c5e6ac94fedc2e05ca7baf10b7748e17f4639b6eb9e9051d8591d"
+              }
+            ],
+            "resourceAssumptions": [
+              {
+                "publisherRoot": "local:ash",
+                "resourceId": "self",
+                "capacity": 1,
+                "unit": "person"
+              },
+              {
+                "publisherRoot": "local:cedar",
+                "resourceId": "self",
+                "capacity": 1,
+                "unit": "person"
+              },
+              {
+                "publisherRoot": "local:elm",
+                "resourceId": "self",
+                "capacity": 1,
+                "unit": "person"
+              },
+              {
+                "publisherRoot": "local:library",
+                "resourceId": "venue",
+                "capacity": 1,
+                "unit": "space"
+              },
+              {
+                "publisherRoot": "local:makerspace",
+                "resourceId": "boards",
+                "capacity": 6,
+                "unit": "board"
+              },
+              {
+                "publisherRoot": "local:makerspace",
+                "resourceId": "kit",
+                "capacity": 1,
+                "unit": "kit"
+              },
+              {
+                "publisherRoot": "local:oak",
+                "resourceId": "self",
+                "capacity": 1,
+                "unit": "person"
+              },
+              {
+                "publisherRoot": "local:willow",
+                "resourceId": "self",
+                "capacity": 1,
+                "unit": "person"
+              }
+            ],
+            "allocations": [
+              {
+                "id": "allocation:011fc639612514bcc3a2ec0b",
+                "requirementId": "installation",
+                "publisherRoot": "local:cedar",
+                "offerId": "installation",
+                "offerHash": "0x637674b7a676ab45bda27846f78f1ed76bcbd2a929325843ebbbf40cb10b7fc2",
+                "resourceId": "self",
+                "quantity": 1,
+                "unit": "person",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                }
+              },
+              {
+                "id": "allocation:1fa9a3b6ba47ed9501a25d83",
+                "requirementId": "boards",
+                "publisherRoot": "local:makerspace",
+                "offerId": "boards-sunday",
+                "offerHash": "0x9e6bc8e22e5657de545dbe5e0aaaa28a7780b7b6becbeff34cfb494f09242ff6",
+                "resourceId": "boards",
+                "quantity": 6,
+                "unit": "board",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792335600000
+                }
+              },
+              {
+                "id": "allocation:59452575acb19aee2e865102",
+                "requirementId": "venue",
+                "publisherRoot": "local:library",
+                "offerId": "venue",
+                "offerHash": "0x07a0663d6d16e0b6d989ed3588341b08eaa80e68c6da139c613efc8470b228e3",
+                "resourceId": "venue",
+                "quantity": 1,
+                "unit": "space",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792335600000
+                }
+              },
+              {
+                "id": "allocation:64aa7d9f65cc033e171adcd3",
+                "requirementId": "kit",
+                "publisherRoot": "local:makerspace",
+                "offerId": "kit",
+                "offerHash": "0xa7430f8c4c86d645e91069240be0f5e5a0635f44ef5ab3c65036500cad04126f",
+                "resourceId": "kit",
+                "quantity": 1,
+                "unit": "kit",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                }
+              },
+              {
+                "id": "allocation:66a412a45438ad85f74a2cef",
+                "requirementId": "hosting",
+                "publisherRoot": "local:elm",
+                "offerId": "hosting",
+                "offerHash": "0x6b5fbe385601074c916bb5504d60acabf6a347683f8863e0340a737315afce43",
+                "resourceId": "self",
+                "quantity": 1,
+                "unit": "person",
+                "interval": {
+                  "start": 1792321200000,
+                  "end": 1792335600000
+                }
+              },
+              {
+                "id": "allocation:8bf442159fbf583cd07bc361",
+                "requirementId": "transport",
+                "publisherRoot": "local:oak",
+                "offerId": "artwork-transport",
+                "offerHash": "0x8d9f9107099ee48c8cf1b70dfba462eeab1cecd07ca588db0b0de36e6703d8ac",
+                "resourceId": "self",
+                "quantity": 1,
+                "unit": "person",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                }
+              },
+              {
+                "id": "allocation:dbb1620ea959a36582e8c117",
+                "requirementId": "installation",
+                "publisherRoot": "local:willow",
+                "offerId": "installation",
+                "offerHash": "0x1cea5ac6917c5e6ac94fedc2e05ca7baf10b7748e17f4639b6eb9e9051d8591d",
+                "resourceId": "self",
+                "quantity": 1,
+                "unit": "person",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                }
+              },
+              {
+                "id": "allocation:f8a27daf0dbdfe14f5cd55f4",
+                "requirementId": "hosting",
+                "publisherRoot": "local:ash",
+                "offerId": "hosting",
+                "offerHash": "0x2600cea803dcb2ac69a6b24a25432de816dcca0d761c83005d43bb4a21106caa",
+                "resourceId": "self",
+                "quantity": 1,
+                "unit": "person",
+                "interval": {
+                  "start": 1792321200000,
+                  "end": 1792335600000
+                }
+              }
+            ],
+            "requiredApprovers": [
+              "local:ash",
+              "local:cedar",
+              "local:elm",
+              "local:library",
+              "local:makerspace",
+              "local:oak",
+              "local:willow"
+            ],
+            "conditions": [
+              {
+                "kind": "allowed_variants",
+                "variantIds": [
+                  "sunday"
+                ]
+              },
+              {
+                "kind": "allowed_venues",
+                "venueIds": [
+                  "library-hall"
+                ]
+              }
+            ],
+            "instructions": "Every publisher reviews the complete exact plan before accepting. This is a synthetic local practice project.",
+            "runbook": [
+              {
+                "kind": "task",
+                "id": "task:29598a37c77f7af6ff341ef0",
+                "title": "Install the displays",
+                "publisherRoot": "local:cedar",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                },
+                "allocationIds": [
+                  "allocation:011fc639612514bcc3a2ec0b"
+                ],
+                "dependsOn": [],
+                "instructions": "Build the displays using the boards and installation kit at the venue."
+              },
+              {
+                "kind": "task",
+                "id": "task:dc732efde6b519c35603b181",
+                "title": "Install the displays",
+                "publisherRoot": "local:willow",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                },
+                "allocationIds": [
+                  "allocation:dbb1620ea959a36582e8c117"
+                ],
+                "dependsOn": [],
+                "instructions": "Build the displays using the boards and installation kit at the venue."
+              },
+              {
+                "kind": "task",
+                "id": "task:4dac8fce0a6a00310d39647d",
+                "title": "Installation kit",
+                "publisherRoot": "local:makerspace",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                },
+                "allocationIds": [
+                  "allocation:64aa7d9f65cc033e171adcd3"
+                ],
+                "dependsOn": [],
+                "instructions": "The installation kit is already at the venue."
+              },
+              {
+                "kind": "task",
+                "id": "task:adb2e080b57f918379fae24e",
+                "title": "Bring the artworks",
+                "publisherRoot": "local:oak",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792321200000
+                },
+                "allocationIds": [
+                  "allocation:8bf442159fbf583cd07bc361"
+                ],
+                "dependsOn": [],
+                "instructions": "Bring the artworks from the synthetic studio. Transport includes carrying equipment."
+              },
+              {
+                "kind": "task",
+                "id": "task:ef30ec52c4b2c06d19da0173",
+                "title": "Display boards",
+                "publisherRoot": "local:makerspace",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792335600000
+                },
+                "allocationIds": [
+                  "allocation:1fa9a3b6ba47ed9501a25d83"
+                ],
+                "dependsOn": [],
+                "instructions": "Boards are already at the venue before setup."
+              },
+              {
+                "kind": "task",
+                "id": "task:3a22b0e1acc906ec96ba23c2",
+                "title": "Exhibition space",
+                "publisherRoot": "local:library",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792335600000
+                },
+                "allocationIds": [
+                  "allocation:59452575acb19aee2e865102"
+                ],
+                "dependsOn": [],
+                "instructions": ""
+              },
+              {
+                "kind": "task",
+                "id": "task:ebfdde385727d9cd1d89a5f2",
+                "title": "Host the exhibition",
+                "publisherRoot": "local:ash",
+                "interval": {
+                  "start": 1792321200000,
+                  "end": 1792335600000
+                },
+                "allocationIds": [
+                  "allocation:f8a27daf0dbdfe14f5cd55f4"
+                ],
+                "dependsOn": [
+                  "task:29598a37c77f7af6ff341ef0",
+                  "task:adb2e080b57f918379fae24e",
+                  "task:dc732efde6b519c35603b181"
+                ],
+                "instructions": "Welcome visitors after display installation and artwork transport finish."
+              },
+              {
+                "kind": "task",
+                "id": "task:2187b13bbd5fa101092a30e3",
+                "title": "Host the exhibition",
+                "publisherRoot": "local:elm",
+                "interval": {
+                  "start": 1792321200000,
+                  "end": 1792335600000
+                },
+                "allocationIds": [
+                  "allocation:66a412a45438ad85f74a2cef"
+                ],
+                "dependsOn": [
+                  "task:29598a37c77f7af6ff341ef0",
+                  "task:adb2e080b57f918379fae24e",
+                  "task:dc732efde6b519c35603b181"
+                ],
+                "instructions": "Welcome visitors after display installation and artwork transport finish."
+              },
+              {
+                "resourceId": "boards",
+                "quantity": 6,
+                "unit": "board",
+                "allocationIds": [
+                  "allocation:1fa9a3b6ba47ed9501a25d83"
+                ],
+                "dependsOn": [],
+                "instructions": "Count the six synthetic boards together.",
+                "kind": "handover",
+                "id": "handover-boards",
+                "transferId": "send-boards",
+                "title": "Hand over display boards",
+                "publisherRoot": "local:makerspace",
+                "giver": "local:makerspace",
+                "receiver": "local:cedar",
+                "interval": {
+                  "start": 1792314000000,
+                  "end": 1792314060000
+                }
+              },
+              {
+                "resourceId": "boards",
+                "quantity": 6,
+                "unit": "board",
+                "allocationIds": [
+                  "allocation:1fa9a3b6ba47ed9501a25d83"
+                ],
+                "dependsOn": [],
+                "instructions": "Count the six synthetic boards together.",
+                "kind": "return",
+                "id": "return-boards",
+                "transferId": "return-boards",
+                "title": "Return display boards",
+                "publisherRoot": "local:cedar",
+                "giver": "local:cedar",
+                "receiver": "local:makerspace",
+                "interval": {
+                  "start": 1792335540000,
+                  "end": 1792335600000
+                }
+              }
+            ],
+            "predecessor": null
+          },
+          "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+          "requirementsHash": "0x214602aa56b1670fcf8f34083ed1d9890e1e753e6f627a904feba06f22adb3be",
+          "changeExplanation": "Synthetic export example: one outstanding return acknowledgement."
+        },
+        "provenance": {
+          "mode": "local",
+          "creator": {
+            "kind": "local",
+            "id": "local-actor:coordinator"
+          },
+          "owner": {
+            "kind": "local",
+            "id": "local-actor:coordinator"
+          },
+          "readonly": true,
+          "permissionlessExtension": false,
+          "contentType": "application/json",
+          "createdAtBlock": null,
+          "expiresAtBlock": null,
+          "transactionHash": null
+        }
+      }
+    ],
+    "publishers": [
+      {
+        "root": {
+          "key": "local:library",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:library",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:library"
+            },
+            "kind": "organization"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:library"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:library"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-task-task:3a22b0e1acc906ec96ba23c2",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-task-task:3a22b0e1acc906ec96ba23c2",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:library",
+              "predecessorKeys": [
+                "local:sample-book:local:library"
+              ],
+              "name": "Library",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "venue",
+                  "name": "Library",
+                  "kind": "place",
+                  "unit": "space",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "capabilities": [
+                    "exhibition-space"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "venue",
+                  "title": "Library",
+                  "resourceId": "venue",
+                  "kind": "place",
+                  "unit": "space",
+                  "quantity": 1,
+                  "capabilities": [
+                    "exhibition-space"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [
+                    {
+                      "kind": "allowed_venues",
+                      "venueIds": [
+                        "library-hall"
+                      ]
+                    }
+                  ],
+                  "instructions": "Synthetic venue; setup and exhibition access included."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:library"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:library",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:library",
+                      "offerId": "venue",
+                      "offerHash": "0x07a0663d6d16e0b6d989ed3588341b08eaa80e68c6da139c613efc8470b228e3"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:59452575acb19aee2e865102",
+                      "requirementId": "venue",
+                      "publisherRoot": "local:library",
+                      "offerId": "venue",
+                      "offerHash": "0x07a0663d6d16e0b6d989ed3588341b08eaa80e68c6da139c613efc8470b228e3",
+                      "resourceId": "venue",
+                      "quantity": 1,
+                      "unit": "space",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792335600000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:library"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:3a22b0e1acc906ec96ba23c2",
+                  "operationId": "sample-task-task:3a22b0e1acc906ec96ba23c2",
+                  "obligationId": "task:3a22b0e1acc906ec96ba23c2",
+                  "author": "local:library",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:library",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:library",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:courtyard",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:courtyard",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:courtyard"
+            },
+            "kind": "organization"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:courtyard"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:courtyard"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:courtyard:book:initial",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "fixture-book:courtyard",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:courtyard",
+              "predecessorKeys": [],
+              "name": "Courtyard",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "venue",
+                  "name": "Courtyard",
+                  "kind": "place",
+                  "unit": "space",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    }
+                  ],
+                  "capabilities": [
+                    "exhibition-space"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "venue",
+                  "title": "Courtyard",
+                  "resourceId": "venue",
+                  "kind": "place",
+                  "unit": "space",
+                  "quantity": 1,
+                  "capabilities": [
+                    "exhibition-space"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [
+                    {
+                      "kind": "allowed_venues",
+                      "venueIds": [
+                        "courtyard"
+                      ]
+                    }
+                  ],
+                  "instructions": "Synthetic venue; setup and exhibition access included."
+                }
+              ],
+              "decisions": [],
+              "grants": [],
+              "attestations": [],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "kind": "local",
+                "id": "local-actor:courtyard"
+              },
+              "owner": {
+                "kind": "local",
+                "id": "local-actor:courtyard"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:makerspace",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:makerspace",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:makerspace"
+            },
+            "kind": "organization"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:makerspace"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:makerspace"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-give",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-give",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:makerspace",
+              "predecessorKeys": [
+                "local:sample-book:sample-task-task:ef30ec52c4b2c06d19da0173"
+              ],
+              "name": "Makerspace",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "boards",
+                  "name": "Display boards",
+                  "kind": "equipment",
+                  "unit": "board",
+                  "capacity": 6,
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "capabilities": [
+                    "display-board"
+                  ]
+                },
+                {
+                  "id": "kit",
+                  "name": "Installation kit",
+                  "kind": "equipment",
+                  "unit": "kit",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "capabilities": [
+                    "installation-kit"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "boards-saturday",
+                  "title": "Four boards on Saturday",
+                  "resourceId": "boards",
+                  "kind": "equipment",
+                  "unit": "board",
+                  "quantity": 4,
+                  "capabilities": [
+                    "display-board"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [
+                    {
+                      "kind": "allowed_variants",
+                      "variantIds": [
+                        "saturday"
+                      ]
+                    }
+                  ],
+                  "instructions": "Already at the Courtyard before 10:00."
+                },
+                {
+                  "id": "boards-sunday",
+                  "title": "Six boards on Sunday",
+                  "resourceId": "boards",
+                  "kind": "equipment",
+                  "unit": "board",
+                  "quantity": 6,
+                  "capabilities": [
+                    "display-board"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [
+                    {
+                      "kind": "allowed_variants",
+                      "variantIds": [
+                        "sunday"
+                      ]
+                    }
+                  ],
+                  "instructions": "Already at the Library before 10:00."
+                },
+                {
+                  "id": "kit",
+                  "title": "Installation kit",
+                  "resourceId": "kit",
+                  "kind": "equipment",
+                  "unit": "kit",
+                  "quantity": 1,
+                  "capabilities": [
+                    "installation-kit"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "Already at the venue."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:makerspace"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:makerspace",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:makerspace",
+                      "offerId": "boards-sunday",
+                      "offerHash": "0x9e6bc8e22e5657de545dbe5e0aaaa28a7780b7b6becbeff34cfb494f09242ff6"
+                    },
+                    {
+                      "publisherRoot": "local:makerspace",
+                      "offerId": "kit",
+                      "offerHash": "0xa7430f8c4c86d645e91069240be0f5e5a0635f44ef5ab3c65036500cad04126f"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:1fa9a3b6ba47ed9501a25d83",
+                      "requirementId": "boards",
+                      "publisherRoot": "local:makerspace",
+                      "offerId": "boards-sunday",
+                      "offerHash": "0x9e6bc8e22e5657de545dbe5e0aaaa28a7780b7b6becbeff34cfb494f09242ff6",
+                      "resourceId": "boards",
+                      "quantity": 6,
+                      "unit": "board",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792335600000
+                      }
+                    },
+                    {
+                      "id": "allocation:64aa7d9f65cc033e171adcd3",
+                      "requirementId": "kit",
+                      "publisherRoot": "local:makerspace",
+                      "offerId": "kit",
+                      "offerHash": "0xa7430f8c4c86d645e91069240be0f5e5a0635f44ef5ab3c65036500cad04126f",
+                      "resourceId": "kit",
+                      "quantity": 1,
+                      "unit": "kit",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792321200000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:makerspace"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:4dac8fce0a6a00310d39647d",
+                  "operationId": "sample-task-task:4dac8fce0a6a00310d39647d",
+                  "obligationId": "task:4dac8fce0a6a00310d39647d",
+                  "author": "local:makerspace",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                },
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:ef30ec52c4b2c06d19da0173",
+                  "operationId": "sample-task-task:ef30ec52c4b2c06d19da0173",
+                  "obligationId": "task:ef30ec52c4b2c06d19da0173",
+                  "author": "local:makerspace",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                },
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-give",
+                  "operationId": "sample-give",
+                  "obligationId": "handover-boards",
+                  "author": "local:makerspace",
+                  "recordedAt": 1791536400000,
+                  "kind": "transfer_report",
+                  "transferId": "send-boards",
+                  "action": "handover",
+                  "resourceId": "boards",
+                  "giver": "local:makerspace",
+                  "receiver": "local:cedar",
+                  "quantity": 6,
+                  "unit": "board",
+                  "statementHash": "0xd0767922fd5a8a3812f2121a416b7d720b29e9f1741a269de5f28596d424f381"
+                }
+              ],
+              "custodyHolds": [
+                {
+                  "id": "report:sample-give",
+                  "projectRoot": "local:small-works",
+                  "resourceId": "boards",
+                  "quantity": 6,
+                  "unit": "board",
+                  "source": {
+                    "projectRoot": "local:small-works",
+                    "activationKey": "local:export-example:activation",
+                    "proposalKey": "local:export-example:proposal",
+                    "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+                  },
+                  "transferId": "send-boards",
+                  "createdAt": 1791536400000,
+                  "status": "outstanding"
+                }
+              ],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:makerspace",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:makerspace",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:cedar",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:cedar",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:cedar"
+            },
+            "kind": "individual"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:cedar"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:cedar"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-return",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-return",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:cedar",
+              "predecessorKeys": [
+                "local:sample-book:sample-receive"
+              ],
+              "name": "Cedar",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "self",
+                  "name": "Cedar",
+                  "kind": "person",
+                  "unit": "person",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "capabilities": [
+                    "installation",
+                    "artwork-transport"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "installation",
+                  "title": "Install the displays",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "installation"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "One person, one simultaneous assignment."
+                },
+                {
+                  "id": "artwork-transport",
+                  "title": "Bring the artworks",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "artwork-transport"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "Transport artworks; carrying equipment included."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:cedar"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:cedar",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:cedar",
+                      "offerId": "installation",
+                      "offerHash": "0x637674b7a676ab45bda27846f78f1ed76bcbd2a929325843ebbbf40cb10b7fc2"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:011fc639612514bcc3a2ec0b",
+                      "requirementId": "installation",
+                      "publisherRoot": "local:cedar",
+                      "offerId": "installation",
+                      "offerHash": "0x637674b7a676ab45bda27846f78f1ed76bcbd2a929325843ebbbf40cb10b7fc2",
+                      "resourceId": "self",
+                      "quantity": 1,
+                      "unit": "person",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792321200000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:cedar"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:29598a37c77f7af6ff341ef0",
+                  "operationId": "sample-task-task:29598a37c77f7af6ff341ef0",
+                  "obligationId": "task:29598a37c77f7af6ff341ef0",
+                  "author": "local:cedar",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                },
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-receive",
+                  "operationId": "sample-receive",
+                  "obligationId": "handover-boards",
+                  "author": "local:cedar",
+                  "recordedAt": 1791536400000,
+                  "kind": "transfer_acknowledgement",
+                  "transferId": "send-boards",
+                  "action": "handover",
+                  "resourceId": "boards",
+                  "giver": "local:makerspace",
+                  "receiver": "local:cedar",
+                  "statementHash": "0xd0767922fd5a8a3812f2121a416b7d720b29e9f1741a269de5f28596d424f381",
+                  "acknowledgedQuantity": 6
+                },
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-return",
+                  "operationId": "sample-return",
+                  "obligationId": "return-boards",
+                  "author": "local:cedar",
+                  "recordedAt": 1791536400000,
+                  "kind": "transfer_report",
+                  "transferId": "return-boards",
+                  "action": "return",
+                  "resourceId": "boards",
+                  "giver": "local:cedar",
+                  "receiver": "local:makerspace",
+                  "quantity": 6,
+                  "unit": "board",
+                  "statementHash": "0x97c6af3073a1fe43cf2469c11afc728a9423cdbcbc50024bb5057932485c30e1"
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:cedar",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:cedar",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:willow",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:willow",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:willow"
+            },
+            "kind": "individual"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:willow"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:willow"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-task-task:dc732efde6b519c35603b181",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-task-task:dc732efde6b519c35603b181",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:willow",
+              "predecessorKeys": [
+                "local:sample-book:local:willow"
+              ],
+              "name": "Willow",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "self",
+                  "name": "Willow",
+                  "kind": "person",
+                  "unit": "person",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "capabilities": [
+                    "installation"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "installation",
+                  "title": "Install the displays",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "installation"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792227600000,
+                      "end": 1792234800000
+                    },
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "One person, one simultaneous assignment."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:willow"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:willow",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:willow",
+                      "offerId": "installation",
+                      "offerHash": "0x1cea5ac6917c5e6ac94fedc2e05ca7baf10b7748e17f4639b6eb9e9051d8591d"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:dbb1620ea959a36582e8c117",
+                      "requirementId": "installation",
+                      "publisherRoot": "local:willow",
+                      "offerId": "installation",
+                      "offerHash": "0x1cea5ac6917c5e6ac94fedc2e05ca7baf10b7748e17f4639b6eb9e9051d8591d",
+                      "resourceId": "self",
+                      "quantity": 1,
+                      "unit": "person",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792321200000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:willow"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:dc732efde6b519c35603b181",
+                  "operationId": "sample-task-task:dc732efde6b519c35603b181",
+                  "obligationId": "task:dc732efde6b519c35603b181",
+                  "author": "local:willow",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:willow",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:willow",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:ash",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:ash",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:ash"
+            },
+            "kind": "individual"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:ash"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:ash"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-task-task:ebfdde385727d9cd1d89a5f2",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-task-task:ebfdde385727d9cd1d89a5f2",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:ash",
+              "predecessorKeys": [
+                "local:sample-book:local:ash"
+              ],
+              "name": "Ash",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "self",
+                  "name": "Ash",
+                  "kind": "person",
+                  "unit": "person",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792234800000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792321200000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "capabilities": [
+                    "hosting"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "hosting",
+                  "title": "Host the exhibition",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "hosting"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792234800000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792321200000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "One person, one simultaneous assignment."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:ash"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:ash",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:ash",
+                      "offerId": "hosting",
+                      "offerHash": "0x2600cea803dcb2ac69a6b24a25432de816dcca0d761c83005d43bb4a21106caa"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:f8a27daf0dbdfe14f5cd55f4",
+                      "requirementId": "hosting",
+                      "publisherRoot": "local:ash",
+                      "offerId": "hosting",
+                      "offerHash": "0x2600cea803dcb2ac69a6b24a25432de816dcca0d761c83005d43bb4a21106caa",
+                      "resourceId": "self",
+                      "quantity": 1,
+                      "unit": "person",
+                      "interval": {
+                        "start": 1792321200000,
+                        "end": 1792335600000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:ash"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:ebfdde385727d9cd1d89a5f2",
+                  "operationId": "sample-task-task:ebfdde385727d9cd1d89a5f2",
+                  "obligationId": "task:ebfdde385727d9cd1d89a5f2",
+                  "author": "local:ash",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:ash",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:ash",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:elm",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:elm",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:elm"
+            },
+            "kind": "individual"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:elm"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:elm"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-task-task:2187b13bbd5fa101092a30e3",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-task-task:2187b13bbd5fa101092a30e3",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:elm",
+              "predecessorKeys": [
+                "local:sample-book:local:elm"
+              ],
+              "name": "Elm",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "self",
+                  "name": "Elm",
+                  "kind": "person",
+                  "unit": "person",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792234800000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792321200000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "capabilities": [
+                    "hosting"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "hosting",
+                  "title": "Host the exhibition",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "hosting"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792234800000,
+                      "end": 1792249200000
+                    },
+                    {
+                      "start": 1792321200000,
+                      "end": 1792335600000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "One person, one simultaneous assignment."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:elm"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:elm",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:elm",
+                      "offerId": "hosting",
+                      "offerHash": "0x6b5fbe385601074c916bb5504d60acabf6a347683f8863e0340a737315afce43"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:66a412a45438ad85f74a2cef",
+                      "requirementId": "hosting",
+                      "publisherRoot": "local:elm",
+                      "offerId": "hosting",
+                      "offerHash": "0x6b5fbe385601074c916bb5504d60acabf6a347683f8863e0340a737315afce43",
+                      "resourceId": "self",
+                      "quantity": 1,
+                      "unit": "person",
+                      "interval": {
+                        "start": 1792321200000,
+                        "end": 1792335600000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:elm"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:2187b13bbd5fa101092a30e3",
+                  "operationId": "sample-task-task:2187b13bbd5fa101092a30e3",
+                  "obligationId": "task:2187b13bbd5fa101092a30e3",
+                  "author": "local:elm",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:elm",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:elm",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      },
+      {
+        "root": {
+          "key": "local:oak",
+          "payload": {
+            "protocol": "partfolk/1",
+            "schemaVersion": 1,
+            "entityType": "publisher_root",
+            "operationId": "fixture-root:oak",
+            "createdAt": 1791536400000,
+            "publisher": {
+              "kind": "local",
+              "id": "local-actor:oak"
+            },
+            "kind": "individual"
+          },
+          "provenance": {
+            "mode": "local",
+            "creator": {
+              "kind": "local",
+              "id": "local-actor:oak"
+            },
+            "owner": {
+              "kind": "local",
+              "id": "local-actor:oak"
+            },
+            "readonly": true,
+            "permissionlessExtension": false,
+            "contentType": "application/json",
+            "createdAtBlock": null,
+            "expiresAtBlock": null,
+            "transactionHash": null
+          }
+        },
+        "book": {
+          "status": "unique",
+          "entity": {
+            "key": "local:sample-book:sample-task-task:adb2e080b57f918379fae24e",
+            "payload": {
+              "protocol": "partfolk/1",
+              "schemaVersion": 1,
+              "entityType": "book_state",
+              "operationId": "sample-task-task:adb2e080b57f918379fae24e",
+              "createdAt": 1791536400000,
+              "publisherRoot": "local:oak",
+              "predecessorKeys": [
+                "local:sample-book:local:oak"
+              ],
+              "name": "Oak",
+              "description": "Synthetic local practice contributor.",
+              "resources": [
+                {
+                  "id": "self",
+                  "name": "Oak",
+                  "kind": "person",
+                  "unit": "person",
+                  "capacity": 1,
+                  "availability": [
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "capabilities": [
+                    "artwork-transport"
+                  ]
+                }
+              ],
+              "offers": [
+                {
+                  "id": "artwork-transport",
+                  "title": "Bring the artworks",
+                  "resourceId": "self",
+                  "kind": "person",
+                  "unit": "person",
+                  "quantity": 1,
+                  "capabilities": [
+                    "artwork-transport"
+                  ],
+                  "availability": [
+                    {
+                      "start": 1792314000000,
+                      "end": 1792321200000
+                    }
+                  ],
+                  "projectScope": [],
+                  "conditions": [],
+                  "instructions": "Transport artworks; carrying equipment included."
+                }
+              ],
+              "decisions": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "status": "accepted",
+                  "decidedAt": 1791536400000,
+                  "operationId": "sample-accept-local:oak"
+                }
+              ],
+              "grants": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "sample-accept-local:oak",
+                  "protocol": "partfolk/1",
+                  "chainId": null,
+                  "offers": [
+                    {
+                      "publisherRoot": "local:oak",
+                      "offerId": "artwork-transport",
+                      "offerHash": "0x8d9f9107099ee48c8cf1b70dfba462eeab1cecd07ca588db0b0de36e6703d8ac"
+                    }
+                  ],
+                  "allocations": [
+                    {
+                      "id": "allocation:8bf442159fbf583cd07bc361",
+                      "requirementId": "transport",
+                      "publisherRoot": "local:oak",
+                      "offerId": "artwork-transport",
+                      "offerHash": "0x8d9f9107099ee48c8cf1b70dfba462eeab1cecd07ca588db0b0de36e6703d8ac",
+                      "resourceId": "self",
+                      "quantity": 1,
+                      "unit": "person",
+                      "interval": {
+                        "start": 1792314000000,
+                        "end": 1792321200000
+                      }
+                    }
+                  ],
+                  "validUntil": 1792335660000,
+                  "acceptedAt": 1791536400000,
+                  "operationId": "sample-accept-local:oak"
+                }
+              ],
+              "attestations": [
+                {
+                  "projectRoot": "local:small-works",
+                  "activationKey": "local:export-example:activation",
+                  "proposalKey": "local:export-example:proposal",
+                  "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a",
+                  "id": "report:sample-task-task:adb2e080b57f918379fae24e",
+                  "operationId": "sample-task-task:adb2e080b57f918379fae24e",
+                  "obligationId": "task:adb2e080b57f918379fae24e",
+                  "author": "local:oak",
+                  "recordedAt": 1791536400000,
+                  "kind": "task_report",
+                  "status": "done",
+                  "note": "Synthetic owner report for the example."
+                }
+              ],
+              "custodyHolds": [],
+              "retentionDays": 90
+            },
+            "provenance": {
+              "mode": "local",
+              "creator": {
+                "id": "local-actor:oak",
+                "kind": "local"
+              },
+              "owner": {
+                "id": "local-actor:oak",
+                "kind": "local"
+              },
+              "readonly": true,
+              "permissionlessExtension": false,
+              "contentType": "application/json",
+              "createdAtBlock": null,
+              "expiresAtBlock": null,
+              "transactionHash": null
+            }
+          }
+        },
+        "snapshot": {
+          "mode": "local",
+          "chainId": null,
+          "blockNumber": null,
+          "blockHash": null,
+          "blockTimestamp": 1791536400000,
+          "fetchedAt": 1791536400000,
+          "completeness": "complete",
+          "freshness": "fresh",
+          "source": "local",
+          "reasons": []
+        }
+      }
+    ],
+    "snapshot": {
+      "mode": "local",
+      "chainId": null,
+      "blockNumber": null,
+      "blockHash": null,
+      "blockTimestamp": 1791536400000,
+      "fetchedAt": 1791536400000,
+      "completeness": "complete",
+      "freshness": "fresh",
+      "source": "local",
+      "reasons": []
+    }
+  },
+  "readiness": {
+    "status": "changed",
+    "lifecycle": "closed",
+    "outcome": "completed_with_outstanding",
+    "evidenceAvailability": "available",
+    "reasons": [
+      {
+        "code": "closed_project"
+      }
+    ],
+    "requiredApprovers": [],
+    "acceptedApprovers": [],
+    "snapshot": {
+      "mode": "local",
+      "chainId": null,
+      "blockNumber": null,
+      "blockHash": null,
+      "blockTimestamp": 1791536400000,
+      "fetchedAt": 1791536400000,
+      "completeness": "complete",
+      "freshness": "fresh",
+      "source": "local",
+      "reasons": []
+    },
+    "source": {
+      "projectRoot": "local:small-works",
+      "activationKey": "local:export-example:activation",
+      "proposalKey": "local:export-example:proposal",
+      "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+    }
+  },
+  "snapshot": {
+    "mode": "local",
+    "chainId": null,
+    "blockNumber": null,
+    "blockHash": null,
+    "blockTimestamp": 1791536400000,
+    "fetchedAt": 1791536400000,
+    "completeness": "complete",
+    "freshness": "fresh",
+    "source": "local",
+    "reasons": []
+  },
+  "selection": {
+    "proposalKey": "local:export-example:proposal",
+    "source": {
+      "projectRoot": "local:small-works",
+      "activationKey": "local:export-example:activation",
+      "proposalKey": "local:export-example:proposal",
+      "proposalHash": "0x5e701ecbbca700ab31ba7a89968b49baab6e2870795fb362973be31df8e41d0a"
+    },
+    "status": "Closed record · completed with outstanding"
+  }
+}

@@ -1,5 +1,5 @@
 # 04 Проверить весь путь от предложения помощи до нового согласованного плана
-Status: todo
+Status: active
 
 После этапа три связанные работы — собрать проект, предложить свою помощь и выполнить согласованный план — проходят через общие реальные контракты. Локальная учебная история и публичные записи проверяются отдельно. Вторая независимая программа подтверждает, что библиотека действительно управляет своим предложением, а Arkiv хранит необходимое для восстановления текущего состояния.
 
@@ -18,7 +18,7 @@ Paths: tests/integration/
 
 **Состояния и восстановление.** Изменение входа делает старый вычисленный результат устаревшим; найденный план остаётся предложением. Pending/declined/withdrawn/expired/missing/conflict/unverified различимы. При обрыве ответа сохранены draft, operationId, замороженные параметры и намерение пользователя. Перезапуск восстанавливает незавершённую операцию и проверяет receipt/current state до повтора. Смена account/chain перед отправкой отменяет подготовленную отправку с сохранением черновика. Неполная загрузка страниц или RPC 429 не превращается в «предложений нет» и не оставляет текущий зелёный статус.
 
-**Невизуальная проверка интерфейсных контрактов.** Для RU/EN проверить наличие всех используемых ключей, совпадающие значения состояний и смысловые подписи в server-rendered HTML, если он есть; статически проверить связанные labels, назначение кнопок и доступные сообщения ошибок. Это не доказывает focus order, touch targets, читаемость, адаптивность или first-use comprehension: они остаются в явном пользовательском checklist. Серверные security и persistence проверки проверяют реальную серверную границу, не имитируют клики.
+**Невизуальная проверка интерфейсных контрактов.** Для English-only проверить наличие всех используемых ключей, совпадающие значения состояний и смысловые подписи в server-rendered HTML, если он есть; статически проверить связанные labels, назначение кнопок и доступные сообщения ошибок. Это не доказывает focus order, touch targets, читаемость, адаптивность или first-use comprehension: они остаются в явном пользовательском checklist. Серверные security и persistence проверки проверяют реальную серверную границу, не имитируют клики.
 
 ### 04.1.1 Доказать расчёт, полное согласие и минимальное исправление на связанных данных
 Status: todo
@@ -36,7 +36,7 @@ Status: todo
 ### 04.1.2 Восстановить работу после сбоев и доказать независимость партнёра
 Status: todo
 
-1. На server/adapter уровне воспроизвести wallet rejection, wrong chain, account switch, отмену до отправки, timeout после принятой транзакции, закрытие процесса после сохранения pending и обрыв после создания proposal до его promotion в project state. Для unknown outcome сначала найти tx/operationId и состояние; известный подтверждённый proposal использовать повторно, не создавать второй root/offer/proposal и не выдавать успех без доказательства. Сохранять known tx/proposal handles и точные predecessor keys вместе с черновиком.
+1. На server/adapter уровне воспроизвести wallet rejection, wrong chain, account switch, отмену до отправки, timeout после принятой транзакции, закрытие процесса после сохранения pending и обрыв после создания proposal до создания нового plan_activation с потреблением точного прежнего activation. Для unknown outcome сначала найти tx/operationId и состояние; известный подтверждённый proposal использовать повторно, не создавать второй root/offer/proposal и не выдавать успех без доказательства. Сохранять known tx/proposal handles и точные predecessor keys вместе с черновиком.
 2. Проверить два разделённых хранилища local practice/public draft. Учебная смена ролей меняет лишь синтетические данные. Public entry не принимает роль, подпись, owner label или acceptance, перенесённые из practice. Переход к публикации сохраняет собственные введённые поля, но не публикует от имени sample parties.
 3. Одновременно принять конфликтующие запросы к одному ресурсу в двух клиентах: capacity берётся из актуальной publisher book; stale predecessor приводит к reconciliation/rebase, а не к двум готовым планам. Уже подтверждённые pending reservations учитываются ещё до согласия всех других участников проекта.
 4. Запустить Partner Desk как отдельный процесс с собственной конфигурацией RPC и остановить studio server. Через его documented non-UI adapter/command boundary прочитать проект и собственную book, затем выполнить поддержанный авторизованный переход. Убедиться, что запросы не проходят через account/API studio и не читают его приватный storage. Повторно запущенный studio увидит тот же результат после нового полного snapshot.
@@ -101,4 +101,9 @@ Status: todo
 **Передача.** Один checkpoint: окончательный evidence manifest и вывод независимого verifier. Результат входит в schema/friction, README и submission только после фактической проверки. Root must gate/receipt uncertainty, неустранённый readiness дефект или неподтверждённая атомарность запрещают завершение задачи.
 
 
+
+
+
+
+Targeted acceptance from the explicit user review (existing04.1/04.2 scope): fresh independent process with no cache reconstructs P1→P2→P3 and diffs; P3 restoring P1 terms still parents P2 and needs fresh consent. Expire/delete book_state while publisher_root stays live, explicitly recover empty same-root book then redeclare availability; expired/invalid root requires new identity/readmission. Edit recipe on an agreed project before activation and assert new Needs are Draft changes—not agreed while the old immutable plan is separately inspectable. Cover reservation through planned equipment return. Existing independent Desk/CLI proof supports both OS and CR, with Studio stopped and no Studio API dependence; shared RPC limits remain explicit.
 

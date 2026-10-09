@@ -1,0 +1,16 @@
+.execution-workspace { gap: var(--space-8); }
+.execution-workspace h2, .execution-workspace h3, .execution-workspace p { margin-top: 0; }
+.execution-workspace .pf-stack { gap: var(--space-4); }
+.execution-duty { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr); gap: var(--space-6); padding: var(--space-6) 0; border-top: 1px solid var(--border-quiet); }
+.execution-duty-time { color: var(--text-secondary); font-size: .9rem; display: flex; flex-direction: column; gap: var(--space-2); }
+.execution-duty-content { min-width: 0; }
+.execution-duty-content header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3); }
+.execution-duty-content header h3 { flex: 1; min-width: 180px; }
+.execution-detail { display: block; font-size: .875rem; color: var(--text-secondary); }
+.execution-statement { padding: var(--space-4); border-left: 3px solid var(--border-control); background: var(--surface-inset); overflow-wrap: anywhere; }
+.execution-outstanding { color: var(--warning-text); font-weight: 500; }
+.execution-resource-list { padding-left: var(--space-6); }
+.execution-id { overflow-wrap: anywhere; font-size: .85rem; }
+.execution-repair, .execution-completion, .execution-exports { padding-top: var(--space-8); border-top: 1px solid var(--border-control); }
+.execution-duty .pf-actions { align-items: end; }
+@media (max-width: 680px) { .execution-duty { grid-template-columns: 1fr; gap: var(--space-3); } .execution-duty-time { flex-direction: row; flex-wrap: wrap; } .execution-workspace .pf-actions > * { max-width: 100%; } }

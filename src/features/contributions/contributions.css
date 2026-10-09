@@ -1,0 +1,12 @@
+.pf-contribution-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-4); }
+.pf-contribution-editor { margin: 0; min-width: 0; padding: var(--space-6); border: 1px solid var(--border-quiet); border-radius: var(--radius-control); }
+.pf-contribution-editor legend { padding: 0 var(--space-2); font-weight: 500; overflow-wrap: anywhere; }
+.pf-contribution-window { padding-block: var(--space-3); border-bottom: 1px solid var(--border-quiet); }
+.pf-contribution-details dl { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr); gap: var(--space-3); }
+.pf-contribution-details dd { margin: 0; overflow-wrap: anywhere; }
+.pf-contribution-identity { overflow-wrap: anywhere; }
+.pf-contribution-runbook { border-bottom: 1px solid var(--border-quiet); padding-bottom: var(--space-4); }
+.pf-contribution-reasons { margin: 0; padding-left: var(--space-6); }
+.pf-contribution-reasons li + li { margin-top: var(--space-2); }
+.pf-agreement summary, .pf-contribution-editor summary { min-height: 44px; padding-block: var(--space-3); cursor: pointer; }
+@media (max-width: 599px) { .pf-contribution-editor { padding: var(--space-4); } .pf-contribution-details dl { grid-template-columns: minmax(0, 1fr); } }

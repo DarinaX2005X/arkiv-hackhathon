@@ -1,0 +1,27 @@
+.pf-desk-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 18px; }
+.pf-desk-brand-detail { display: block; color: var(--text-secondary); font-size: 13px; line-height: 1.4; font-weight: 400; letter-spacing: .03em; }
+.pf-desk-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.pf-desk-nav a { color: var(--text-primary); display: flex; align-items: center; min-height: 44px; padding: 8px 16px; text-decoration: none; border-radius: var(--radius-control); }
+.pf-desk-nav a[aria-current='page'] { background: var(--selected-surface); color: var(--selected-text); text-decoration: underline; text-underline-offset: 4px; }
+.pf-desk-mode { background: var(--surface-inset); color: var(--text-secondary); font-size: 14px; }
+.pf-desk-mode-inner { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; padding-block: 10px; }
+.pf-desk-main { min-height: 65vh; padding-block: 32px 64px; }
+.pf-desk-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; }
+.pf-desk-account > .pf-stack:last-child { align-items: flex-start; max-width: 270px; }
+.pf-desk-account .pf-secondary { max-width: 76ch; font-size: 14px; }
+.pf-desk-identity, .pf-desk-references dd { overflow-wrap: anywhere; font-size: 14px; }
+.pf-desk-open { border-block: 1px solid var(--border-quiet); padding-block: 16px; }
+.pf-desk-open summary { width: fit-content; min-height: 32px; color: var(--brand-ink); font-weight: 500; cursor: pointer; }
+.pf-desk-open form { padding-top: 16px; }
+.pf-desk-inputs { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 3fr); align-items: start; gap: 16px; }
+.pf-desk-references { margin: 12px 0; }
+.pf-desk-references dt { font-weight: 600; }
+.pf-desk-references dd { margin: 0 0 8px; }
+.pf-desk-historical-row { display: grid; gap: 8px; border-top: 1px solid var(--border-quiet); padding-top: 16px; }
+.pf-desk-help { max-width: 900px; }
+.pf-desk-help > section { border-top: 1px solid var(--border-quiet); padding-top: 24px; }
+.pf-desk-footer { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: start; gap: 24px; padding-block: 32px; border-top: 1px solid var(--border-quiet); color: var(--text-secondary); font-size: 14px; }
+.pf-desk-skip { position: absolute; left: 16px; top: -100px; z-index: 50; min-height: 44px; padding: 10px 16px; background: var(--surface-work); color: var(--text-primary); }
+.pf-desk-skip:focus { top: 8px; }
+@media (max-width: 959px) { .pf-desk-header { align-items: flex-start; } .pf-desk-account { grid-template-columns: 1fr; } }
+@media (max-width: 599px) { .pf-desk-header { display: grid; gap: 12px; } .pf-desk-nav { gap: 4px; } .pf-desk-nav a { padding-inline: 12px; } .pf-desk-mode-inner { display: grid; gap: 4px; } .pf-desk-inputs { grid-template-columns: 1fr; } .pf-desk-main { padding-top: 24px; } .pf-desk-account { padding: 16px; border: 1px solid var(--border-quiet); } }

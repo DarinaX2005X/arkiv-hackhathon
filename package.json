@@ -1,14 +1,40 @@
 {
-  "name": "arkiv-hackathon",
+  "name": "partfolk",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Arkiv Global Tour Stop project. Concept selection and verified SDK bootstrap in progress.",
+  "description": "Partfolk: bring people, places and equipment into one workable plan.",
   "engines": {
     "node": ">=22.12.0"
   },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:bootstrap": "node --test tests/first-write.test.mjs tests/atomic-transition.test.mjs",
+    "build": "vite build",
+    "build:desk": "vite build --config vite.desk.config.ts",
+    "dev:desk": "vite --config vite.desk.config.ts",
+    "preview": "vite preview",
+    "preview:desk": "vite preview --config vite.desk.config.ts",
+    "verify": "tsx src/cli/verify.ts",
+    "check": "npm run typecheck && npm run test:unit && npm run test:bootstrap && npm run build && npm run build:desk"
+  },
   "dependencies": {
     "@arkiv-network/sdk": "0.8.1",
+    "@js-temporal/polyfill": "0.5.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
   }
 }

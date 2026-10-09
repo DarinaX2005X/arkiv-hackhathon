@@ -74,3 +74,5 @@ Status: todo
 **Передача.** Read-only checkpoint: итог review, доказанные closure, актуальные ограничения и список оставшихся user/external gates. Только после этого начинается окончательная редактура README и handoff.
 
 
+
+

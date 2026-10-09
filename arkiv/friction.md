@@ -91,3 +91,17 @@ Observed: A creation succeeded at block352006, tx `0x0170cf0c6534e5b1bdaf470a8ac
 Evidence: [atomic-transition.json](evidence/atomic-transition.json). No paid stale transaction was sent. A mined failed-batch rollback was NOT tested; all-or-none execution is the official protocol guarantee. This supports a same-owner current-book transition precondition, not a native patch CAS, resource truth or atomic agreement across multiple owners. Readonly A was in fact deleted in this experiment, extending the earlier source-only finding with a live observation.
 
 Suggested documentation improvement: show a complete immutable current-state replacement example, explain the exact stale predecessor error and separate this pattern from multi-owner locking. The API exposed the necessary primitives successfully; no SDK mutation failure is claimed.
+
+## Public adapter and independent verifier
+
+The Partfolk reader/writer uses SDK 0.8.1 with viem 2.57.4. The injected-wallet port, operation journal, scoped reader, and receipt verifier have been exercised with real SDK serialization against deterministic fake JSON-RPC responses. These are unit/contract checks, not additional live writes. UI and browser behavior remain user-owned verification.
+
+Observed in installed source and reproduced with a fake provider: a viem send path may try `wallet_sendTransaction` after `eth_sendTransaction`. The port guards both methods and permits at most one forwarded request after recording admission. A generic lost response must not trigger a fallback resend. A fake-provider test verifies this guard and immediate hash checkpointing. This is defensive integration behavior, not a claim of a duplicated real transaction.
+
+Observed in SDK mutation behavior: the ergonomic mutation action couples sending to receipt processing. The wallet boundary captures the provider hash and stops that internal wait so independent official-RPC verification owns the result. Its explicit receipt wait disables replacement following (`checkReplacement:false`); a different transaction must not silently become success for a frozen application intent.
+
+Fault tests exposed and repaired verifier omissions around per-log transaction/block provenance, removed logs, duplicate created keys, and inconsistent block-number headers. The final verifier compares each event to its receipt and independently fetches the canonical header. These failures were deliberately constructed fixtures, not observed faults of the Tiramisu node.
+
+Read behavior is conservative: one block for every page/reference; one bounded cursor restart without mixing accumulated pages; scoped conflict detection; exact creator/owner/readonly validation; no latest-revision selection; history gaps separate from current agreement confidence. Reader tests cover natural expiry, incomplete pages, scope poisoning, activation replay, missing historical proposals, and terminal closure.
+
+Read-only CLI observation on 9 October 2026: direct invocation `node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability atomic --json` successfully read the historical B probe at block 353367 and explicitly returned `productProof:false`. On this Windows shell, the installed npm PowerShell wrapper dropped double-dash option arguments for an attempted `npm run verify -- --inspect-capability ...` invocation. The direct Node invocation avoids that wrapper. This CLI capability inspection is not a Partfolk project validation.

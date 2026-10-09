@@ -1,0 +1,27 @@
+import { defineCatalog } from './index';
+
+export const shellCopy = defineCatalog({
+  brand: 'Partfolk', tagline: 'Everyone brings a part.',
+  skip: 'Skip to main content', navigation: 'Main navigation', projects: 'Projects',
+  contributions: 'My contributions', requests: 'Requests', help: 'Help',
+  localMode: 'Local work · nothing published', publicMode: 'Public project view',
+  disconnected: 'Wallet not connected',
+  heading: 'Bring people, places and equipment into one workable plan.',
+  description: 'Turn offers from different communities into a shared plan. Everyone confirms their part, and you can see what needs replacing when things change.',
+  foundationTitle: 'The workspace foundation is ready.',
+  foundationBody: 'Project planning and contribution tools are being connected. This build does not publish offers or record agreement yet.',
+  workspaceTitle: 'Projects', workspaceBody: 'Your project tools will appear here as they are connected. No sample projects have been added to your work.',
+  contributionTitle: 'My contributions', contributionBody: 'Your offers and commitments will appear here when contribution tools are connected.',
+  requestsTitle: 'Requests', requestsBody: 'Project requests will appear here once independent discovery is connected.',
+  helpTitle: 'Work together, with clear ownership.',
+  helpBody: 'People and partners control their own offers and decisions. A possible plan becomes agreed only after every required owner accepts the exact current version.',
+  helpPrivacy: 'Published project and contribution details are public. A project link does not make them private. Local work remains on this device until you explicitly publish it.',
+  missingTitle: 'This page is not available.', missingBody: 'Check the project link, or return to Projects.',
+  pendingTitle: 'This project tool is being connected.', pendingBody: 'The link is preserved. No publication or agreement has been recorded by opening it.',
+  storageTitle: 'Your work could not be saved on this device.',
+  storageBody: 'Current work remains in memory. Export it before closing this page.',
+  recoveryTitle: 'Saved data needs recovery.',
+  recoveryBody: 'The saved format could not be read safely. It has been preserved. Export the original data before replacing it.',
+  exportRecovery: 'Export original saved data',
+  implementationNote: 'Interface appearance and browser interaction have not yet been verified by the user.',
+});

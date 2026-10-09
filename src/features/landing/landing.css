@@ -1,0 +1,54 @@
+.pf-landing { max-width: 1280px; width: 100%; margin-inline: auto; display: grid; gap: var(--space-24); padding-block: var(--space-4) var(--space-8); }
+.pf-landing-hero { display: grid; grid-template-columns: minmax(0, .93fr) minmax(0, 1.07fr); align-items: start; gap: var(--space-12); }
+.pf-landing-intro { display: grid; gap: var(--space-6); padding-block: var(--space-6); }
+.pf-landing-intro h1 { max-width: 18ch; font-size: clamp(36px, 4.6vw, 64px); line-height: 1.03; font-weight: 500; color: var(--brand-ink); }
+.pf-landing-description { max-width: 46ch; }
+.pf-landing-intro > .pf-field-message { margin-top: calc(-1 * var(--space-3)); }
+.pf-landing-return { display: grid; gap: var(--space-1); padding-top: var(--space-4); border-top: 1px solid var(--border-quiet); }
+.pf-landing-return > span { color: var(--text-secondary); font-size: 14px; }
+.pf-landing-sheet { margin: 0; }
+.pf-landing-sheet h2 { font-size: 32px; line-height: 1.125; color: var(--brand-ink); }
+.pf-landing-coverage { border-collapse: collapse; width: 100%; margin-top: var(--space-6); text-align: left; table-layout: fixed; }
+.pf-landing-coverage thead th { padding-block: var(--space-2); font-size: 14px; font-weight: 500; color: var(--text-secondary); border-bottom: 1px solid var(--border-quiet); }
+.pf-landing-coverage th:first-child { width: 58%; padding-right: var(--space-4); }
+.pf-landing-coverage tbody th, .pf-landing-coverage td { padding-block: var(--space-3); border-bottom: 1px solid var(--border-quiet); vertical-align: top; overflow-wrap: anywhere; }
+.pf-landing-coverage tbody th { font-weight: 500; }
+.pf-landing-row-detail { display: block; margin-top: var(--space-1); color: var(--text-secondary); font-size: 14px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.pf-landing-owner { display: block; border-left: 2px solid var(--action); padding-left: var(--space-2); }
+.pf-landing-owner + .pf-landing-owner { margin-top: var(--space-1); }
+.pf-landing-owner-quantity { display: block; color: var(--text-secondary); font-size: 14px; }
+.pf-landing-sheet-note { padding-top: var(--space-4); }
+.pf-landing-story { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, 1.25fr); gap: var(--space-24); }
+.pf-landing-story > .pf-stack { align-self: start; }
+.pf-landing-story h2, .pf-landing-ownership h2, .pf-landing-close h2 { font-size: clamp(28px, 2.6vw, 36px); line-height: 1.15; color: var(--brand-ink); max-width: 24ch; }
+.pf-landing-sequence { display: grid; gap: var(--space-6); padding: 0; margin: 0; list-style: none; }
+.pf-landing-sequence li { display: grid; grid-template-columns: var(--space-8) minmax(0, 1fr); gap: var(--space-4); padding-bottom: var(--space-6); border-bottom: 1px solid var(--border-quiet); }
+.pf-landing-sequence li:last-child { padding-bottom: 0; border-bottom: 0; }
+.pf-landing-sequence h3 { margin-bottom: var(--space-2); }
+.pf-landing-step-number { color: var(--action); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pf-landing-ownership { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, 1.25fr); gap: var(--space-24); padding-block: var(--space-12); border-top: 1px solid var(--border-quiet); border-bottom: 1px solid var(--border-quiet); }
+.pf-landing-ownership .pf-actions { gap: var(--space-4) var(--space-6); }
+.pf-landing-close { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); }
+.pf-landing-close p { margin-top: var(--space-4); max-width: 48ch; }
+@media (max-width: 1100px) {
+  .pf-landing-hero { gap: var(--space-8); }
+  .pf-landing-story, .pf-landing-ownership { gap: var(--space-12); }
+  .pf-landing-close { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 959px) {
+  .pf-landing { gap: var(--space-16); }
+  .pf-landing-hero { grid-template-columns: minmax(0, 1fr); }
+  .pf-landing-intro { padding-top: 0; }
+  .pf-landing-intro h1 { max-width: 18ch; }
+  .pf-landing-description { max-width: 60ch; }
+  .pf-landing-sheet { max-width: 760px; }
+  .pf-landing-story, .pf-landing-ownership { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
+  .pf-landing-story > .pf-stack, .pf-landing-ownership > .pf-stack { max-width: 68ch; }
+}
+@media (max-width: 599px) {
+  .pf-landing { gap: var(--space-12); padding-top: 0; }
+  .pf-landing-intro h1 { font-size: 36px; }
+  .pf-landing-coverage th:first-child { width: 58%; padding-right: var(--space-3); }
+  .pf-landing-sequence li { grid-template-columns: var(--space-6) minmax(0, 1fr); gap: var(--space-3); }
+  .pf-landing-ownership { padding-block: var(--space-8); }
+}

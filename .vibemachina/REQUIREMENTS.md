@@ -14,10 +14,12 @@
 | R10 | Dual handover/return, accurate completion exceptions and cancellation | agent: equipment workflow needs actual closing semantics | accepted | 01.2, 03.1, 04.1, 05.1, 05.2 | Sender alone cannot confirm receipt; cancellation does not edit owner grant |
 | R11 | Useful versioned exports and fresh recipe reuse | BRIEF: usable result and reproducibility; agent reusable cycle | accepted | 03.1, 04.1, 05.1, 05.2 | Export identifies status/version/timezone; reuse strips dates/grants/receipts |
 | R12 | Local practice/custom drafts, public boundaries, pending/retry recovery | BRIEF: ordinary user can test; agent wallet boundary | accepted | 01.1, 01.3, 02.1, 02.2, 03.1, 03.2, 03.3, 04.1, 05.1, 05.2 | No wallet practice; no local consent promotion; cancelled/unknown writes retained |
-| R13 | Original design, consistent mark/tokens, complete RU/EN, accessibility and narrow screens | BRIEF: excellent design; VibeMachina; user Russian | accepted | 01.1, 02.1, 02.2, 03.1, 03.2, 03.3, 04.1, 05.1, 05.2 | Token/locale checks and user keyboard/narrow-screen review; no fake visual claim |
+| R13 | Original design, consistent mark/tokens, complete English-only, accessibility and narrow screens | BRIEF: excellent design; VibeMachina; direct user decision9Oct: product English-only | accepted | 01.1, 02.1, 02.2, 03.1, 03.2, 03.3, 04.1, 05.1, 05.2 | Token/English-copy checks and user keyboard/narrow-screen review; no fake visual claim |
 | R14 | Real independent Partner Desk and verifier CLI, documented open protocol | BRIEF: why/how Arkiv and Open Source track; agent proof | accepted | 01.3, 03.2, 03.3, 04.1, 04.2, 05.1, 05.2, 06.1 | Separate build/process works against RPC without Studio server/API |
 | R15 | Maintain repository-relative arkiv/schema.md and arkiv/friction.md honestly | BRIEF explicit required paths | accepted | 01.3, 04.2, 05.1, 05.2, 06.1 | Exact entities/typed queries/expiry plus observed failures and receipt links |
 | R16 | Official rubric/admission, authentic demo wallets/tx evidence and short reproducible demo | BRIEF official priority; upstream rules | accepted | 04.2, 05.1, 05.2, 06.1, 06.2 | Gate checklist with evidence; main Open Source; India excluded |
 | R17 | Separate preserved private Git, MIT, substantial README, deploy and submission materials | BRIEF structure; user Git URL and visibility choice | accepted | 05.1, 05.2, 06.1, 06.2 | Clean npm ci/check; reachable public site; user handles visibility/form |
 | R18 | User owns every visual/browser check; delegated delivery with meaningful checkpoints | AGENTS and explicit VibeMachina invocation | accepted | 04.1, 05.1, 05.2, 06.2 | No UI automation; findings preserved; scoped commits and honest pending visual status |
+
+
 

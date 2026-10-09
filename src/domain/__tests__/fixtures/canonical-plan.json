@@ -1,0 +1,65 @@
+{
+  "name": "partfolk/1 complete public material document",
+  "expectedHash": "0x36a80afbb3232bf3fa635c507480ce9ceb9d52bfae5e8ea7008b44b2a02dee39",
+  "plan": {
+    "protocol": "partfolk/1",
+    "validationVersion": 1,
+    "chainId": 7738577,
+    "projectRoot": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "outcome": "A small exhibition",
+    "variant": {
+      "id": "sunday",
+      "title": "Sunday",
+      "venueId": "library",
+      "timeZone": "Europe/London",
+      "requirements": [{
+        "id": "host",
+        "title": "Host the exhibition",
+        "kind": "person",
+        "capability": "hosting",
+        "unit": "person",
+        "quantity": 1,
+        "interval": { "start": 1792321200000, "end": 1792335600000 },
+        "instructions": "Welcome visitors.",
+        "dependsOn": []
+      }],
+      "instructions": "Meet inside the venue."
+    },
+    "offers": [{
+      "publisherRoot": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "offerId": "hosting",
+      "offerHash": "0x3333333333333333333333333333333333333333333333333333333333333333"
+    }],
+    "resourceAssumptions": [{
+      "publisherRoot": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "resourceId": "self",
+      "capacity": 1,
+      "unit": "person"
+    }],
+    "allocations": [{
+      "id": "allocation-host",
+      "requirementId": "host",
+      "publisherRoot": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "offerId": "hosting",
+      "offerHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+      "resourceId": "self",
+      "quantity": 1,
+      "unit": "person",
+      "interval": { "start": 1792321200000, "end": 1792335600000 }
+    }],
+    "requiredApprovers": ["0x2222222222222222222222222222222222222222222222222222222222222222"],
+    "conditions": [],
+    "instructions": "Synthetic canonical interoperability vector; no consent asserted.",
+    "runbook": [{
+      "kind": "task",
+      "id": "task-host",
+      "title": "Host the exhibition",
+      "publisherRoot": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "interval": { "start": 1792321200000, "end": 1792335600000 },
+      "allocationIds": ["allocation-host"],
+      "dependsOn": [],
+      "instructions": "Welcome visitors."
+    }],
+    "predecessor": null
+  }
+}
