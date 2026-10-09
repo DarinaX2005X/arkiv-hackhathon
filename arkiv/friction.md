@@ -79,3 +79,15 @@ Actual gas used: 101712. Actual total fee and observed account balance delta: 0.
 Elapsed from the task's practical setup start at approximately 12:39 UTC to confirmed read-back at 13:19 UTC: approximately 40 minutes, including parallel research and a manual faucet step. Do not interpret this as SDK installation or transaction latency alone.
 
 Observed friction: the SDK's ergonomic mutation method also performs preparation, signing and sending, so an estimate-only helper needs a read-method allowlist, a signing guard, and interception of `eth_estimateGas`. The first-write skill provides this pattern. A first-class public prepare/estimate API returning the exact mutation calldata and fee cap would make safe first-use tooling simpler. No write failure is claimed: the bounded first send succeeded.
+
+## Native consume-and-replace experiment
+
+Surface: SDK0.8.1 executeBatch and official Tiramisu RPC. Observed9October2026; helper `scripts/probe-atomic-transition.mjs`, guards `tests/atomic-transition.test.mjs`. The helper admits only one frozen phase per explicit --broadcast invocation; default never signs or sends. Both phases combined have a0.003testGLM cap inside the overall0.1testGLM ceiling.
+
+Expected: create readonly A; atomically create B and delete exact A; a stale create C/delete A estimate must decode the exact EntityNotFound(A) custom error. A generic RPC failure cannot count as passing evidence.
+
+Observed: A creation succeeded at block352006, tx `0x0170cf0c6534e5b1bdaf470a8acc119f45949629283cd751e332f668f84069fd`. B creation/A deletion succeeded at block352065, tx `0x80e46f7b11e8e413f75a696484524b976f95bb4da695816ed56cd6737268925a`. A stale estimate returned selector0x66a89f2a with the exact deleted A key. The complete creator-scoped query at block352164 contained only the exact B payload and flags; no A or C. Actual probe fee0.000224464000448928testGLM; aggregate including bootstrap0.000326176000652352testGLM. Guard suite19/19 passed.
+
+Evidence: [atomic-transition.json](evidence/atomic-transition.json). No paid stale transaction was sent. A mined failed-batch rollback was NOT tested; all-or-none execution is the official protocol guarantee. This supports a same-owner current-book transition precondition, not a native patch CAS, resource truth or atomic agreement across multiple owners. Readonly A was in fact deleted in this experiment, extending the earlier source-only finding with a live observation.
+
+Suggested documentation improvement: show a complete immutable current-state replacement example, explain the exact stale predecessor error and separate this pattern from multi-owner locking. The API exposed the necessary primitives successfully; no SDK mutation failure is claimed.

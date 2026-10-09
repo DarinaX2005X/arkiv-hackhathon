@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "status": "verified",
+  "chainId": 7738577,
+  "sdkVersion": "0.8.1",
+  "probeId": "20261009_sdk081_6267ab77",
+  "creator": "0x6267AB770266dA229130a2a75a52A9d578Fb0A5b",
+  "observedAt": "2026-10-09T13:54:28.086Z",
+  "parameterSha256": "03913dc8f9fc8d15caaf642d70cf8ccd6920c0998d53a23036c92e33a035fe91",
+  "keys": {
+    "A": "0x725eba68b95b3d5f8de608d748442091ebcf71c44c87cb15599305ec64124d8f",
+    "B": "0x5f29b503534f990b2dbbbe81f027c121379ebf1a3488fbac964880f547ec12f0",
+    "C": "0xf4e900fa56b9989f196b53cee9a7ed2abb1bbc5acc9179e47e7b11e32c7887a7"
+  },
+  "phases": [
+    {
+      "state": "A",
+      "transactionHash": "0x0170cf0c6534e5b1bdaf470a8acc119f45949629283cd751e332f668f84069fd",
+      "receiptBlock": "352006",
+      "blockHash": "0xf7c0ea45836cd39610b54e00e81e3dc2e374e8ee70c9ad2506b1b5c3842691b4",
+      "actualFeeWei": "107240000214480"
+    },
+    {
+      "state": "B",
+      "transactionHash": "0x80e46f7b11e8e413f75a696484524b976f95bb4da695816ed56cd6737268925a",
+      "receiptBlock": "352065",
+      "blockHash": "0x1e877ac5e418081016ec3ec44fd225a4e3c76755910d77bd550ea57523b942c5",
+      "actualFeeWei": "117224000234448"
+    }
+  ],
+  "proof": {
+    "AAbsent": true,
+    "BExactAndLive": true,
+    "CAbsent": true,
+    "snapshotBefore": "352164",
+    "snapshotAfter": "352164",
+    "staleEstimate": {
+      "status": "rejected_missing_entity",
+      "entityKey": "0x725eba68b95b3d5f8de608d748442091ebcf71c44c87cb15599305ec64124d8f",
+      "revertData": "0x66a89f2a725eba68b95b3d5f8de608d748442091ebcf71c44c87cb15599305ec64124d8f"
+    },
+    "staleBroadcast": false,
+    "minedRollbackTested": false
+  },
+  "budget": {
+    "maximumProbeTestGlm": "0.003",
+    "probeSpentWei": "224464000448928",
+    "probeSpentTestGlm": "0.000224464000448928",
+    "bootstrapSpentWei": "101712000203424",
+    "approvedGlobalTestGlm": "0.1"
+  },
+  "limitation": "Stale batch rejection is verified through eth_estimateGas. Reverted mined-batch atomicity relies on official protocol documentation."
+}
