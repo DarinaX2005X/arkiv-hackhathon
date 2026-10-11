@@ -1,9 +1,10 @@
 import { ENTITY_EVENTS_ABI, ExpirationTime } from '@arkiv-network/sdk';
+import type { Entity } from '@arkiv-network/sdk';
 import { eq, } from '@arkiv-network/sdk/query';
 import { key } from '@arkiv-network/sdk/attr';
 import { decodeEventLog } from 'viem';
 import { canonicalJson } from '../../domain/canonical';
-import type { EntityPayload, EntityRecord, PublicEntityKey, Snapshot, TransactionHash } from '../../domain/types';
+import type { AccountAddress, EntityKey, EntityPayload, EntityProvenance, EntityRecord, PublicEntityKey, Snapshot, TransactionHash } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { OperationReceipt } from '../types';
 import type { StoredOperationStep } from '../operations';
@@ -11,7 +12,21 @@ import type { NativeAttribute, NativeBatch } from '../wallet';
 import { ARKIV_ADDRESS } from './client';
 import { assertArkiv, ArkivRepositoryError } from './errors';
 import { decodeEntity, entityType, NAMESPACE, payloadAttributes, publicAddress, publicKey, sameIdentity, validatePayloadForNetwork } from './envelope';
-import type { ArkivReader } from './reader';
+import type { ArkivReader, ReadContext } from './reader';
+
+/** An extension changes its payload codec; transaction and provenance verification stay identical. */
+export interface VerificationRecord { key: EntityKey; payload: { entityType: string }; provenance: EntityProvenance }
+export interface VerificationCodec<R extends VerificationRecord> {
+  namespace: string;
+  validate(value: unknown): R['payload'];
+  decode(raw: Entity, snapshot: Snapshot, creator: AccountAddress, expectedKey?: PublicEntityKey): R;
+  read(reader: ArkivReader, context: ReadContext, entityKey: PublicEntityKey, payload: R['payload'], creator: AccountAddress): Promise<R | null>;
+}
+const CORE_CODEC: VerificationCodec<EntityRecord> = {
+  namespace: NAMESPACE, validate: validatePayloadForNetwork,
+  decode: (raw, snapshot, creator, expectedKey) => decodeEntity(raw, entityType(raw.attributes?.entity_type?.value), snapshot, creator, expectedKey),
+  read: (reader, context, entityKey, payload, creator) => reader.entity(context, entityKey, payload.entityType, creator),
+};
 
 export function nativeCreate(payloadInput: EntityPayload, lifetimeSeconds: number): NonNullable<NativeBatch['creates']>[number] {
   const payload = validatePayloadForNetwork(payloadInput);
@@ -28,19 +43,18 @@ export function nativeCreate(payloadInput: EntityPayload, lifetimeSeconds: numbe
   return { payloadJson: canonicalJson(payload), attributes, lifetimeSeconds, salt: '0' };
 }
 
-async function recoverHash(reader: ArkivReader, record: StoredOperationStep): Promise<TransactionHash | null> {
+async function recoverHash<R extends VerificationRecord>(reader: ArkivReader, record: StoredOperationStep, codec: VerificationCodec<R>): Promise<TransactionHash | null> {
   if (record.submissionHash) return record.submissionHash;
   if (record.step.transactionHash) return record.step.transactionHash;
   if (!record.admission || !record.prepared || !record.batch.creates?.length) return null;
   const context = await reader.context();
-  const rows = await reader.query(context, [eq('project', NAMESPACE), eq('operation_id', record.step.id)], record.prepared.account);
+  const rows = await reader.query(context, [eq('project', codec.namespace), eq('operation_id', record.step.id)], record.prepared.account);
   if (!rows.length) return null; // Absence cannot establish that an admitted send never happened.
   assertArkiv(rows.length === record.batch.creates.length, 'unverified', 'conflicting_heads', 'The operation ID has ambiguous creation results.');
   const expectedPayloads = record.batch.creates.map(create => create.payloadJson).sort();
   const actualPayloads: string[] = [];
   for (const row of rows) {
-    const type = entityType(row.attributes?.entity_type?.value);
-    actualPayloads.push(canonicalJson(decodeEntity(row, type, context.snapshot, record.prepared.account).payload));
+    actualPayloads.push(canonicalJson(codec.decode(row, context.snapshot, record.prepared.account).payload));
   }
   assertArkiv(canonicalJson(actualPayloads.sort()) === canonicalJson(expectedPayloads), 'unverified', 'projection_mismatch', 'The operation ID was found with different content.');
   const firstBlock = rows[0]!.createdAt!;
@@ -56,12 +70,17 @@ async function recoverHash(reader: ArkivReader, record: StoredOperationStep): Pr
   return [...hashes][0]!;
 }
 
-export interface VerifiedStep { receipt: OperationReceipt; records: EntityRecord[]; reverted: boolean }
+export interface VerifiedStep<R extends VerificationRecord = EntityRecord> { receipt: OperationReceipt; records: R[]; reverted: boolean }
 
 /** SDK success is deliberately ignored. Only a canonical official-RPC receipt with the frozen call can confirm. */
 export async function verifyOperationStep(reader: ArkivReader, record: StoredOperationStep, options: { waitMs?: number } = {}): Promise<VerifiedStep | null> {
+  return verifyNativeOperationStep(reader, record, CORE_CODEC, options);
+}
+
+export async function verifyNativeOperationStep<R extends VerificationRecord>(reader: ArkivReader, record: StoredOperationStep,
+  codec: VerificationCodec<R>, options: { waitMs?: number } = {}): Promise<VerifiedStep<R> | null> {
   assertArkiv(record.prepared && record.admission, 'unverified', 'evidence_unavailable', 'No admitted transaction is recorded for this step.');
-  const hash = await recoverHash(reader, record);
+  const hash = await recoverHash(reader, record, codec);
   if (!hash) return null;
   const receipt = options.waitMs
     ? await reader.client.waitForTransactionReceipt({ hash, checkReplacement: false, timeout: options.waitMs, pollingInterval: 1_000 })
@@ -103,7 +122,7 @@ export async function verifyOperationStep(reader: ArkivReader, record: StoredOpe
   const snapshot: Snapshot = { mode: 'public', source: 'arkiv', chainId: TIRAMISU_CHAIN_ID, blockNumber: operationReceipt.blockNumber,
     blockHash: receipt.blockHash, blockTimestamp: timestamp, fetchedAt: reader.now(), freshness: 'fresh', completeness: 'complete', reasons: [] };
   const context = await reader.context({ snapshot });
-  const records: EntityRecord[] = []; const createdKeys = new Set<PublicEntityKey>(); let eventIndex = 0;
+  const records: R[] = []; const createdKeys = new Set<PublicEntityKey>(); let eventIndex = 0;
   for (const create of creates) {
     const event = events[eventIndex++]!;
     assertArkiv(event.eventName === 'EntityCreated' && sameIdentity(event.args.owner, request.from) && event.args.creationFlags === 1,
@@ -113,8 +132,8 @@ export async function verifyOperationStep(reader: ArkivReader, record: StoredOpe
     createdKeys.add(createdKey);
     assertArkiv(event.args.expiresAt - receipt.blockNumber === ExpirationTime.fromSeconds(create.lifetimeSeconds).minLifetime,
       'unverified', 'projection_mismatch', 'The entity lifetime does not match the frozen request.');
-    const frozen = validatePayloadForNetwork(JSON.parse(create.payloadJson));
-    const entity = await reader.entity(context, event.args.entityKey, frozen.entityType, publicAddress(request.from));
+    const frozen = codec.validate(JSON.parse(create.payloadJson));
+    const entity = await codec.read(reader, context, createdKey, frozen, publicAddress(request.from));
     assertArkiv(entity && canonicalJson(entity.payload) === create.payloadJson
       && entity.provenance.createdAtBlock === operationReceipt.blockNumber
       && entity.provenance.expiresAtBlock === event.args.expiresAt.toString(), 'unverified', 'projection_mismatch', 'The created entity does not match its frozen payload and receipt.');
@@ -135,8 +154,7 @@ export async function verifyOperationStep(reader: ArkivReader, record: StoredOpe
       'unverified', 'projection_mismatch', 'The renewal event does not match the reviewed expiry.');
     const rows = await reader.query(context, [eq('$key', key(extension.entityKey))], undefined, true);
     assertArkiv(rows.length === 1, 'unverified', 'evidence_unavailable', 'The renewed entity cannot be read back.');
-    const type = entityType(rows[0]!.attributes?.entity_type?.value);
-    const entity = decodeEntity(rows[0]!, type, snapshot, publicAddress(request.from), extension.entityKey);
+    const entity = codec.decode(rows[0]!, snapshot, publicAddress(request.from), extension.entityKey);
     assertArkiv(entity.provenance.expiresAtBlock === extension.expiresAtBlock, 'unverified', 'projection_mismatch', 'The renewed expiry was not observed.');
     entity.provenance.transactionHash = hash; records.push(entity); operationReceipt.entityKeys.push(entity.key);
   }

@@ -2,6 +2,8 @@
 
 Status: implemented Partfolk adapter contract, 9 October 2026. The TypeScript payload validator, direct SDK reader, journalled injected-wallet writer, and independent CLI implement this contract. Bootstrap and native transition feasibility evidence are actual network observations, clearly separated below. These earlier probes alone are not evidence of a complete public Partfolk workflow.
 
+The event extension below was implemented and verified with local RPC fixtures on 11 October 2026. No event-extension network broadcasts are claimed by those checks.
+
 Network: Tiramisu, chain ID 7738577. SDK: the official 0.8.x line, verified installed version recorded in `friction.md`.
 
 All application data published during development is synthetic. Indexed attributes are public and use lowercase names. Numeric range fields require explicit typed attributes. Arkiv creation and expiration values are block numbers. Creator provenance does not establish real-world identity or truth. No personal data, credentials or signing keys are permitted.
@@ -59,6 +61,36 @@ The export is a dated snapshot, never an imported authorization. Exports refuse 
 The injected EOA port estimates actual SDK serialization and persists an admission checkpoint before forwarding a single wallet send. It captures the returned hash immediately. Account/chain changes invalidate preparation. Browser journals use same-origin locks and explicit storage failures. Clients may choose separate journal storage keys and a shared lock key for active submission serialization; unresolved records remain local to each journal. They contain public operation data, never signing secrets.
 
 Success requires the official RPC transaction and canonical receipt to match the frozen sender, native target, calldata, value, chain, and any explicit fee parameters. Native event identities, metadata, flags, unique created keys, and ordering must match. Payloads/projections are read back at the receipt block; consumed keys must be absent there. A lost response is recovered only by the same creator-scoped operation ID with exact payloads and one matching creation transaction. Zero matches remain uncertain. A mined revert is terminal for that transaction, not a not-sent retry. If an earlier phase already succeeded, reconciliation reports `partial_reverted` and retains the frozen overall intent and confirmed keys. An explicit resume may create a new attempt ID for the proven reverted phase after canonical revert verification and fresh preflight; it never republishes the confirmed root, proposal, or activation. Failed attempts remain in the journal. A first-phase or single-transaction revert stays terminal for the overall intent.
+
+## Event participation extension
+
+`partfolk-events/1` uses a separate `partfolk-events` namespace and schema version `1`. It does not change the seven core payloads or existing contributor consent hashes. The existing public project root is the event identity. Exact extension DTOs and rules live in `src/domain/events/`; `src/data/events/` supplies an independent reader and journalled native writer.
+
+| Type | Immutable creator / current scope | Payload and additional typed projections |
+| --- | --- | --- |
+| `event_release` | Project root creator | Audience `terms`, their canonical `audienceHash`, publication `source`, `predecessorReleaseKey`; `starts_at: u64`, `ends_at: u64`, `proposal_key: key` |
+| `event_state` | Project root creator, unique per `project_key` | Current `releaseKey`, `audienceHash`, copied `startsAt`/`endsAt`, current internal `source`, `status`, `predecessorKeys`; `release_key: key`, `starts_at: u64`, `ends_at: u64`, `proposal_key: key`, `status: str` |
+| `attendance_state` | Attendee wallet creator, unique per `project_key` plus `$creator` | `attendee`, exact `releaseKey` and `audienceHash`, `decision` (`going` or `withdrawn`), `predecessorKeys`; `release_key: key`, `decision: str` |
+
+All three also project `project: str`, `entity_type: str`, `schema_version: i32`, `created_at: u64`, `operation_id: str`, `project_key: key`, and `audience_hash: bytes32`. These are exact projections; extra attributes, an unknown schema, changed ownership, mutable flags or an attendee different from the immutable creator are rejected. All records are readonly with owner-controlled expiration and `application/json` content. JSON is bounded to 64 KiB; every public identity uses a canonical lowercase key/address.
+
+Audience terms contain `title`, `description`, `startsAt`, `endsAt`, named IANA `timeZone`, public `venue`, `instructions`, and `conditions`. All eight fields contribute to the domain-separated audience hash. Public terms carry no payment, capacity guarantee, email, private contact data or physical-attendance claim. A wallet registration is a public intention to attend an open, free event.
+
+Publication first retains an immutable release, then creates a new current state while deleting its exact predecessor in one atomic native batch. A journal preserves both phases. Updated public terms require a successor release; old releases remain available until their explicit expiration. Repairing an internal plan can replace only `event_state.source`, preserving the audience release and existing attendance decisions. New joins and reopening require a complete fresh source whose exact active plan is `ready`; contributor withdrawal or a different active plan derives a pause regardless of the stored `open` label. Cancellation and end are terminal event statuses; `closed` closes registration and may reopen after fresh validation. Elapsed scheduled end also prevents joining.
+
+When a current event state is missing but earlier coordinator-authored releases remain, a fresh publication is rejected before wallet preparation. Only the original journal's independently confirmed first release can finish its missing initial-state phase, and it must still be the sole authored release. This preserves uncertain publication recovery without silently resetting known event history. An expired or unavailable release is never recreated automatically.
+
+Cancellation, registration closure and ending authenticate the project root, current event state and exact audience release without requiring still-available contributor evidence. Their authored outcome remains readable if an old contributor disappears. Opening, reopening and joining always require the complete current source; missing audience-release evidence still makes the event itself unverified.
+
+Catalogue discovery scans `event_state` with optional `ends_at >= u64(from)` and `starts_at <= u64(to)` filters at one block. It authenticates each candidate against its project root, then reads **all** current authored heads without date or schema filters so a fork outside the discovery interval cannot be hidden. Title search and ordering happen after the bounded complete read. My events queries attendance by immutable wallet creator, authenticates each current scope and both the current and previously confirmed release. Missing references retain an entry with explicit unavailable evidence. No attendance state is inferred from browser cache, root labels, or another user's records.
+
+Each event's source confidence is isolated within that same block. A missing source contributor makes its own event unverified without hiding a healthy unrelated event. The total page/entity budgets remain shared across the traversal; cursor failures, mixed blocks, RPC failures and exhausted budgets still reject the whole incomplete read.
+
+Every write uses the existing operation journal, explicit wallet authority, current-head checks before and after unsigned preparation, and the same native transaction/receipt verification as core writes. An ambiguous result reconciles the original ID and captured transaction; SDK success alone never confirms it. Event and new/reconfirmed attendance lifetimes must nominally cover the scheduled end plus 30 days, with an explicit positive even number of seconds and a maximum of ten 366-day years. Arkiv expiry remains a block deadline; this policy is not a UTC retention guarantee. Withdrawals preserve their recorded release/hash even when that referenced event has become unavailable.
+
+The action envelope and native journal are separate evidence. An absent or truncated native journal never proves that an earlier uncertain action was not sent. Reconciliation reports `unverified` when its observed steps or transaction evidence cannot be recovered; `not_sent` carries `evidence: native-journal` only when the retained journal proves an unadmitted step or a definitive wallet rejection.
+
+Local tests cover independent readers, complete pagination, hidden forks, schema/author/receipt spoofing, fresh-plan admission, changed public terms, atomic withdrawal and reconciliation without duplicate sends. They do not establish a live funded event workflow or visual acceptance.
 
 ## Capability bootstrap entity
 
