@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { RootApp, type RouteRegistry, type RouteViewProps } from './App';
 import { useAppSession } from './context';
-import { parseRoute, routeHref } from './routes';
+import { parseRoute, routeHref, routePath, safeReturnPath } from './routes';
 import { createStudioWorkspaces, LOCAL_COORDINATOR, type StudioWorkspaces, type WorkspaceKind } from './workspaces';
 import { injectedProvider } from './network';
 import { copyRecipeToPublicDraft } from './projectSharing';
@@ -17,6 +17,7 @@ import { ExecutionWorkspace } from '../features/execution';
 import { GuidedPractice } from '../features/practice/GuidedPractice';
 import { AccountCommands, AccountPage, SignInPage, workDestination } from '../features/account';
 import { selectNewProjectDraft } from '../features/projects/draft-session';
+import { WorkspaceTour, workspaceTour } from '../features/onboarding';
 
 const sampleRoles = [
   ['coordinator', 'Exhibition coordinator'], ['library', 'Library (exhibition space)'],
@@ -91,6 +92,13 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     copyRecipeToPublicDraft(manager.runtimes.public, source);
     void manager.select('public', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
   };
+  const Help = (props: RouteViewProps) => <HelpRoute {...props} onCreateProject={startProject} onReplayTour={() => {
+    const candidate = parseRoute(safeReturnPath('returnTo' in props.route ? props.route.returnTo : undefined) ?? '/workspace');
+    const target = candidate.name === 'home' || candidate.name === 'demo' || (candidate.name === 'project' && candidate.projectRoot === SMALL_WORKS_PROJECT_ROOT)
+      ? { name: 'workspace' as const } : candidate;
+    const open = manager.getSnapshot().kind === 'practice' ? manager.select('public', target) : manager.followRoute(target);
+    void open.then(() => { workspaceTour(manager.getSnapshot().runtime).start(); window.location.hash = routePath(target); });
+  }} />;
   const reuse = (template: RecipeTemplate) => {
     const runtime = manager.runtimes.local;
     runtime.session.setAccount(LOCAL_COORDINATOR);
@@ -111,7 +119,7 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
       projectRoot={props.route.name === 'contributions' ? props.route.projectRoot ?? (practice ? SMALL_WORKS_PROJECT_ROOT : undefined) : undefined} template={practice ? practiceTemplate(session.actor) : undefined} />;
   };
   return {
-    home: props => <LandingRoute {...props} onCreateProject={startProject} />, help: HelpRoute, workspace: WorkspaceRoute, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
+    home: props => <LandingRoute {...props} onCreateProject={startProject} />, help: Help, workspace: WorkspaceRoute, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
     'sign-in': props => <SignInPage {...props} binding={manager.publicBinding} />,
     account: props => <AccountPage {...props} binding={manager.publicBinding} />,
     onboarding: props => <AccountPage {...props} binding={manager.publicBinding} />,
@@ -130,7 +138,7 @@ export function Studio({ manager }: { manager: StudioWorkspaces }) {
   // Stable per manager: switching a role never remounts the project or loses a draft.
   const routes = routeRegistry(manager);
   if (state.loading) return <main className="pf-page pf-app-main"><LoadingState title="Opening your workspace" description="Your other projects and drafts are kept separately." /></main>;
-  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} account={<AccountCommands manager={manager} />} />;
+  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} account={<AccountCommands manager={manager} />} guide={state.kind === 'practice' ? undefined : <WorkspaceTour />} />;
 }
 const registries = new WeakMap<StudioWorkspaces, RouteRegistry>();
 function routeRegistry(manager: StudioWorkspaces) {

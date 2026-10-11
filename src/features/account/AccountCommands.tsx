@@ -26,7 +26,7 @@ export function AccountCommands({ manager }: { manager: StudioWorkspaces }) {
     <details ref={disclosure} className="pf-account-menu" onKeyDown={event => {
       if (event.key === 'Escape') { disclosure.current?.removeAttribute('open'); disclosure.current?.querySelector('summary')?.focus(); }
     }}>
-      <summary>{actor ? label || 'Account' : 'Your work'}</summary>
+      <summary id="account-commands">{actor ? label || 'Account' : 'Your work'}</summary>
       <div className="pf-account-menu-panel">
         <div className="pf-account-menu-identity"><strong>{actor?.kind === 'wallet' ? label || 'Connected wallet' : 'Browsing as a guest'}</strong>{actor?.kind === 'wallet' && <span className="pf-account-address">{actor.address.slice(0, 10)}…{actor.address.slice(-6)}</span>}</div>
         <Link href={routeHref({ name: 'workspace' })}>My projects</Link>

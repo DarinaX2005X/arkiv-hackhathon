@@ -28,7 +28,7 @@ function HashNavigation() {
   return null;
 }
 
-export function AppShell({ children, controls, account }: { children: ReactNode; controls?: ReactNode; account?: ReactNode }) {
+export function AppShell({ children, controls, account, guide }: { children: ReactNode; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
   const { copy, session } = useApp();
   const state = useAppSession();
   const t = copy.text.bind(copy, 'shell');
@@ -48,7 +48,7 @@ export function AppShell({ children, controls, account }: { children: ReactNode;
     <header className="pf-app-header">
       <a className="pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><span className="pf-wordmark">{t('brand')}</span></a>
       <nav aria-label={t('navigation')} className="pf-app-navigation">
-        {(route.name === 'home' ? navigation.filter(item => item.name === 'workspace' || item.name === 'help') : navigation).map(item => <a key={item.name} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') ? 'page' : undefined}>{t(item.label)}</a>)}
+        {(route.name === 'home' ? navigation.filter(item => item.name === 'workspace' || item.name === 'help') : navigation).map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') ? 'page' : undefined}>{t(item.label)}</a>)}
       </nav>
       {account}
     </header>
@@ -61,7 +61,8 @@ export function AppShell({ children, controls, account }: { children: ReactNode;
         <p>{t(needsRecovery ? 'recoveryBody' : 'storageBody')}</p>
         {session.exportRecovery() !== null && <Button variant="secondary" onClick={exportRecovery}>{t('exportRecovery')}</Button>}
       </Notice>}
-      {children}
+      {guide}
+      <div id="work-surface" tabIndex={-1}>{children}</div>
     </main>
     <footer className="pf-app-footer">
       <div className="pf-footer-intro">
@@ -95,13 +96,13 @@ function FoundationView({ route }: RouteViewProps) {
   return <section className="pf-sheet"><h1>{t(keys[0])}</h1><EmptyState title={t(keys[0])}>{t(keys[1])}</EmptyState></section>;
 }
 
-function RoutedApp({ routes, controls, account }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode }) {
+function RoutedApp({ routes, controls, account, guide }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
   const state = useAppSession();
   const route = parseRoute(state.destination);
   const View = routes[route.name] ?? FoundationView;
-  return <><HashNavigation /><AppShell controls={controls} account={account}><View route={route} /></AppShell></>;
+  return <><HashNavigation /><AppShell controls={controls} account={account} guide={guide}><View route={route} /></AppShell></>;
 }
 /** MAIN composes the feature registry; Desk may use only AppProvider/AppShell. */
-export function RootApp({ runtime, routes = {}, controls, account }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode }) {
-  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} account={account} /></AppProvider>;
+export function RootApp({ runtime, routes = {}, controls, account, guide }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
+  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} account={account} guide={guide} /></AppProvider>;
 }
