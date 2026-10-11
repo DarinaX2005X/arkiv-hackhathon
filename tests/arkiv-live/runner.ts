@@ -23,8 +23,8 @@ import { canonicalJson } from '../../src/domain/canonical';
 import { prepareDecision } from '../../src/domain/operations';
 import { deriveRequiredApprovers } from '../../src/domain/validation';
 import { PROTOCOL } from '../../src/domain/types';
-import type { AccountAddress, AgreementHealth, ProjectAggregate, Proposal } from '../../src/domain/types';
-import { ACTOR_IDS, BASE_ACTORS, CHILD_FUNDING_WEI, LIFETIME_SECONDS, assertProofState,
+import type { AccountAddress, AgreementHealth, ProjectAggregate, Proposal, SourcePlanRef } from '../../src/domain/types';
+import { ACTOR_IDS, BASE_ACTORS, CHILD_FUNDING_WEI, LIFETIME_SECONDS, REVISION_NAMES, assertProofLineage, assertProofState,
   buildProofProposal, materialBook, proofConsentDeadline, publicRecipe, publisherTemplate } from './scenario';
 import type { ProofActor, RevisionName } from './scenario';
 import { verifyInFreshProcess } from './cli';
@@ -48,6 +48,18 @@ const signerPath = (actor: ProofActor) => resolve(LOCAL, `wallet-${actor}.json`)
 type WalletFile = { version?: number; role?: ProofActor; network: string; chainId: number; address: AccountAddress; privateKey: Hex };
 type PublicObservation = { id: string; observedAt: string; codeCommit: string; studioStoppedDeclaredByOperator: boolean;
   packet: ExportPacket; independentPacket: ExportPacket; summary: ReturnType<typeof assertProofState> };
+const CHECKPOINT_REVISIONS = { 'p1-awaiting': 'p1', 'p1-ready': 'p1', 'p1-changed': 'p1',
+  'p2-awaiting': 'p2', 'p2-ready': 'p2', 'p3-awaiting': 'p3', 'p3-ready': 'p3' } as const;
+
+/** Expected identities come from the saved successful publications, never from either client's observed history. */
+export function expectedProofLineage(state: Pick<ProofState, 'projectRoot' | 'proposals'>, revision: RevisionName): SourcePlanRef[] {
+  return REVISION_NAMES.slice(0, REVISION_NAMES.indexOf(revision) + 1).map(name => {
+    const saved = state.proposals[name];
+    ensure(saved, `The saved ${name} proposal reference is missing.`);
+    return { projectRoot: publicKey(state.projectRoot), proposalKey: publicKey(saved.proposalKey),
+      proposalHash: publicKey(saved.proposalHash), activationKey: publicKey(saved.activationKey) };
+  });
+}
 
 /** Missing application journals are never interpreted as an unsent operation. */
 export function assertJournalContinuity(actions: ProofState['actions'], store: OperationStore, records: BudgetRecord[]): void {
@@ -307,10 +319,11 @@ class ProofRun {
     }
     await this.observe(`${revision}-ready`, 'ready', 7);
   }
-  private async observe(id: string, status: AgreementHealth, accepted: number) {
+  private async observe(id: keyof typeof CHECKPOINT_REVISIONS, status: AgreementHealth, accepted: number) {
     const packet = take(await this.repo().exportPacket(publicKey(this.state.projectRoot)));
-    const summary = assertProofState(packet.project, status, accepted, Date.now());
-    const independentPacket = await verifyInFreshProcess(packet, ROOT);
+    const lineage = expectedProofLineage(this.state, CHECKPOINT_REVISIONS[id]);
+    const summary = assertProofState(packet.project, status, accepted, Date.now(), lineage);
+    const independentPacket = await verifyInFreshProcess(packet, ROOT, lineage);
     const observation: PublicObservation = { id, observedAt: new Date().toISOString(), codeCommit: this.commit,
       studioStoppedDeclaredByOperator: this.options.studioStopped, packet, independentPacket, summary };
     atomicWriteJson(resolve(LOCAL, `observation-${id}.json`), observation);
@@ -358,7 +371,9 @@ class ProofRun {
   }
   async verify() {
     const packet = take(await this.repo().exportPacket(publicKey(this.state.projectRoot)));
-    const independent = await verifyInFreshProcess(packet, ROOT);
+    const revision = [...REVISION_NAMES].reverse().find(name => this.state.proposals[name]);
+    ensure(revision, 'A completed proof publication is required before verifying its saved lineage.');
+    const independent = await verifyInFreshProcess(packet, ROOT, expectedProofLineage(this.state, revision));
     emit({ verified: true, snapshot: independent.snapshot, readiness: independent.readiness, projectRoot: packet.project.root.key,
       studioStoppedDeclaredByOperator: this.options.studioStopped });
   }
@@ -367,8 +382,12 @@ class ProofRun {
     const within = relative(evidenceRoot, output);
     ensure(within && !within.startsWith('..') && !/^[A-Za-z]:/.test(within) && output.endsWith('.json'), 'Public exports must be new JSON files inside arkiv/evidence.');
     ensure(this.state.completedPhases.includes('p3-accept'), 'The complete P1/P2/P3 sequence must finish before final evidence export.');
-    const observations = this.state.observationIds.map(id => {
-      const record = readJson<PublicObservation>(resolve(LOCAL, `observation-${id}.json`)); ensure(record?.id === id, 'A dated observation is missing.'); return record;
+    const observations = Object.entries(CHECKPOINT_REVISIONS).map(([id, revision]) => {
+      ensure(this.state.observationIds.includes(id), 'A required proof checkpoint is missing.');
+      const record = readJson<PublicObservation>(resolve(LOCAL, `observation-${id}.json`)); ensure(record?.id === id, 'A dated observation is missing.');
+      const lineage = expectedProofLineage(this.state, revision);
+      assertProofLineage(record.packet.project, lineage); assertProofLineage(record.independentPacket.project, lineage);
+      return record;
     });
     const evidence = { format: 'partfolk-product-proof', version: 1, network: 'tiramisu', chainId: LIVE_CHAIN_ID,
       exportedAt: new Date().toISOString(), codeCommit: this.commit, runId: this.state.runId, synthetic: true,

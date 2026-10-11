@@ -12,7 +12,7 @@ import type { AccountAddress, BookState, DomainReason, EntityKey, EntityPayload,
 import type { ActivateProposalCommand, CommandBase, CreateProjectCommand, MutationResult, OperationIntent, OperationKind,
   OperationPhase, PublicationProgress, PublishPlanCommand, PublishProjectLinkCommand, PublishProposalCommand, ReconciliationResult,
   RegisterPublisherCommand, RenewEntityCommand, ReplaceBookCommand, ReplaceProjectCommand, ShareOfferCommand } from '../types';
-import { allocateOperationStep } from '../operations';
+import { allocateOperationStep, inspectReconciliationJournal } from '../operations';
 import type { OperationController, StoredOperationStep } from '../operations';
 import type { NativeBatch } from '../wallet';
 import { ArkivRepositoryError, assertArkiv, repositoryError } from './errors';
@@ -480,10 +480,10 @@ export class ArkivWriter {
   async reconcile(input: OperationIntent): Promise<ReconciliationResult> {
     const controller = this.connected(); const saved = controller.getOperation(input.id); const operation = saved ?? clone(input);
     assertArkiv(operation.inputHash === input.inputHash && equal(operation.authority, input.authority), 'conflict', 'hash_mismatch', 'The reconciliation intent does not match its saved operation.');
-    if (!saved && (input.transactionHash || input.confirmedKeys.length || input.steps.some(step =>
-      step.transactionHash || ['submitted', 'confirmed', 'unverified', 'reverted'].includes(step.status)))) {
+    const journal = inspectReconciliationJournal(input, saved, controller.getStep);
+    if (!journal.complete) {
       return { status: 'unverified', operation, error: { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false,
-        diagnostic: 'The send evidence exists but its local verification journal is missing.' } };
+        diagnostic: 'The original verification journal is missing or incomplete. Its absence cannot establish that nothing was sent.' } };
     }
     let lastReceipt: VerifiedStep['receipt'] | null = null; let admitted = false;
     for (const step of operation.steps) {
@@ -512,6 +512,7 @@ export class ArkivWriter {
         error: { code: 'reverted', reasons: [{ code: 'evidence_unavailable' }], retryable: partial } };
     }
     if (lastReceipt && latest.phase === 'complete') return { status: 'confirmed', operation: latest, receipt: lastReceipt };
-    return { status: admitted ? 'pending' : 'not_sent', operation: latest };
+    return admitted ? { status: 'pending', operation: latest }
+      : { status: 'not_sent', operation: latest, ...(journal.notSentEvidence ? { evidence: journal.notSentEvidence } : {}) };
   }
 }

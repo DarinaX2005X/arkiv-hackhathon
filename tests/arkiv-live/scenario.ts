@@ -1,11 +1,11 @@
 import { makeSmallWorksFixture, smallWorksRecipe } from '../../src/domain/fixtures';
-import { hashPlan } from '../../src/domain/canonical';
+import { canonicalJson, hashPlan } from '../../src/domain/canonical';
 import { activeSource, deriveReadiness, lastAcceptedDuty } from '../../src/domain/readiness';
 import { solve } from '../../src/domain/solver';
 import { finalizePlan } from '../../src/domain/validation';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from '../../src/domain/types';
 import type { AgreementHealth, BookState, EntityKey, PlanDocument, ProjectAggregate, ProjectRecipe, Proposal,
-  PublicEntityKey, PublisherRoot, SolverInput, SolverPin } from '../../src/domain/types';
+  PublicEntityKey, PublisherRoot, SolverInput, SolverPin, SourcePlanRef } from '../../src/domain/types';
 import { publicKey } from '../../src/data/arkiv/envelope';
 
 export const ACTOR_IDS = ['library', 'courtyard', 'makerspace', 'cedar', 'willow', 'ash', 'elm', 'oak', 'juniper'] as const;
@@ -114,7 +114,32 @@ export function proofConsentDeadline(plan: PlanDocument, publisherRoot: EntityKe
   return lastAcceptedDuty(plan, publisherRoot) + 60 * 60_000;
 }
 
-export function assertProofState(project: ProjectAggregate, expectedStatus: AgreementHealth, accepted: number, now: number) {
+/** Proof checkpoints require the saved revision chain even when current product readiness can survive an old history gap. */
+export function assertProofLineage(project: ProjectAggregate, expected: readonly SourcePlanRef[]): void {
+  ensure(expected.length >= 1 && expected.length <= REVISION_NAMES.length
+    && new Set(expected.map(source => source.proposalKey)).size === expected.length
+    && new Set(expected.map(source => source.activationKey)).size === expected.length,
+  'The proof needs distinct saved references for every expected revision.');
+  ensure(project.proposalHistoryStatus?.complete === true && project.proposalHistoryStatus.reasons.length === 0,
+    'The proof proposal lineage is incomplete.');
+  ensure(project.proposalHistory.length === expected.length, 'The proof proposal lineage does not contain every expected revision.');
+  for (const [index, source] of expected.entries()) {
+    const proposal = project.proposalHistory[index]!;
+    ensure(source.projectRoot === project.root.key && proposal.key === source.proposalKey
+      && proposal.payload.projectRoot === source.projectRoot && proposal.payload.plan.projectRoot === source.projectRoot
+      && proposal.payload.proposalHash === source.proposalHash && hashPlan(proposal.payload.plan) === source.proposalHash,
+    'The proof proposal lineage differs from the saved revision identities.');
+    ensure(canonicalJson(proposal.payload.plan.predecessor) === canonicalJson(index === 0 ? null : expected[index - 1]),
+      'The proof proposal predecessor differs from the saved revision chain.');
+  }
+  const current = expected.at(-1)!;
+  ensure(project.proposal?.key === current.proposalKey && project.proposal.payload.proposalHash === current.proposalHash
+    && canonicalJson(activeSource(project)) === canonicalJson(current), 'The active proof revision differs from the saved revision chain.');
+}
+
+export function assertProofState(project: ProjectAggregate, expectedStatus: AgreementHealth, accepted: number, now: number,
+  expectedLineage: readonly SourcePlanRef[]) {
+  assertProofLineage(project, expectedLineage);
   const readiness = deriveReadiness(project, now);
   ensure(readiness.status === expectedStatus, `Expected ${expectedStatus}; read ${readiness.status}: ${readiness.reasons.map(reason => reason.code).join(', ')}.`);
   ensure(readiness.acceptedApprovers.length === accepted, `Expected ${accepted} exact current approvals; read ${readiness.acceptedApprovers.length}.`);

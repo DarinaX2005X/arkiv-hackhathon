@@ -5,7 +5,7 @@ import { prepareDecision } from '../../src/domain/operations';
 import { activeSource, deriveReadiness } from '../../src/domain/readiness';
 import { validateEntityPayload } from '../../src/domain/validation';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from '../../src/domain/types';
-import type { AccountAddress, EntityPayload, EntityRecord, PlanActivation, ProjectAggregate, Proposal, PublicEntityKey, Snapshot } from '../../src/domain/types';
+import type { AccountAddress, EntityPayload, EntityRecord, PlanActivation, ProjectAggregate, Proposal, PublicEntityKey, Snapshot, SourcePlanRef } from '../../src/domain/types';
 import { ACTOR_IDS, assertProofState, buildProofProposal, materialBook, proofConsentDeadline, publicRecipe } from './scenario';
 import type { ProofRoots } from './scenario';
 
@@ -69,6 +69,7 @@ describe('public proof scenario uses production domain contracts', () => {
   });
   it('proves P1 agreement, Oak withdrawal, P2 repair, and P3 restore with three distinct exact agreements', () => {
     const { project, roots } = fixture();
+    const lineage: SourcePlanRef[] = [];
     // Juniper is deliberately unknown until the repair phase.
     project.publishers = project.publishers.filter(item => item.root.key !== roots.juniper);
     if (project.state.status === 'unique') project.state.entity.payload.publisherRoots = project.state.entity.payload.publisherRoots.filter(key => key !== roots.juniper);
@@ -77,28 +78,38 @@ describe('public proof scenario uses production domain contracts', () => {
     expect(p1.plan.allocations.find(item => item.requirementId === 'transport')!.publisherRoot).toBe(roots.oak);
     const boards = p1.plan.allocations.find(item => item.requirementId === 'boards')!;
     expect(boards.interval).toEqual({ start: Date.parse('2026-10-18T08:30:00.000Z'), end: Date.parse('2026-10-18T15:30:00.000Z') });
-    activate(project, p1, 200); assertProofState(project, 'awaiting_approval', 0, NOW + 2_000);
-    acceptAll(project); assertProofState(project, 'ready', 7, NOW + 2_000);
+    activate(project, p1, 200); lineage.push(activeSource(project)!);
+    assertProofState(project, 'awaiting_approval', 0, NOW + 2_000, lineage);
+    acceptAll(project); assertProofState(project, 'ready', 7, NOW + 2_000, lineage);
     const oak = project.publishers.find(item => item.root.key === roots.oak)!;
     const withdrawn = prepareDecision(project, roots.oak!, oak.root.payload.publisher, { status: 'withdrawn', operationId: 'oak-withdraw', now: NOW + 2_000, reason: 'Synthetic withdrawal.' });
     if (!withdrawn.ok || oak.book.status !== 'unique') throw new Error('Withdrawal failed.');
     oak.book.entity.payload = withdrawn.value.book;
-    assertProofState(project, 'changed', 6, NOW + 2_000);
+    assertProofState(project, 'changed', 6, NOW + 2_000, lineage);
     const juniper = fixture().project.publishers.find(item => item.root.key === roots.juniper)!;
     project.publishers.push(juniper); if (project.state.status === 'unique') project.state.entity.payload.publisherRoots.push(roots.juniper!);
     const p2 = buildProofProposal(project, 'p2', roots, { operationId: 'p2', createdAt: NOW });
     expect(p2.plan.predecessor?.proposalKey).toBe(entityKey(200));
     expect(p2.plan.allocations.find(item => item.requirementId === 'transport')!.publisherRoot).toBe(roots.cedar);
     expect(p2.plan.allocations.some(item => item.requirementId === 'installation' && item.publisherRoot === roots.juniper)).toBe(true);
-    activate(project, p2, 202); assertProofState(project, 'awaiting_approval', 0, NOW + 2_000);
-    acceptAll(project); assertProofState(project, 'ready', 7, NOW + 2_000);
+    activate(project, p2, 202); lineage.push(activeSource(project)!);
+    assertProofState(project, 'awaiting_approval', 0, NOW + 2_000, lineage);
+    acceptAll(project); assertProofState(project, 'ready', 7, NOW + 2_000, lineage);
     const p3 = buildProofProposal(project, 'p3', roots, { operationId: 'p3', createdAt: NOW, initialPlan: p1.plan });
     expect(p3.plan.predecessor?.proposalKey).toBe(entityKey(202));
     expect(p3.plan.allocations).toEqual(p1.plan.allocations);
     expect(p3.proposalHash).not.toBe(p1.proposalHash); expect(hashPlan(p3.plan)).toBe(p3.proposalHash);
-    activate(project, p3, 204); assertProofState(project, 'awaiting_approval', 0, NOW + 2_000);
-    acceptAll(project); const final = assertProofState(project, 'ready', 7, NOW + 2_000);
+    activate(project, p3, 204); lineage.push(activeSource(project)!);
+    assertProofState(project, 'awaiting_approval', 0, NOW + 2_000, lineage);
+    acceptAll(project); const final = assertProofState(project, 'ready', 7, NOW + 2_000, lineage);
     expect(final.history.map(item => item.key)).toEqual([entityKey(200), entityKey(202), entityKey(204)]);
+    // Losing old records need not invalidate a current agreement, but it invalidates this specific lineage proof.
+    project.proposalHistory = [project.proposal!];
+    project.proposalHistoryStatus = { complete: false, reasons: [{ code: 'evidence_unavailable' }] };
+    expect(deriveReadiness(project, NOW + 2_000)).toMatchObject({ status: 'ready', evidenceAvailability: 'partial' });
+    expect(() => assertProofState(project, 'ready', 7, NOW + 2_000, lineage)).toThrow('lineage is incomplete');
+    project.proposalHistoryStatus = { complete: true, reasons: [] };
+    expect(() => assertProofState(project, 'ready', 7, NOW + 2_000, lineage)).toThrow('every expected revision');
   });
   it('uses wall time for cache freshness while business consent uses the pinned block time', () => {
     const { project, roots } = fixture();

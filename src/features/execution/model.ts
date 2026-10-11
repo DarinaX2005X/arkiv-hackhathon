@@ -1,7 +1,7 @@
 import type { Actor, Attestation, EntityKey, EntityRecord, ProjectAggregate, Proposal, RunbookObligation, SourcePlanRef } from '../../domain/types';
 import type { ReplaceBookCommand, ReplaceProjectCommand, WriteAuthority } from '../../data/types';
 import { activeSource, deriveReadiness, sameActor, sameSource } from '../../domain/readiness';
-import { evaluateExecution, transferStatementHash } from '../../domain/execution';
+import { effectiveStatements, evaluateExecution, transferStatementHash } from '../../domain/execution';
 import { prepareAttestation, prepareCloseProject, prepareReleaseCustodyHold } from '../../domain/operations';
 import { createOperationIntent } from '../../data/operations';
 import { bookLifetime } from '../contributions/model';
@@ -12,6 +12,7 @@ export type TransferReport = Extract<Attestation, { kind: 'transfer_report' }>;
 export type TransferAcknowledgement = Extract<Attestation, { kind: 'transfer_acknowledgement' }>;
 export interface RunbookRow {
   obligation: RunbookObligation; reports: Exclude<Attestation, TransferAcknowledgement>[]; acknowledgements: TransferAcknowledgement[];
+  historicalStatements: Attestation[];
   status: 'not_reported' | 'reported_not_done' | 'reported_done' | 'awaiting_acknowledgement' | 'partially_acknowledged' | 'confirmed_handover' | 'confirmed_return' | 'evidence_unavailable';
   completed: boolean; mine: boolean; reportedQuantity: number; acknowledgedQuantity: number;
 }
@@ -33,12 +34,10 @@ export function sourceForProposal(project: ProjectAggregate, key: EntityKey): So
   return null;
 }
 export function effectiveAttestations(project: ProjectAggregate, source: SourcePlanRef): Attestation[] {
-  return project.publishers.flatMap(publisher => {
+  return effectiveStatements(project.publishers.flatMap(publisher => {
     if (publisher.book.status !== 'unique') return [];
-    const statements = publisher.book.entity.payload.attestations.filter(item => item.author === publisher.root.key && sameSource(item, source));
-    const corrected = new Set(statements.map(item => item.correctsAttestationId).filter(Boolean));
-    return statements.filter(item => !corrected.has(item.id));
-  });
+    return publisher.book.entity.payload.attestations.filter(item => item.author === publisher.root.key && sameSource(item, source));
+  }));
 }
 export function ownPublisherRoots(project: ProjectAggregate, actor: Actor | null): EntityKey[] {
   return actor ? project.publishers.filter(publisher => sameActor(publisher.root.payload.publisher, actor)
@@ -50,6 +49,9 @@ export function runbookRows(project: ProjectAggregate, proposal: EntityRecord<Pr
   const evaluation = source ? evaluateExecution(proposal.payload.plan, source, project.publishers, [], project.snapshot) : null;
   return [...proposal.payload.plan.runbook].sort((a, b) => a.interval.start - b.interval.start || a.interval.end - b.interval.end || a.id.localeCompare(b.id)).map(obligation => {
     const own = statements.filter(item => item.obligationId === obligation.id);
+    const historicalStatements = project.publishers.flatMap(publisher => publisher.book.status === 'unique'
+      ? publisher.book.entity.payload.attestations.filter(item => source && sameSource(item, source) && item.author === publisher.root.key
+        && item.obligationId === obligation.id && !own.some(current => current.id === item.id)) : []);
     const reports = own.filter(item => item.kind !== 'transfer_acknowledgement');
     const acknowledgements = own.filter((item): item is TransferAcknowledgement => item.kind === 'transfer_acknowledgement');
     const completed = evaluation?.completed.some(work => work.obligationId === obligation.id && work.evidenceAvailability === 'available') ?? false;
@@ -61,7 +63,7 @@ export function runbookRows(project: ProjectAggregate, proposal: EntityRecord<Pr
       ? completed ? 'reported_done' : reports.some(item => item.kind === 'task_report' && item.status === 'not_done') ? 'reported_not_done' : 'not_reported'
       : completed ? obligation.kind === 'handover' ? 'confirmed_handover' : 'confirmed_return'
         : acknowledgedQuantity ? 'partially_acknowledged' : reportedQuantity ? 'awaiting_acknowledgement' : 'not_reported';
-    return { obligation, reports, acknowledgements, completed, status, reportedQuantity, acknowledgedQuantity,
+    return { obligation, reports, acknowledgements, historicalStatements, completed, status, reportedQuantity, acknowledgedQuantity,
       mine: obligation.kind === 'task' ? owned.includes(obligation.publisherRoot) : owned.includes(obligation.giver) || owned.includes(obligation.receiver) };
   });
 }
@@ -81,7 +83,7 @@ export function versionStatus(project: ProjectAggregate, proposal: EntityRecord<
 
 export type ProgressInput =
   | { kind: 'task_report'; status: 'done' | 'not_done'; note: string }
-  | { kind: 'transfer_report'; quantity: number }
+  | { kind: 'transfer_report'; quantity: number; correctsReportId?: string }
   | { kind: 'transfer_acknowledgement'; reportId: string; quantity: number };
 export function prepareProgressCommand(project: ProjectAggregate, proposal: EntityRecord<Proposal>, source: SourcePlanRef,
   obligationId: string, authority: WriteAuthority, input: ProgressInput, now: number, id: string): ReplaceBookCommand {
@@ -104,7 +106,12 @@ export function prepareProgressCommand(project: ProjectAggregate, proposal: Enti
     if (obligation.kind === 'task') throw new Error('This is not a transfer.');
     const transfer = { transferId: obligation.transferId, action: obligation.kind, resourceId: obligation.resourceId, giver: obligation.giver, receiver: obligation.receiver };
     if (input.kind === 'transfer_report') {
-      const report = { ...base, kind: 'transfer_report' as const, ...transfer, quantity: input.quantity, unit: obligation.unit };
+      const prior = input.correctsReportId ? statements.find((item): item is TransferReport => item.id === input.correctsReportId
+        && item.kind === 'transfer_report' && item.obligationId === obligationId && item.author === author) : undefined;
+      if (input.correctsReportId && !prior) throw new Error('The original current report must be available before you can correct it.');
+      if (prior && prior.recordedAt >= base.recordedAt) throw new Error('Refresh to a later snapshot before correcting this report.');
+      const report = { ...base, kind: 'transfer_report' as const, ...transfer, quantity: input.quantity, unit: obligation.unit,
+        ...(prior ? { correctsAttestationId: prior.id } : {}) };
       attestation = { ...report, statementHash: transferStatementHash(report) };
     } else {
       const report = statements.find((item): item is TransferReport => item.id === input.reportId && item.kind === 'transfer_report');

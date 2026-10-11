@@ -24,7 +24,8 @@ export type WriteAuthority =
 export type OperationKind =
   | 'create_project' | 'register_publisher' | 'replace_project' | 'replace_book'
   | 'publish_proposal' | 'activate_proposal' | 'publish_project_link'
-  | 'close_project' | 'renew_entity' | 'publish_plan' | 'share_offer';
+  | 'close_project' | 'renew_entity' | 'publish_plan' | 'share_offer'
+  | 'publish_event' | 'replace_event' | 'replace_attendance';
 export type OperationPhase =
   | 'prepared' | 'root_pending' | 'root_confirmed' | 'initial_state_pending' | 'initialized'
   | 'proposal_pending' | 'proposal_confirmed' | 'activation_pending' | 'activation_confirmed'
@@ -67,7 +68,7 @@ export type ReconciliationResult =
   | { status: 'reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
   | { status: 'partial_reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
   | { status: 'pending'; operation: OperationIntent }
-  | { status: 'not_sent'; operation: OperationIntent }
+  | { status: 'not_sent'; operation: OperationIntent; evidence?: 'native-journal' }
   | { status: 'unverified'; operation: OperationIntent; error: RepositoryError };
 export interface CommandBase { operation: OperationIntent; lifetimeSeconds: number }
 export interface CreateProjectCommand extends CommandBase { recipe: ProjectRecipe; rootKey?: EntityKey }

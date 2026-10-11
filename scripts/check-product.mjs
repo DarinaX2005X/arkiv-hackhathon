@@ -4,6 +4,8 @@ const cwd = fileURLToPath(new URL('../', import.meta.url));
 const checks = [
   ['node_modules/typescript/bin/tsc', '--noEmit'],
   ['node_modules/vitest/vitest.mjs', 'run'],
+  ['node_modules/typescript/bin/tsc', '--noEmit', '-p', 'tests/integration/tsconfig.json'],
+  ['node_modules/vitest/vitest.mjs', 'run', '--config', 'tests/integration/vitest.config.ts'],
   ['--test', 'tests/first-write.test.mjs', 'tests/atomic-transition.test.mjs'],
   ['node_modules/typescript/bin/tsc', '--noEmit', '-p', 'tests/arkiv-live/tsconfig.json'],
   ['--import', 'tsx', '--test', 'tests/arkiv-live/safety.test.ts'],

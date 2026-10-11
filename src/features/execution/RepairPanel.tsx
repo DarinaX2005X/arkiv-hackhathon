@@ -24,7 +24,9 @@ function changeRows(before: PlanDocument, after: PlanDocument, project: ProjectA
   return ids.map(id => ({ id, label: after.variant.requirements.find(item => item.id === id)?.title ?? before.variant.requirements.find(item => item.id === id)?.title ?? id,
     before: text(before, id), after: text(after, id) }));
 }
-export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate; onRefresh: () => void | Promise<void> }) {
+export function RepairPanel({ project, onRefresh, onReviewTransfer }: {
+  project: ProjectAggregate; onRefresh: () => void | Promise<void>; onReviewTransfer: (obligationId: string) => void;
+}) {
   const runtime = useApp(), session = useAppSession();
   const controller = useMemo(() => createRepairController(), [project.root.key]);
   const [pins, setPins] = useState<SolverPin[]>([]), [explanation, setExplanation] = useState('Replace withdrawn contributions and finish the remaining work.'), [reviewed, setReviewed] = useState(false), [error, setError] = useState('');
@@ -66,6 +68,10 @@ export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate;
     {withdrawn.length > 0 && <Notice tone="warning" title="A contribution is no longer agreed"><ul>{withdrawn.map(publisher => <li key={publisher.root.key}>{publisherName(project, publisher.root.key)} withdrew or declined. Affected work: {project.proposal!.payload.plan.allocations.filter(allocation => allocation.publisherRoot === publisher.root.key).map(allocation => project.proposal!.payload.plan.variant.requirements.find(requirement => requirement.id === allocation.requirementId)?.title ?? allocation.requirementId).join(', ')}.</li>)}</ul></Notice>}
     {readiness.reasons.length > 0 && <ul>{readiness.reasons.map((reason, index) => <li key={index}>{reasonText(reason)}</li>)}</ul>}
     <p>{remaining?.completedWork.length ?? 0} completed records retained. Withdrawn and declined contributors are excluded from this calculation.</p>
+    {Boolean(remaining?.unresolvedTransfers.length) && <Notice tone="warning" title="Reconcile the transfer before changing the plan"><ul>{remaining!.unresolvedTransfers.map(transfer => {
+      const duty = project.proposal!.payload.plan.runbook.find(item => item.id === transfer.obligationId);
+      return <li key={transfer.reportId}><Button variant="quiet" onClick={() => onReviewTransfer(transfer.obligationId)}>{duty?.title ?? transfer.obligationId}</Button>: the sender reported {transfer.reportedQuantity}, and the recipient acknowledged {transfer.acknowledgedQuantity}.</li>;
+    })}</ul><p>Check what actually changed hands. The sender can correct their report above, or the recipient can correct their acknowledgement if more arrived. A corrected report needs the recipient’s own confirmation before the remaining quantity can be planned.</p></Notice>}
     <details><summary>Keep specific assignments</summary><p>These are strict pins. Leaving them open lets the search prefer familiar people without accepting an impossible result.</p>
       {input?.recipe.variants[0]?.requirements.map(requirement => <Select key={requirement.id} label={requirement.title} value={pins.find(pin => pin.requirementId === requirement.id) ? JSON.stringify(pins.find(pin => pin.requirementId === requirement.id)) : ''}
         onChange={event => { const value = event.target.value; setPins(current => [...current.filter(pin => pin.requirementId !== requirement.id), ...(value ? [JSON.parse(value) as SolverPin] : [])]); }}>
@@ -75,7 +81,7 @@ export function RepairPanel({ project, onRefresh }: { project: ProjectAggregate;
         }) : [])}</Select>)}
     </details>
     <Button disabled={!input || blocked || state.running} onClick={() => { controller.update(project, pins); void controller.run(); }}>{state.running ? 'Checking remaining work…' : 'Find a replacement'}</Button>
-    {!input && <p>There is no verifiable remaining plan to calculate. Review the outstanding items or refresh current data.</p>}
+    {!input && !remaining?.unresolvedTransfers.length && <p>There is no verifiable remaining plan to calculate. Review the outstanding items or refresh current data.</p>}
     {state.stale && <Notice tone="warning">The previous result describes older input. Run the search again. Your selected pins are retained.</Notice>}
     {state.failure && <Notice tone="warning">{state.failure}</Notice>}
     {state.result && !state.stale && !candidate && <Notice tone="warning" title={state.result.status === 'exhausted' ? 'The search did not finish' : 'No complete replacement was found'}><ul>{state.result.reasons.map((reason, index) => <li key={index}>{reason.requirementId ? `${input?.recipe.variants.flatMap(variant => variant.requirements).find(requirement => requirement.id === reason.requirementId)?.title ?? reason.requirementId}: ` : ''}{reasonText(reason)}{reason.resourceId ? ` Resource: ${reason.resourceId}.` : ''}</li>)}</ul><p>Change an actual offer or requirement before recalculating. No new participant has been invented.</p></Notice>}

@@ -8,6 +8,9 @@ import type {
 } from './types';
 
 type TransferReport = Extract<Attestation, { kind: 'transfer_report' }>;
+export interface UnresolvedTransfer {
+  obligationId: string; reportId: string; reportedQuantity: number; acknowledgedQuantity: number;
+}
 
 /** Hash the complete immutable authored transfer, excluding its own digest. */
 export function transferStatementHash(report: Omit<TransferReport, 'statementHash'> | TransferReport): ContentHash {
@@ -15,7 +18,7 @@ export function transferStatementHash(report: Omit<TransferReport, 'statementHas
   return hashCanonical({ protocol: 'partfolk/1', purpose: 'transfer_statement', statement });
 }
 
-function effectiveStatements(statements: Attestation[], reasons: DomainReason[]): Attestation[] {
+export function effectiveStatements(statements: Attestation[], reasons: DomainReason[] = []): Attestation[] {
   const removed = new Set<string>();
   const ids = new Set<string>();
   const invalid = new Set<string>();
@@ -31,12 +34,17 @@ function effectiveStatements(statements: Attestation[], reasons: DomainReason[])
       invalid.add(statement.id); reasons.push({ code: 'attestation_mismatch', obligationId: statement.obligationId });
     } else removed.add(previous.id);
   }
-  return statements.filter(s => !removed.has(s.id) && !invalid.has(s.id));
+  const supersededReports = new Set(statements.filter(s => s.kind === 'transfer_report' && removed.has(s.id))
+    .map(s => (s as TransferReport).statementHash));
+  // A receipt for an explicitly corrected sender statement stays in history. It
+  // cannot confirm the replacement statement, and is not an orphaned assertion.
+  return statements.filter(s => !removed.has(s.id) && !invalid.has(s.id)
+    && !(s.kind === 'transfer_acknowledgement' && supersededReports.has(s.statementHash)));
 }
 
 export function evaluateExecution(
   plan: PlanDocument, source: SourcePlanRef, publishers: PublisherAggregate[], recordedCompleted: CompletedWork[] = [], snapshot?: Snapshot,
-  transferProgress?: Map<string, number>,
+  transferProgress?: Map<string, number>, unresolvedTransfers?: UnresolvedTransfer[],
 ): ExecutionVerdict {
   const reasons: DomainReason[] = [];
   const statements: Attestation[] = [];
@@ -90,7 +98,10 @@ export function evaluateExecution(
         sent += report.quantity;
         const acknowledgements = matches.filter(s => s.kind === 'transfer_acknowledgement' && s.statementHash === report.statementHash);
         const ack = acknowledgements[0];
-        if (ack?.kind !== 'transfer_acknowledgement' || acknowledgements.length !== 1) continue;
+        if (ack?.kind !== 'transfer_acknowledgement' || acknowledgements.length !== 1) {
+          unresolvedTransfers?.push({ obligationId: obligation.id, reportId: report.id, reportedQuantity: report.quantity, acknowledgedQuantity: 0 });
+          continue;
+        }
         if (ack.author !== obligation.receiver || ack.giver !== obligation.giver || ack.receiver !== obligation.receiver
           || ack.action !== obligation.kind || ack.resourceId !== obligation.resourceId || ack.transferId !== obligation.transferId
           || !Number.isSafeInteger(ack.acknowledgedQuantity) || ack.acknowledgedQuantity <= 0
@@ -98,6 +109,8 @@ export function evaluateExecution(
           reasons.push({ code: 'attestation_mismatch', obligationId: obligation.id }); continue;
         }
         acknowledged += ack.acknowledgedQuantity;
+        if (ack.acknowledgedQuantity !== report.quantity) unresolvedTransfers?.push({ obligationId: obligation.id,
+          reportId: report.id, reportedQuantity: report.quantity, acknowledgedQuantity: ack.acknowledgedQuantity });
         evidence.push(report, ack);
       }
       for (const match of matches) {
@@ -187,14 +200,15 @@ export function planDiff(before: PlanDocument, after: PlanDocument): PlanDiffere
 }
 
 /** Outstanding duties become a new material package; completed assertions stay in lineage. */
-export function remainingWork(project: ProjectAggregate): { plan: PlanDocument; completedWork: CompletedWork[]; execution: ExecutionVerdict } | null {
+export function remainingWork(project: ProjectAggregate): { plan: PlanDocument; completedWork: CompletedWork[]; execution: ExecutionVerdict; unresolvedTransfers: UnresolvedTransfer[] } | null {
   const source = activeSource(project);
   if (!source || !project.proposal || project.proposal.key !== source.proposalKey || project.proposal.payload.proposalHash !== source.proposalHash
     || !validateCurrentEntity(project.proposal, project.snapshot, project.root.payload.coordinator).valid) return null;
   const execution = deriveExecution(project);
   const previous = project.proposal.payload.plan;
   const transferProgress = new Map<string, number>();
-  evaluateExecution(previous, source, project.publishers, [], project.snapshot, transferProgress);
+  const unresolvedTransfers: UnresolvedTransfer[] = [];
+  evaluateExecution(previous, source, project.publishers, [], project.snapshot, transferProgress, unresolvedTransfers);
   const outstanding = new Set(execution.outstandingObligationIds);
   const runbook = previous.runbook.filter(o => outstanding.has(o.id)).map(o => ({ ...o,
     ...(o.kind === 'task' ? {} : { quantity: o.quantity - (transferProgress.get(o.id) ?? 0) }),
@@ -236,7 +250,7 @@ export function remainingWork(project: ProjectAggregate): { plan: PlanDocument; 
     resourceAssumptions: previous.resourceAssumptions.filter(r => allocations.some(a => a.publisherRoot === r.publisherRoot && a.resourceId === r.resourceId)),
     variant: { ...previous.variant, requirements }, requiredApprovers: [] });
   plan.requiredApprovers = deriveRequiredApprovers(plan);
-  return { plan, completedWork: execution.completed, execution };
+  return { plan, completedWork: execution.completed, execution, unresolvedTransfers };
 }
 
 export function reuseRecipe(project: ProjectAggregate): RecipeTemplate | null {

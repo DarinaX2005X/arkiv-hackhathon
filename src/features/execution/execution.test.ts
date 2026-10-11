@@ -111,6 +111,26 @@ describe('execution presentation and commands', () => {
     expect(versionStatus(current, current.proposal!, current.snapshot.fetchedAt)).toContain('unverified');
     expect(runbookRows(current, current.proposal!, activeSource(current), null).every(row => row.status === 'evidence_unavailable')).toBe(true);
   });
+  it('corrects a fully reported handover without rewriting the original or carrying over its receipt', () => {
+    const project = fixture(true); agree(project);
+    const original = progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 6 }, 'original-six').book.attestations[0]!;
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: original.id, quantity: 6 }, 'original-receipt');
+    advance(project);
+    const corrected = progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 4, correctsReportId: original.id }, 'correct-four');
+    expect(corrected.book.attestations.find(item => item.id === original.id)).toEqual(original);
+    const report = corrected.book.attestations.find(item => item.id === 'report:correct-four')!;
+    expect(report).toMatchObject({ correctsAttestationId: original.id, quantity: 4, proposalHash: original.proposalHash });
+    expect(corrected.book.custodyHolds.filter(hold => hold.status === 'outstanding').map(hold => hold.quantity)).toEqual([4]);
+    let row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'handover-boards')!;
+    expect(row.status).toBe('awaiting_acknowledgement'); expect(row.acknowledgedQuantity).toBe(0);
+    expect(row.historicalStatements.map(item => item.id)).toEqual(expect.arrayContaining([original.id, 'report:original-receipt']));
+    expect(() => progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: original.id, quantity: 4 }, 'stale-receipt')).toThrow('exact report');
+    expect(() => progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 2, correctsReportId: original.id }, 'old-correction')).toThrow('original current report');
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: report.id, quantity: 4 }, 'corrected-receipt');
+    row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'handover-boards')!;
+    expect(row.status).toBe('partially_acknowledged'); expect(row.acknowledgedQuantity).toBe(4);
+    expect(deriveExecution(project).reasons).toEqual([]);
+  });
 });
 
 describe('remaining-work repair', () => {
@@ -184,6 +204,47 @@ describe('remaining-work repair', () => {
     expect(independentlyValidatePlan(candidate.plan, project.publishers, project.snapshot.blockTimestamp, [], completedWorkContext(project)).valid).toBe(true);
     expect(deriveExecution(project).outstandingCustodyHolds.map(hold => hold.quantity)).toEqual([6]);
   });
+  it('requires reconciling six reported against two received before planning and delivering the actual remaining four', () => {
+    const project = fixture(true); agree(project);
+    const before = repairInput(project)!;
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 6 }, 'reported-six');
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:reported-six', quantity: 2 }, 'received-two');
+    expect(repairInput(project)).toBeNull();
+    expect(solveRepair(project, before, [], budget)).toMatchObject({ status: 'unverified', candidates: [] });
+    expect(() => prepareExecutionCheckpoint(project, { mode: 'local', actor: SMALL_WORKS_COORDINATOR as { kind: 'local'; id: `local-actor:${string}` }, chainId: null }, project.snapshot.blockTimestamp, 'unsafe-checkpoint')).toThrow('Reconcile');
+    expect(deriveExecution(project).outstandingCustodyHolds.map(hold => hold.quantity)).toEqual([6]);
+    const allDelivered = structuredClone(project); advance(allDelivered);
+    progress(allDelivered, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:reported-six', quantity: 6 }, 'confirm-original-six');
+    const returnOnly = solveRepair(allDelivered, repairInput(allDelivered)!, [], budget).candidates[0]!;
+    expect(returnOnly.plan.runbook.some(duty => duty.id === 'handover-boards')).toBe(false);
+    expect(returnOnly.plan.runbook.find(duty => duty.id === 'return-boards')).toMatchObject({ quantity: 6 });
+    advance(project);
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', correctsReportId: 'report:reported-six', quantity: 2 }, 'correct-two');
+    expect(repairInput(project)).toBeNull();
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:correct-two', quantity: 2 }, 'confirm-two');
+    const result = solveRepair(project, repairInput(project)!, [], budget);
+    expect(result.status).toBe('found');
+    const candidate = result.candidates[0]!;
+    expect(candidate.plan.runbook.find(duty => duty.id === 'handover-boards')).toMatchObject({ quantity: 4 });
+    expect(candidate.plan.runbook.find(duty => duty.id === 'return-boards')).toMatchObject({ quantity: 6 });
+    const prior = project.proposal!; project.proposalHistory.push(prior);
+    project.proposal = localRecord('local:reconciled-repair', { ...prior.payload, plan: candidate.plan,
+      proposalHash: candidate.proposalHash, requirementsHash: hashRequirements(project.root.key, candidate.plan.variant.requirements) }, SMALL_WORKS_COORDINATOR);
+    if (project.activation.status !== 'unique') throw new Error('fixture');
+    project.activation.entity = localRecord('local:repaired-activation', { ...project.activation.entity.payload,
+      proposalKey: project.proposal.key, proposalHash: candidate.proposalHash }, SMALL_WORKS_COORDINATOR);
+    agree(project);
+    expect(deriveReadiness(project, project.snapshot.fetchedAt).status).toBe('ready');
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 4 }, 'remaining-four');
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:remaining-four', quantity: 4 }, 'received-four');
+    expect(deriveExecution(project).outstandingCustodyHolds.reduce((sum, hold) => sum + hold.quantity, 0)).toBe(6);
+    progress(project, 'local:cedar', 'return-boards', { kind: 'transfer_report', quantity: 6 }, 'return-six');
+    progress(project, 'local:makerspace', 'return-boards', { kind: 'transfer_acknowledgement', reportId: 'report:return-six', quantity: 6 }, 'received-return');
+    expect(deriveExecution(project).outstandingCustodyHolds).toEqual([]);
+    expect(deriveExecution(project).reasons).toEqual([]);
+    expect(deriveExecution(project).completed.map(work => work.obligationId)).toEqual(expect.arrayContaining(['handover-boards', 'return-boards']));
+    expect(deriveReadiness(project, project.snapshot.fetchedAt).status).toBe('ready');
+  });
   it('finds Cedar transport, Juniper installation, Willow unchanged and resets all agreement', () => {
     const project = withdrawn(true), input = repairInput(project)!;
     const result = solveRepair(project, input, [], budget), candidate = result.candidates[0]!;
@@ -232,14 +293,14 @@ describe('remaining-work repair', () => {
   });
   it('invalidates a repair when only a partial transfer acknowledgement changes', async () => {
     const project = fixture(true); agree(project);
-    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 6 }, 'partial-send');
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 2 }, 'partial-send');
     progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:partial-send', quantity: 2 }, 'partial-receive');
     const fingerprint = repairFingerprint(project);
     let finish!: (result: SolverResult) => void;
     const controller = createRepairController(() => new Promise<SolverResult>(resolve => { finish = resolve; }));
     controller.update(project, []); const pending = controller.run();
     const changed = structuredClone(project); advance(changed);
-    progress(changed, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:partial-send', quantity: 3 }, 'partial-correction');
+    progress(changed, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:partial-send', quantity: 1 }, 'partial-correction');
     expect(repairFingerprint(changed)).not.toBe(fingerprint);
     controller.update(changed, []);
     finish({ status: 'impossible', candidates: [], reasons: [], nodesVisited: 0, exhausted: false, optimality: 'proven' });

@@ -305,7 +305,16 @@ export class LocalRepository implements Repository {
   private project(store: LocalStore, key: EntityKey, snapshot: Snapshot): ProjectAggregate {
     const root = this.get<ProjectRoot>(store, key, 'project_root', snapshot.blockTimestamp);
     const state = this.scope<ProjectState>(store, 'project_state', root, snapshot.blockTimestamp);
-    const activation = this.scope<PlanActivation>(store, 'plan_activation', root, snapshot.blockTimestamp);
+    let activation = this.scope<PlanActivation>(store, 'plan_activation', root, snapshot.blockTimestamp);
+    // Local storage retains expired immutable proposals, so an empty live scope
+    // can be distinguished from a project that has never had a proposed plan.
+    const hasPlanHistory = Object.values(store.records).some(({ entity }) =>
+      (entity.payload.entityType === 'proposal' || entity.payload.entityType === 'plan_activation')
+      && entity.payload.projectRoot === root.key
+      && sameActor(entity.provenance.creator, root.provenance.creator));
+    if (activation.status === 'missing' && !hasPlanHistory
+      && state.status === 'unique' && state.entity.payload.lifecycle === 'planning'
+      && state.entity.payload.completion === null) activation = { status: 'missing', reason: 'not_initialized' };
     const history = this.live(store, snapshot.blockTimestamp).filter(entity => entity.payload.entityType === 'proposal'
       && entity.payload.projectRoot === key && sameActor(entity.provenance.creator, root.provenance.creator)
       && sameActor(entity.provenance.owner, root.provenance.creator)) as EntityRecord<Proposal>[];

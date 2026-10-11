@@ -11,6 +11,7 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "test:integration": "tsc --noEmit -p tests/integration/tsconfig.json && vitest run --config tests/integration/vitest.config.ts",
     "test:bootstrap": "node --test tests/first-write.test.mjs tests/atomic-transition.test.mjs",
     "build": "vite build",
     "build:desk": "vite build --config vite.desk.config.ts",
@@ -18,7 +19,7 @@
     "preview": "vite preview",
     "preview:desk": "vite preview --config vite.desk.config.ts",
     "verify": "tsx src/cli/verify.ts",
-    "check": "npm run typecheck && npm run test:unit && npm run test:bootstrap && npm run build && npm run build:desk"
+    "check": "node scripts/check-product.mjs"
   },
   "dependencies": {
     "@arkiv-network/sdk": "0.8.1",

@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { ENTITY_EVENTS_ABI } from '@arkiv-network/sdk';
 import { encodeAbiParameters, encodeEventTopics, parseAbiParameters, toHex } from 'viem';
 import type { Hex } from 'viem';
-import { hashPlan, hashRequirements } from '../../domain/canonical';
+import { hashOffer, hashPlan, hashRequirements } from '../../domain/canonical';
+import { deriveExecution } from '../../domain/execution';
+import { activeSource } from '../../domain/readiness';
 import { prepareAttestation, prepareCloseProject, prepareDecision } from '../../domain/operations';
 import { independentlyValidatePlan } from '../../domain/validation';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { AccountAddress, EntityPayload, PublicEntityKey } from '../../domain/types';
+import { prepareProgressCommand, runbookRows } from '../../features/execution/model';
+import type { ProgressInput } from '../../features/execution/model';
+import { repairInput, solveRepair } from '../../features/execution/repair';
+import { publishPlanInput } from '../../features/projects/selectors';
 import type { OperationKind, ReplaceBookCommand, WriteAuthority } from '../types';
 import { createOperationController, createOperationIntent, MemoryOperationStore } from '../operations';
 import { createWalletGateway } from '../wallet';
@@ -129,6 +135,91 @@ function harness(account: AccountAddress = PUBLISHER) {
   });
   return { ...source, store, controller, gateway, repository, control, command, replacement, externalReplaceBook, saveSnapshot, read, receipts };
 }
+
+function equipmentHarness() {
+  const f = harness(), recipientRoot = entityKey(80), recipientBook = entityKey(81);
+  const offer = f.book.offers[0]!;
+  Object.assign(offer, { resourceId: 'boards', kind: 'equipment', unit: 'board', quantity: 6 });
+  Object.assign(f.book.resources[0]!, { id: 'boards', kind: 'equipment', unit: 'board', capacity: 6 });
+  Object.assign(f.plan.variant.requirements[0]!, { kind: 'equipment', unit: 'board', quantity: 6 });
+  Object.assign(f.plan.allocations[0]!, { resourceId: 'boards', unit: 'board', quantity: 6, offerHash: hashOffer(KEYS.publisher, offer) });
+  Object.assign(f.plan.offers[0]!, { offerHash: hashOffer(KEYS.publisher, offer) });
+  Object.assign(f.plan.resourceAssumptions[0]!, { resourceId: 'boards', unit: 'board', capacity: 6 });
+  const allocation = f.plan.allocations[0]!;
+  const common = { publisherRoot: KEYS.publisher, resourceId: 'boards', quantity: 6, unit: 'board',
+    allocationIds: [allocation.id], dependsOn: [], instructions: 'Count the boards.' };
+  f.plan.runbook.push({ ...common, kind: 'handover', id: 'send', transferId: 'delivery', title: 'Deliver boards',
+    giver: KEYS.publisher, receiver: recipientRoot, interval: { start: allocation.interval.start, end: allocation.interval.start + 1 } },
+  { ...common, kind: 'return', id: 'return', transferId: 'return-delivery', title: 'Return boards', publisherRoot: recipientRoot,
+    giver: recipientRoot, receiver: KEYS.publisher, interval: { start: allocation.interval.end - 1, end: allocation.interval.end } });
+  f.plan.requiredApprovers.push(recipientRoot);
+  f.proposal.proposalHash = hashPlan(f.plan); f.proposal.requirementsHash = hashRequirements(KEYS.project, f.plan.variant.requirements);
+  f.activation.proposalHash = f.proposal.proposalHash;
+  f.state.publisherRoots.push(recipientRoot);
+  f.book.decisions[0]!.proposalHash = f.proposal.proposalHash;
+  Object.assign(f.book.grants[0]!, { proposalHash: f.proposal.proposalHash, offers: f.plan.offers, allocations: f.plan.allocations });
+  f.requestLink.proposalHash = f.proposal.proposalHash;
+  f.rpc.update(KEYS.book, f.book); f.rpc.update(KEYS.proposal, f.proposal); f.rpc.update(KEYS.activation, f.activation);
+  f.rpc.update(KEYS.state, f.state); f.rpc.update(KEYS.requestLink, f.requestLink);
+  f.rpc.put(rawEntity(recipientRoot, { ...f.publisher, publisher: { kind: 'wallet', address: STRANGER } }, STRANGER));
+  f.rpc.put(rawEntity(recipientBook, { ...f.book, publisherRoot: recipientRoot, name: 'Recipient', resources: [], offers: [], decisions: [], grants: [], attestations: [], custodyHolds: [] }, STRANGER));
+  f.saveSnapshot();
+  async function load() {
+    const result = await f.repository.loadProject(KEYS.project);
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    for (const publisher of result.value.publishers) if (publisher.book.status !== 'unique') throw new Error(JSON.stringify(publisher.book));
+    return result.value;
+  }
+  async function progress(address: AccountAddress, duty: string, input: ProgressInput, id: string) {
+    f.control.account = address;
+    const project = await load();
+    const command = prepareProgressCommand(project, project.proposal!, activeSource(project)!, duty, authority(address), input, f.rpc.timestamp, id);
+    const result = await f.repository.replaceBook(command);
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    return load();
+  }
+  return { ...f, recipientRoot, load, progress };
+}
+
+describe('public transfer commands with the real writer and injected RPC', () => {
+  it('persists sender six-to-four correction through writer capacity checks and requires the receiver’s new receipt', async () => {
+    const f = equipmentHarness();
+    await f.progress(PUBLISHER, 'send', { kind: 'transfer_report', quantity: 6 }, 'original-six');
+    await f.progress(STRANGER, 'send', { kind: 'transfer_acknowledgement', reportId: 'report:original-six', quantity: 6 }, 'receipt-six');
+    let project = await f.progress(PUBLISHER, 'send', { kind: 'transfer_report', correctsReportId: 'report:original-six', quantity: 4 }, 'correct-four');
+    let row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'send')!;
+    expect(row).toMatchObject({ reportedQuantity: 4, acknowledgedQuantity: 0, status: 'awaiting_acknowledgement' });
+    expect(row.historicalStatements.map(item => item.id)).toEqual(expect.arrayContaining(['report:original-six', 'report:receipt-six']));
+    expect(deriveExecution(project).outstandingCustodyHolds.map(hold => hold.quantity)).toEqual([4]);
+    project = await f.progress(STRANGER, 'send', { kind: 'transfer_acknowledgement', reportId: 'report:correct-four', quantity: 4 }, 'receipt-four');
+    row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'send')!;
+    expect(row.acknowledgedQuantity).toBe(4); expect(deriveExecution(project).reasons).toEqual([]);
+    expect(f.control.sends).toBe(4);
+  });
+  it('publishes reconciled remaining work and accepts two held plus four new boards through their full return', async () => {
+    const f = equipmentHarness();
+    await f.progress(PUBLISHER, 'send', { kind: 'transfer_report', quantity: 6 }, 'reported-six');
+    let project = await f.progress(STRANGER, 'send', { kind: 'transfer_acknowledgement', reportId: 'report:reported-six', quantity: 2 }, 'received-two');
+    expect(repairInput(project)).toBeNull();
+    await f.progress(PUBLISHER, 'send', { kind: 'transfer_report', correctsReportId: 'report:reported-six', quantity: 2 }, 'correct-two');
+    project = await f.progress(STRANGER, 'send', { kind: 'transfer_acknowledgement', reportId: 'report:correct-two', quantity: 2 }, 'confirm-two');
+    const input = repairInput(project)!;
+    const candidate = solveRepair(project, input, [], { maxNodes: 10000, maxCandidates: 1 }).candidates[0]!;
+    expect(candidate.plan.runbook.find(duty => duty.id === 'send')).toMatchObject({ quantity: 4 });
+    f.control.account = COORDINATOR;
+    const fields = publishPlanInput(project, candidate, 'repair-transfer', f.rpc.timestamp, 'Deliver the remaining four boards.', { sourceRecipe: input.recipe });
+    const published = await f.repository.publishPlan(f.command('publish_plan', fields, 'repair-transfer', COORDINATOR));
+    if (!published.ok) throw new Error(JSON.stringify(published.error));
+    project = await f.progress(PUBLISHER, 'send', { kind: 'transfer_report', quantity: 4 }, 'remaining-four');
+    expect(deriveExecution(project).outstandingCustodyHolds.reduce((sum, hold) => sum + hold.quantity, 0)).toBe(6);
+    await f.progress(STRANGER, 'send', { kind: 'transfer_acknowledgement', reportId: 'report:remaining-four', quantity: 4 }, 'received-four');
+    await f.progress(STRANGER, 'return', { kind: 'transfer_report', quantity: 6 }, 'return-six');
+    project = await f.progress(PUBLISHER, 'return', { kind: 'transfer_acknowledgement', reportId: 'report:return-six', quantity: 6 }, 'confirm-return');
+    expect(deriveExecution(project).outstandingCustodyHolds).toEqual([]);
+    expect(deriveExecution(project).completed.map(work => work.obligationId)).toEqual(expect.arrayContaining(['send', 'return']));
+    expect(independentlyValidatePlan(project.proposal!.payload.plan, project.publishers, project.snapshot.blockTimestamp).valid).toBe(true);
+  });
+});
 
 describe('writer preflight and facade error boundaries', () => {
   it('binds every command field to the frozen input before any RPC or wallet work', async () => {

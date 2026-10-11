@@ -2,15 +2,19 @@ import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { ExportPacket } from '../../src/data/types';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
+import type { SourcePlanRef } from '../../src/domain/types';
 import { canonicalJson } from '../../src/domain/canonical';
 import { activeSource } from '../../src/domain/readiness';
+import { assertProofLineage } from './scenario';
 
 export type RunCli = (executable: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number }) => Promise<string>;
 const runCli: RunCli = (executable, args, options) => new Promise((accept, reject) => {
   execFile(executable, args, options, (error, stdout) => error ? reject(new Error('The independent verifier did not return a verified packet.')) : accept(stdout));
 });
 
-export async function verifyInFreshProcess(expected: ExportPacket, repositoryRoot: string, execute: RunCli = runCli): Promise<ExportPacket> {
+export async function verifyInFreshProcess(expected: ExportPacket, repositoryRoot: string, expectedLineage: readonly SourcePlanRef[],
+  execute: RunCli = runCli): Promise<ExportPacket> {
+  assertProofLineage(expected.project, expectedLineage);
   const env: NodeJS.ProcessEnv = {};
   for (const name of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE']) if (process.env[name]) env[name] = process.env[name];
   const output = await execute(process.execPath, [resolve(repositoryRoot, 'node_modules/tsx/dist/cli.mjs'),
@@ -32,5 +36,6 @@ export async function verifyInFreshProcess(expected: ExportPacket, repositoryRoo
       !== canonicalJson(expected.project.proposalHistory.map(item => [item.key, item.payload.proposalHash]))) {
     throw new Error('The independent verifier does not match the exact requested public snapshot.');
   }
+  assertProofLineage(packet.project, expectedLineage);
   return packet;
 }

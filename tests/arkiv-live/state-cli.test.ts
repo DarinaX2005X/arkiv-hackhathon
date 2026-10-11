@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hashCanonical } from '../../src/domain/canonical';
-import { deriveReadiness } from '../../src/domain/readiness';
+import { activeSource, deriveReadiness } from '../../src/domain/readiness';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
-import type { AccountAddress } from '../../src/domain/types';
+import type { AccountAddress, SourcePlanRef } from '../../src/domain/types';
 import type { ExportPacket, WriteAuthority } from '../../src/data/types';
 import { ArkivReader } from '../../src/data/arkiv/reader';
 import { KEYS, NOW, entityKey, threeProposalFixture } from '../../src/data/__tests__/arkiv-fixture';
@@ -38,6 +38,12 @@ async function packetFixture(): Promise<ExportPacket> {
   const project = await reader.loadProject(KEYS.project);
   return { format: 'partfolk-export', version: 1, exportedAt: NOW, mode: 'public', project,
     readiness: deriveReadiness(project, NOW), snapshot: project.snapshot };
+}
+
+// Capture the original complete fixture as the operator's saved publication references before altering a returned packet.
+function savedLineage(packet: ExportPacket): SourcePlanRef[] {
+  return packet.project.proposalHistory.map((_, index, records) => structuredClone(index + 1 < records.length
+    ? records[index + 1]!.payload.plan.predecessor! : activeSource(packet.project)!));
 }
 
 afterEach(() => { vi.unstubAllEnvs(); });
@@ -160,7 +166,7 @@ describe('independent CLI verifier with an injected executor', () => {
       vi.stubEnv(variable, 'do-not-forward');
     }
     const execute = vi.fn<RunCli>(async () => JSON.stringify(expected));
-    const received = await verifyInFreshProcess(expected, repositoryRoot, execute);
+    const received = await verifyInFreshProcess(expected, repositoryRoot, savedLineage(expected), execute);
     expect(received).toEqual(expected);
     expect(execute).toHaveBeenCalledTimes(1);
     const [executable, args, options] = execute.mock.calls[0]!;
@@ -176,7 +182,35 @@ describe('independent CLI verifier with an injected executor', () => {
   it('allows independent fetch/export times when the exact canonical snapshot and agreement match', async () => {
     const expected = await packetFixture(); const received = structuredClone(expected);
     received.exportedAt += 2_000; received.snapshot.fetchedAt += 2_000;
-    expect(await verifyInFreshProcess(expected, '.', async () => JSON.stringify(received))).toEqual(received);
+    expect(await verifyInFreshProcess(expected, '.', savedLineage(expected), async () => JSON.stringify(received))).toEqual(received);
+  });
+
+  it.each([false, true])('rejects two equally truncated histories even if their completeness marker is %s', async complete => {
+    const expected = await packetFixture(); const lineage = savedLineage(expected);
+    expect(lineage).toHaveLength(3);
+    expected.project.proposalHistory = [expected.project.proposal!];
+    expected.project.proposalHistoryStatus = { complete, reasons: complete ? [] : [{ code: 'evidence_unavailable' }] };
+    const execute = vi.fn<RunCli>(async () => JSON.stringify(expected));
+    await expect(verifyInFreshProcess(expected, '.', lineage, execute)).rejects.toThrow('lineage');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects an independent history gap even when its proposal keys and hashes match', async () => {
+    const expected = await packetFixture(); const received = structuredClone(expected);
+    received.project.proposalHistoryStatus = { complete: false, reasons: [{ code: 'evidence_unavailable' }] };
+    await expect(verifyInFreshProcess(expected, '.', savedLineage(expected), async () => JSON.stringify(received)))
+      .rejects.toThrow('lineage is incomplete');
+  });
+
+  it.each<[string, (lineage: SourcePlanRef[]) => void, string]>([
+    ['prior proposal key', lineage => { lineage[0]!.proposalKey = entityKey(601); }, 'saved revision identities'],
+    ['prior proposal hash', lineage => { lineage[0]!.proposalHash = entityKey(602); }, 'saved revision identities'],
+    ['prior activation', lineage => { lineage[0]!.activationKey = entityKey(603); }, 'saved revision chain'],
+    ['active activation', lineage => { lineage[2]!.activationKey = entityKey(604); }, 'active proof revision'],
+    ['project root', lineage => { lineage[0]!.projectRoot = entityKey(605); }, 'saved revision identities'],
+  ])('authenticates the %s against saved publication references', async (_name, mutate, message) => {
+    const expected = await packetFixture(); const lineage = savedLineage(expected); mutate(lineage);
+    await expect(verifyInFreshProcess(expected, '.', lineage, async () => JSON.stringify(expected))).rejects.toThrow(message);
   });
 
   it.each<[string, (packet: ExportPacket) => void]>([
@@ -209,16 +243,16 @@ describe('independent CLI verifier with an injected executor', () => {
   ])('rejects an independent packet with mismatched %s', async (_name, mutate) => {
     const expected = await packetFixture(); const different = structuredClone(expected); mutate(different);
     let failure: unknown;
-    try { await verifyInFreshProcess(expected, '.', async () => JSON.stringify(different)); }
+    try { await verifyInFreshProcess(expected, '.', savedLineage(expected), async () => JSON.stringify(different)); }
     catch (error) { failure = error; }
     expect(failure, 'A mismatched independent packet must be rejected.').toBeInstanceOf(Error);
   });
 
   it('rejects malformed JSON and propagates execution failure without another process attempt', async () => {
     const expected = await packetFixture();
-    await expect(verifyInFreshProcess(expected, '.', async () => 'not a JSON packet')).rejects.toThrow('not JSON');
+    await expect(verifyInFreshProcess(expected, '.', savedLineage(expected), async () => 'not a JSON packet')).rejects.toThrow('not JSON');
     const execute = vi.fn<RunCli>(async () => { throw new Error('Synthetic verifier failure'); });
-    await expect(verifyInFreshProcess(expected, '.', execute)).rejects.toThrow('Synthetic verifier failure');
+    await expect(verifyInFreshProcess(expected, '.', savedLineage(expected), execute)).rejects.toThrow('Synthetic verifier failure');
     expect(execute).toHaveBeenCalledTimes(1);
   });
 });

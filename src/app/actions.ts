@@ -25,7 +25,8 @@ interface ActionStore {
   exportRecovery?(): string | null;
   inspectImport?(raw: string): LoadResult<ActionRecord>;
 }
-type Submit<C extends CommandBase, T> = (repository: Repository, command: C) => Promise<Result<T>>;
+export type ActionRepository = Pick<Repository, 'mode' | 'reconcile'>;
+type Submit<R extends ActionRepository, C extends CommandBase, T> = (repository: R, command: C) => Promise<Result<T>>;
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const actorKey = (actor: Actor | null): string => !actor ? 'disconnected' : actor.kind === 'wallet' ? `wallet:${actor.address.toLowerCase()}` : actor.id;
 const failure = (code: RepositoryError['code'], diagnostic: string): Result<never> => ({ ok: false, error: { code, diagnostic, reasons: [], retryable: false } });
@@ -36,7 +37,7 @@ export function validRepositoryActionRecord(value: unknown): value is ActionReco
   if (!object(value.command) || !object(value.operation)) return false;
   const operation = value.operation;
   const phases = ['prepared', 'root_pending', 'root_confirmed', 'initial_state_pending', 'initialized', 'proposal_pending', 'proposal_confirmed', 'activation_pending', 'activation_confirmed', 'book_pending', 'book_confirmed', 'link_pending', 'fanout_pending', 'complete'];
-  const kinds = ['create_project', 'register_publisher', 'replace_project', 'replace_book', 'publish_proposal', 'activate_proposal', 'publish_project_link', 'close_project', 'renew_entity', 'publish_plan', 'share_offer'];
+  const kinds = ['create_project', 'register_publisher', 'replace_project', 'replace_book', 'publish_proposal', 'activate_proposal', 'publish_project_link', 'close_project', 'renew_entity', 'publish_plan', 'share_offer', 'publish_event', 'replace_event', 'replace_attendance'];
   const hash = (entry: unknown) => typeof entry === 'string' && /^0x[\da-fA-F]{64}$/.test(entry);
   const keys = (entry: unknown) => Array.isArray(entry) && entry.every(key => typeof key === 'string' && /^(0x[\da-fA-F]{64}|local:.+)$/.test(key));
   if (!kinds.includes(String(operation.kind)) || !phases.includes(String(operation.phase))
@@ -66,8 +67,8 @@ export function validRepositoryActionRecord(value: unknown): value is ActionReco
 }
 
 /** UI persistence and duplicate-submit control. The repository remains the signing authority. */
-export function createRepositoryActionController({ repository, store, getActor }: {
-  repository: Repository | null; store: ActionStore; getActor: () => Actor | null;
+export function createRepositoryActionController<R extends ActionRepository = Repository>({ repository, store, getActor }: {
+  repository: R | null; store: ActionStore; getActor: () => Actor | null;
 }) {
   let state: RepositoryActionState = { status: 'idle', operation: null, message: '' };
   let record: ActionRecord = { status: 'idle', command: null, operation: null };
@@ -101,7 +102,7 @@ export function createRepositoryActionController({ repository, store, getActor }
     if (!persist({ ...record, command: nextCommand, operation, status })) return;
     emit({ status, operation, message, ...(error ? { error } : {}) });
   };
-  const execute = async <C extends CommandBase, T>(command: C, submit: Submit<C, T>): Promise<Result<T>> => {
+  const execute = async <C extends CommandBase, T>(command: C, submit: Submit<R, C, T>): Promise<Result<T>> => {
     if (!repository) return failure('not_connected', 'No repository is available.');
     if (!sameActor(command.operation)) return failure('unauthorized', 'The current account does not own this request.');
     busy = true;
@@ -125,7 +126,7 @@ export function createRepositoryActionController({ repository, store, getActor }
       return result;
     } finally { busy = false; }
   };
-  return {
+  const controller = {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     get recoverableCommand(): CommandBase | null { return object(record.command) ? structuredClone(record.command) as unknown as CommandBase : null; },
@@ -145,7 +146,7 @@ export function createRepositoryActionController({ repository, store, getActor }
         message: 'The saved request is readable again. Check its original transaction before continuing.' });
       return { ok: true, value: undefined };
     },
-    async run<C extends CommandBase, T>(command: C, submit: Submit<C, T>): Promise<Result<T>> {
+    async run<C extends CommandBase, T>(command: C, submit: Submit<R, C, T>): Promise<Result<T>> {
       if (busy || state.status === 'needs-verification' || state.status === 'submitting') return failure('unverified', 'Resolve the existing request before sending a new one.');
       if (!repository || !sameActor(command.operation)) return failure('unauthorized', 'Connect the account that owns this request.');
       let frozen: C;
@@ -163,6 +164,18 @@ export function createRepositoryActionController({ repository, store, getActor }
         const result = await repository.reconcile(structuredClone(record.operation));
         if (!result.ok) { finish('needs-verification', record.operation, 'The current status could not be verified. Keep the original request.', result.error); return result; }
         const value = result.value;
+        // A public UI envelope can survive loss of its separate native journal.
+        // Caller-provided steps cannot prove that the wallet was never asked.
+        const observedSend = record.operation.transactionHash || record.operation.confirmedKeys.length > 0
+          || record.operation.steps.some(step => step.transactionHash || step.confirmedKeys.length > 0
+            || ['submitted', 'unverified', 'confirmed', 'reverted'].includes(step.status));
+        if (value.status === 'not_sent' && record.operation.authority.mode === 'public'
+          && (value.evidence !== 'native-journal' || observedSend)) {
+          const error: RepositoryError = { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false };
+          finish('needs-verification', record.operation,
+            'The original transaction journal is unavailable. Keep this saved request and restore its journal before trying again.', error);
+          return { ok: true as const, value: { status: 'unverified' as const, operation: record.operation, error } };
+        }
         if (value.status === 'confirmed' && value.operation.phase === 'complete') finish('confirmed', value.operation, 'Your original request is confirmed.');
         else if (value.status === 'confirmed') finish('needs-verification', value.operation, 'A step is confirmed. Continue the remaining steps of this saved request.');
         else if (value.status === 'partial_reverted') finish('needs-verification', value.operation, 'Earlier steps are confirmed. The latest transaction reverted. Continue this saved request to retry only its remaining step after a fresh check.', value.error);
@@ -179,9 +192,15 @@ export function createRepositoryActionController({ repository, store, getActor }
         return failure('unverified', 'Reconciliation was interrupted.');
       } finally { busy = false; }
     },
-    async resume<C extends CommandBase, T>(submit: Submit<C, T>): Promise<Result<T>> {
+    async resume<C extends CommandBase, T>(submit: Submit<R, C, T>): Promise<Result<T>> {
       if (busy || state.status === 'reverted' || state.status === 'confirmed' || !object(record.command) || !record.operation) return failure('unverified', 'This request cannot be resumed.');
-      // Repositories reconcile each saved step before sending a remaining one.
+      // Reconcile at the UI boundary too: a missing native journal must not make
+      // an old ambiguous request look like a new, never-submitted operation.
+      const reconciled = await controller.reconcile();
+      const current = controller.getSnapshot();
+      if (!reconciled.ok || reconciled.value.status === 'unverified'
+        || current.status === 'reverted' || current.status === 'confirmed') return failure('unverified', 'The original request must be verified before it can continue.');
+      // Repositories still authenticate each original step before any remaining send.
       return execute(structuredClone(record.command) as unknown as C, submit);
     },
     clear(): boolean {
@@ -191,9 +210,10 @@ export function createRepositoryActionController({ repository, store, getActor }
       return true;
     },
   };
+  return controller;
 }
 
-const controllers = new WeakMap<AppRuntime, Map<string, ReturnType<typeof createRepositoryActionController>>>();
+const controllers = new WeakMap<AppRuntime, Map<string, ReturnType<typeof createRepositoryActionController<Repository>>>>();
 export function useRepositoryAction(channel: string) {
   const runtime = useApp();
   const session = useAppSession();

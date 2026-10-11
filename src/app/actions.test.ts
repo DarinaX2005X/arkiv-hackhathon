@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createRepositoryActionController, validRepositoryActionRecord } from './actions';
 import { createDraftStore } from './storage';
 import { createOperationIntent } from '../data/operations';
-import type { Actor } from '../domain/types';
+import { TIRAMISU_CHAIN_ID, type Actor } from '../domain/types';
 import type { CommandBase, OperationIntent, ReconciliationResult, Repository, Result } from '../data/types';
 
 type Port = Parameters<typeof createRepositoryActionController>[0]['store'];
@@ -143,5 +143,62 @@ describe('unreadable request recovery', () => {
     expect(controller.restoreRecovery('{broken').ok).toBe(false);
     expect(values.get('saved')).toBe('{corrupt original');
     expect(controller.recoveryText).toBe('{corrupt original');
+  });
+});
+
+describe('public request journal loss', () => {
+  const publicActor = { kind: 'wallet' as const, address: `0x${'12'.repeat(20)}` as const };
+  const publicCommand = () => {
+    const input = { lifetimeSeconds: 3600, expectedHeads: [] };
+    return { ...input, operation: createOperationIntent('replace_attendance', { mode: 'public', actor: publicActor, chainId: TIRAMISU_CHAIN_ID }, input) };
+  };
+  it('does not turn an ambiguous original intent into no-send proof when its native journal disappeared', async () => {
+    const command = publicCommand();
+    const journal = store();
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation } }) };
+    const action = createRepositoryActionController({ repository: repo, store: journal, getActor: () => publicActor });
+    await action.run(command, async () => { throw new Error('The send response was lost'); });
+    const reopened = createRepositoryActionController({ repository: repo, store: journal, getActor: () => publicActor });
+    const result = await reopened.reconcile();
+    expect(result.ok && result.value.status).toBe('unverified');
+    expect(reopened.getSnapshot().status).toBe('needs-verification');
+    expect(reopened.clear()).toBe(false);
+    let callbacks = 0;
+    await reopened.resume(async () => { callbacks++; return { ok: true, value: null }; });
+    expect(callbacks).toBe(0);
+  });
+  it('reconciles a saved request before a resume callback can use the repository', async () => {
+    const command = publicCommand(); const order: string[] = [];
+    const operation: OperationIntent = { ...command.operation, steps: [{ id: 'kept-step', phase: 'initial_state_pending', status: 'failed-before-send',
+      transactionHash: null, confirmedKeys: [], expectedHeads: [], inputHash: command.operation.inputHash }] };
+    const repo = { mode: 'public' as const, reconcile: async (): Promise<Result<ReconciliationResult>> => {
+      order.push('reconcile'); return { ok: true, value: { status: 'not_sent', operation, evidence: 'native-journal' } };
+    } };
+    const action = createRepositoryActionController({ repository: repo, store: store(), getActor: () => publicActor });
+    await action.run(command, async () => ({ ok: false, error: { code: 'rejected', reasons: [], retryable: false } }));
+    await action.resume(async (_repo, saved) => { order.push('resume'); expect(saved.operation.id).toBe(command.operation.id); return { ok: true, value: { operation: { ...operation, phase: 'complete' } } }; });
+    expect(order).toEqual(['reconcile', 'resume']);
+  });
+  it('rejects caller steps echoed without native journal evidence after a rejected request was retried', async () => {
+    const command = publicCommand();
+    command.operation.steps = [{ id: 'old-rejection', phase: 'initial_state_pending', status: 'failed-before-send',
+      transactionHash: null, confirmedKeys: [], expectedHeads: [], inputHash: command.operation.inputHash }];
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation } }) };
+    const action = createRepositoryActionController({ repository: repo, store: store(), getActor: () => publicActor });
+    await action.run(command, async () => { throw new Error('Retried send has an unknown outcome'); });
+    let callbacks = 0;
+    await action.resume(async () => { callbacks++; return { ok: true, value: null }; });
+    expect(callbacks).toBe(0); expect(action.getSnapshot().status).toBe('needs-verification'); expect(action.clear()).toBe(false);
+  });
+  it('never downgrades observed send evidence to not sent even if an incomplete journal claims it', async () => {
+    const command = publicCommand();
+    command.operation.steps = [{ id: 'known-send', phase: 'initial_state_pending', status: 'unverified',
+      transactionHash: null, confirmedKeys: [], expectedHeads: [], inputHash: command.operation.inputHash }];
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation: { ...operation, steps: [] }, evidence: 'native-journal' } }) };
+    const action = createRepositoryActionController({ repository: repo, store: store(), getActor: () => publicActor });
+    await action.run(command, async () => { throw new Error('Lost response'); });
+    await action.reconcile();
+    expect(action.getSnapshot().operation?.steps[0]?.status).toBe('unverified');
+    expect(action.getSnapshot().status).toBe('needs-verification'); expect(action.clear()).toBe(false);
   });
 });

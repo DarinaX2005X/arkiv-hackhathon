@@ -1,6 +1,7 @@
 import { canonicalConditions, canonicalJson, compareText, hashCanonical, hashOffer, hashPlan, hashRequirements, offerIdentity, resourceIdentity } from './canonical';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from './types';
 import { validateCurrentEntity } from './readiness';
+import { reconcileReturnedCustody } from './custody';
 import type {
   Actor, Allocation, Attestation, BookState, CompletedWork, Condition, DomainReason, EntityKey, EntityPayload, EntityRecord, Interval,
   ContentHash, Offer, PlanDocument, ProjectRecipe, PublisherAggregate, Requirement, Resource,
@@ -550,8 +551,11 @@ function transferConservation(plan: PlanDocument, books: ReadonlyMap<EntityKey, 
     const first = group[0]!, owner = first.kind === 'handover' ? first.giver : first.receiver;
     const allocations = plan.allocations.filter(allocation => allocation.publisherRoot === owner
       && allocation.resourceId === first.resourceId && allocation.unit === first.unit);
-    const book = books.get(owner);
-    const holdings = new Map<EntityKey, number>(), carried = new Map<string, number>();
+    const book = books.has(owner) ? structuredClone(books.get(owner)!) : undefined;
+    // Validation describes the plan from its opening inventory. Returns reported
+    // under this exact version must not erase the inventory that funded them.
+    if (book) reconcileReturnedCustody(book, plan.projectRoot, proposalHash);
+    const holdings = new Map<EntityKey, number>();
     let openingHeld = 0;
     for (const hold of book?.custodyHolds ?? []) {
       if (hold.status !== 'outstanding' || hold.projectRoot !== plan.projectRoot || hold.resourceId !== first.resourceId
@@ -577,16 +581,14 @@ function transferConservation(plan: PlanDocument, books: ReadonlyMap<EntityKey, 
       if (receivers.size !== 1 || reports.reduce((sum, report) => sum + report.quantity, 0) < hold.quantity) continue;
       const receiver = reports[0]!.receiver;
       holdings.set(receiver, (holdings.get(receiver) ?? 0) + hold.quantity);
-      const continuation = canonicalJson([hold.transferId, receiver]);
-      carried.set(continuation, (carried.get(continuation) ?? 0) + hold.quantity);
     }
     const stock = Math.max(openingHeld, peakLoad(allocations.map(allocation => ({ ...allocation, projectRoot: plan.projectRoot })), 0));
     holdings.set(owner, stock - openingHeld);
     const events: { at: number; delta: number; party: EntityKey; obligationId: string }[] = [];
     for (const transfer of group) {
-      const continuing = transfer.kind === 'handover' ? carried.get(canonicalJson([transfer.transferId, transfer.receiver])) ?? 0 : 0;
-      const quantity = Math.max(0, transfer.quantity - continuing);
-      if (!quantity) continue;
+      // Every duty in a new plan describes work still to perform. Earlier
+      // custody funds a later return; it cannot erase a new physical handover.
+      const quantity = transfer.quantity;
       events.push({ at: transfer.interval.start, delta: -quantity, party: transfer.giver, obligationId: transfer.id },
         { at: transfer.interval.end, delta: quantity, party: transfer.receiver, obligationId: transfer.id });
     }

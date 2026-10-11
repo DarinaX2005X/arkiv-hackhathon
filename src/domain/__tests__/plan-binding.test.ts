@@ -131,11 +131,11 @@ describe('planned transfers conserve stock by owner, resource, recipient and tim
     expect(finalize().ok).toBe(false);
   });
 
-  it('allows remaining acknowledgement of the same earlier transfer without lending twice', () => {
+  it('does not reuse an earlier transfer ID to disguise another physical handover', () => {
     const { plan, transfer, held, finalize } = fixture();
     held(6);
     plan.runbook.push(transfer('old-delivery', 'handover', 1));
-    expect(finalize().ok).toBe(true);
+    expect(finalize().ok).toBe(false);
   });
 
   it('keeps agreed terms valid when their own handover creates a live custody hold', () => {

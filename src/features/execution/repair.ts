@@ -12,7 +12,8 @@ import { createOperationIntent } from '../../data/operations';
 export function repairInput(project: ProjectAggregate): SolverInput | null {
   if (project.state.status !== 'unique' || project.state.entity.payload.lifecycle === 'closed') return null;
   const remainder = remainingWork(project), source = activeSource(project);
-  if (!remainder || !source || !remainder.plan.allocations.length) return null;
+  if (!remainder || !source || !remainder.plan.allocations.length || remainder.unresolvedTransfers.length
+    || remainder.execution.reasons.some(reason => reason.code === 'attestation_mismatch')) return null;
   const state = project.state.entity.payload;
   const withdrawn = new Set(project.publishers.filter(publisher => publisher.book.status === 'unique'
     && publisher.book.entity.payload.decisions.some(decision => sameSource(decision, source) && (decision.status === 'withdrawn' || decision.status === 'declined'))).map(publisher => publisher.root.key));
@@ -27,6 +28,11 @@ export function repairInput(project: ProjectAggregate): SolverInput | null {
 export function solveRepair(project: ProjectAggregate, input: SolverInput, pins: SolverPin[], budget: SolverBudget): SolverResult {
   const remainder = remainingWork(project);
   if (!remainder) return { status: 'unverified', candidates: [], reasons: [{ code: 'missing_proposal' }], nodesVisited: 0, exhausted: false, optimality: 'not_proven' };
+  const mismatches = remainder.execution.reasons.filter(reason => reason.code === 'attestation_mismatch');
+  if (remainder.unresolvedTransfers.length || mismatches.length) return { status: 'unverified', candidates: [], reasons: [...mismatches, ...remainder.unresolvedTransfers.map(transfer => ({
+    code: 'attestation_mismatch', obligationId: transfer.obligationId,
+    params: { reported: transfer.reportedQuantity, acknowledged: transfer.acknowledgedQuantity },
+  } as const))], nodesVisited: 0, exhausted: false, optimality: 'not_proven' };
   const transferDuties = remainder.plan.runbook.filter(duty => duty.kind !== 'task');
   const taskRequirements = new Set(remainder.plan.runbook.filter(duty => duty.kind === 'task').flatMap(duty => duty.allocationIds)
     .map(id => remainder.plan.allocations.find(allocation => allocation.id === id)?.requirementId));
@@ -58,12 +64,16 @@ export function createRepairController(evaluate: (project: ProjectAggregate, inp
 }
 export function repairFingerprint(project: ProjectAggregate, pins: SolverPin[] = []): string {
   const input = repairInput(project);
-  return hashCanonical({ input: input ? planningFingerprint(input, pins) : null, remaining: remainingWork(project)?.plan ?? null });
+  const remaining = remainingWork(project);
+  return hashCanonical({ input: input ? planningFingerprint(input, pins) : null, remaining: remaining?.plan ?? null,
+    unresolvedTransfers: remaining?.unresolvedTransfers ?? [] });
 }
 export function prepareExecutionCheckpoint(project: ProjectAggregate, authority: WriteAuthority, now: number, id: string): ReplaceProjectCommand {
   if (project.state.status !== 'unique') throw new Error('Refresh the project before retaining completed work.');
   const remaining = remainingWork(project);
   if (!remaining) throw new Error('The current plan needs verification before repair.');
+  if (remaining.unresolvedTransfers.length) throw new Error('Reconcile the reported transfer first. The sender can correct their report, and the recipient must confirm the matching quantity.');
+  if (remaining.execution.reasons.some(reason => reason.code === 'attestation_mismatch')) throw new Error('The current reports need verification before repair.');
   const previous = project.state.entity;
   const command = { projectRoot: project.root.key, expectedHeads: [previous.key], lifetimeSeconds: STATE_LIFETIME_SECONDS,
     state: { ...structuredClone(previous.payload), operationId: id, createdAt: now, predecessorKeys: [previous.key], completedWork: remaining.completedWork } };

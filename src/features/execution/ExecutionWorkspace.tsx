@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
 import { routeHref } from '../../app/routes';
@@ -26,11 +26,12 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
 }) {
   const session = useAppSession(), owned = ownPublisherRoots(project, session.actor);
   const [quantity, setQuantity] = useState(''), [note, setNote] = useState(''), [ackQuantities, setAckQuantities] = useState<Record<string, string>>({});
+  const [correctedQuantities, setCorrectedQuantities] = useState<Record<string, string>>({});
   const duty = row.obligation, zone = proposal.payload.plan.variant.timeZone;
   const giver = duty.kind !== 'task' && owned.includes(duty.giver), receiver = duty.kind !== 'task' && owned.includes(duty.receiver);
   const canAct = !blocked && source !== null && row.status !== 'evidence_unavailable';
   const remaining = duty.kind === 'task' ? 0 : duty.quantity - row.reportedQuantity;
-  return <article className="execution-duty">
+  return <article className="execution-duty" id={`runbook-duty-${duty.id}`} tabIndex={-1}>
     <div className="execution-duty-time"><time dateTime={new Date(duty.interval.start).toISOString()}>{formatDateTime(duty.interval.start, zone)}</time><span>until {formatDateTime(duty.interval.end, zone)}</span></div>
     <div className="pf-stack execution-duty-content"><header><h3>{duty.title}</h3><StatusLabel tone={row.status === 'evidence_unavailable' ? 'warning' : row.completed ? 'success' : row.status === 'not_reported' ? 'neutral' : 'warning'}>{rowLabels[row.status]}</StatusLabel></header>
       <p>{duty.kind === 'task' ? `Responsible: ${publisherName(project, duty.publisherRoot)}` : `${publisherName(project, duty.giver)} gives ${duty.quantity} ${duty.unit} to ${publisherName(project, duty.receiver)}`}</p>
@@ -47,10 +48,13 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
       {row.reports.map(report => <div className="execution-statement" key={report.id}><strong>{publisherName(project, report.author)} reported {report.kind === 'task_report' ? report.status === 'done' ? 'done' : 'incomplete' : report.kind === 'transfer_report' ? `${report.quantity} ${report.unit} given` : ''}</strong><span className="execution-detail">{formatDateTime(report.recordedAt, zone)}</span>{report.kind === 'task_report' && report.note && <p>{report.note}</p>}
         {report.kind === 'transfer_report' && <>{row.acknowledgements.filter(ack => ack.statementHash === report.statementHash).map(ack => <p key={ack.id}>{publisherName(project, ack.author)} acknowledged {ack.acknowledgedQuantity} {report.unit} at {formatDateTime(ack.recordedAt, zone)}.</p>)}
           {!row.acknowledgements.some(ack => ack.statementHash === report.statementHash) && <p className="execution-outstanding">The recipient has not acknowledged this report.</p>}
+          {giver && <div className="pf-stack"><div className="pf-actions"><Field label={duty.kind === 'return' ? 'Corrected quantity I returned' : 'Corrected quantity I handed over'} type="number" min={1} max={remaining + report.quantity} step={1} value={correctedQuantities[report.id] ?? String(report.quantity)} onChange={event => setCorrectedQuantities(current => ({ ...current, [report.id]: event.target.value }))} />
+            <Button variant="quiet" disabled={!canAct || Number(correctedQuantities[report.id] ?? report.quantity) === report.quantity} onClick={() => onRecord(duty.id, { kind: 'transfer_report', correctsReportId: report.id, quantity: Number(correctedQuantities[report.id] ?? report.quantity) })}>Correct my transfer report</Button></div><p className="execution-detail">The original report stays in history. The recipient must confirm the corrected report separately.</p></div>}
           {receiver && <div className="pf-actions"><Field label={`Quantity received from report at ${formatDateTime(report.recordedAt, zone)}`} type="number" min={1} max={report.quantity} step={1} value={ackQuantities[report.id] ?? String(report.quantity)} onChange={event => setAckQuantities(current => ({ ...current, [report.id]: event.target.value }))} />
             <Button variant="secondary" disabled={!canAct} onClick={() => onRecord(duty.id, { kind: 'transfer_acknowledgement', reportId: report.id, quantity: Number(ackQuantities[report.id] ?? report.quantity) })}>{row.acknowledgements.some(ack => ack.statementHash === report.statementHash) ? 'Correct my acknowledgement' : duty.kind === 'return' ? 'Confirm I received the return' : 'Confirm I received these items'}</Button></div>}
         </>}
       </div>)}
+      {row.historicalStatements.length > 0 && <details><summary>Earlier reports and acknowledgements</summary><p>These earlier statements remain in history and do not confirm a corrected transfer.</p><ul>{row.historicalStatements.map(item => <li key={item.id}>{publisherName(project, item.author)} {item.kind === 'transfer_report' ? `reported ${item.quantity} ${item.unit}` : item.kind === 'transfer_acknowledgement' ? `acknowledged ${item.acknowledgedQuantity}` : `reported ${item.status === 'done' ? 'done' : 'incomplete'}`} at {formatDateTime(item.recordedAt, zone)}.</li>)}</ul></details>}
       {duty.kind === 'task' && owned.includes(duty.publisherRoot) && <div className="pf-stack"><Textarea label="My completion note" hint="This records your own report. It does not record anyone else’s agreement or receipt." value={note} maxLength={10000} onChange={event => setNote(event.target.value)} />
         <div className="pf-actions"><Button variant="secondary" disabled={!canAct || row.completed} onClick={() => onRecord(duty.id, { kind: 'task_report', status: 'done', note })}>Report my task done</Button>
           {row.reports.length > 0 && <Button variant="quiet" disabled={!canAct || row.status === 'reported_not_done'} onClick={() => onRecord(duty.id, { kind: 'task_report', status: 'not_done', note })}>Correct my task to incomplete</Button>}</div></div>}
@@ -64,12 +68,19 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
 export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: ProjectAggregate; onRefresh: () => void | Promise<void>; onReuse?: (template: RecipeTemplate) => void }) {
   const runtime = useApp(), session = useAppSession();
   const [selectedKey, setSelectedKey] = useState<EntityKey | null>(null), [mine, setMine] = useState(false), [error, setError] = useState('');
+  const [reviewTransfer, setReviewTransfer] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<RecordedOutcome>('completed_with_outstanding'), [statement, setStatement] = useState(''), [reviewedClosure, setReviewedClosure] = useState(false);
   const [releaseReasons, setReleaseReasons] = useState<Record<string, string>>({}), [draftExport, setDraftExport] = useState<string | null>(null);
   const action = useRepositoryAction(`execution:${project.root.key}`), closeAction = useRepositoryAction(`execution-close:${project.root.key}`);
   const versions = planVersions(project), selected = versions.find(item => item.key === selectedKey) ?? project.proposal ?? versions[0] ?? null;
   const source = selected ? sourceForProposal(project, selected.key) : null;
   const rows = selected ? runbookRows(project, selected, source, session.actor) : [];
+  useEffect(() => {
+    if (reviewTransfer && selected?.key === project.proposal?.key) {
+      document.getElementById(`runbook-duty-${reviewTransfer}`)?.focus();
+      setReviewTransfer(null);
+    }
+  }, [reviewTransfer, selected?.key, project.proposal?.key]);
   const execution = deriveExecution(project), state = project.state.status === 'unique' ? project.state.entity.payload : null;
   const authority = authorityFor(session.actor, session.mode, session.chainId), coordinator = ownsProject(project, session.actor);
   const readiness = deriveReadiness(project, runtime.now());
@@ -137,7 +148,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
     <div className="pf-actions"><Button variant="secondary" onClick={() => void onRefresh()}>Refresh current records</Button>{coordinator && state?.lifecycle === 'planning' && <Button disabled={blocked || !authority || readiness.status !== 'ready'} disabledReason="Everyone must agree to the current exact version before the project is marked started." onClick={() => void start()}>Mark project in progress</Button>}</div>
     {error && <Notice tone="warning" role="alert">{error}</Notice>}
     <ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} onResume={() => void action.resume<ReplaceBookCommand, unknown>((repository, command) => repository.replaceBook(command)).then(() => onRefresh())} />
-    <RepairPanel project={project} onRefresh={onRefresh} />
+    <RepairPanel project={project} onRefresh={onRefresh} onReviewTransfer={id => { setSelectedKey(project.proposal?.key ?? null); setMine(false); setReviewTransfer(id); }} />
     <section className="pf-stack execution-completion" aria-label="Completion review"><h2>{state?.completion ? 'Recorded project outcome' : 'Completion review'}</h2>
       {state?.completion && <Notice title={state.completion.outcome.replaceAll('_', ' ')}><p>Recorded {formatDateTime(state.completion.recordedAt, state.recipe.timeZone)}.</p><p>{state.completion.statement}</p><p>{state.completion.outstandingObligationIds.length} unfinished duties and {state.completion.outstandingCustodyHoldIds.length} equipment holds were recorded at closure. Later owner updates remain separate.</p></Notice>}
       <p>{execution.completed.length} owner-reported completed duties; {execution.outstandingObligationIds.length} duties still outstanding. Supporting evidence: {execution.evidenceAvailability}.</p>

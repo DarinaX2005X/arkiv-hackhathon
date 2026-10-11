@@ -4,7 +4,14 @@ import type { LocalStorageLike } from '../../data/local';
 import type { OperationKind, Result } from '../../data/types';
 import { hashPlan, hashRequirements } from '../canonical';
 import { prepareCloseProject, prepareDecision } from '../operations';
-import { deriveReadiness } from '../readiness';
+import { activeSource, deriveReadiness } from '../readiness';
+import { deriveExecution } from '../execution';
+import { SMALL_WORKS_COORDINATOR, SMALL_WORKS_NOW, SMALL_WORKS_PROJECT_ROOT, smallWorksRecipe, smallWorksRecords } from '../fixtures';
+import { finalizePlan, independentlyValidatePlan } from '../validation';
+import { prepareProgressCommand, runbookRows } from '../../features/execution/model';
+import type { ProgressInput } from '../../features/execution/model';
+import { repairInput, solveRepair } from '../../features/execution/repair';
+import { publishPlanInput } from '../../features/projects/selectors';
 import { solve } from '../solver';
 import { PROTOCOL } from '../types';
 import type { Actor, BookState, EntityKey, EntityRecord, ProjectAggregate, ProjectRecipe, ProjectState, Proposal } from '../types';
@@ -79,6 +86,59 @@ async function activateFirst() {
 }
 
 describe('LocalRepository durable owner protocol', () => {
+  it('saves full-quantity sender corrections and a reconciled remaining transfer through complete local repository commands', async () => {
+    const storage = createMemoryStorage();
+    const fresh = () => new LocalRepository({ storage, namespace: 'practice', now: () => SMALL_WORKS_NOW, logicalClock: true });
+    const repo = fresh(); unwrap(repo.seed(smallWorksRecords({ oak: true })));
+    let project = unwrap(await repo.loadProject(SMALL_WORKS_PROJECT_ROOT));
+    const solved = solve({ projectRoot: project.root.key, recipe: smallWorksRecipe(), publishers: project.publishers,
+      snapshot: project.snapshot, predecessor: null, predecessorSource: null, completedWork: [] });
+    const plan = structuredClone(solved.candidates[0]!.plan), allocation = plan.allocations.find(item => item.resourceId === 'boards')!;
+    const shared = { publisherRoot: allocation.publisherRoot, resourceId: allocation.resourceId, quantity: 6, unit: allocation.unit,
+      allocationIds: [allocation.id], dependsOn: [], instructions: 'Count each transfer.' };
+    plan.runbook.push({ ...shared, kind: 'handover', id: 'send', transferId: 'delivery', title: 'Deliver boards', giver: 'local:makerspace', receiver: 'local:cedar',
+      interval: { start: allocation.interval.start, end: allocation.interval.start + 1 } },
+    { ...shared, kind: 'return', id: 'return', transferId: 'return-delivery', title: 'Return boards', publisherRoot: 'local:cedar', giver: 'local:cedar', receiver: 'local:makerspace',
+      interval: { start: allocation.interval.end - 1, end: allocation.interval.end } });
+    const finalized = finalizePlan(plan, project.publishers, project.snapshot);
+    if (!finalized.ok) throw new Error(JSON.stringify(finalized.reasons));
+    if (SMALL_WORKS_COORDINATOR.kind !== 'local') throw new Error('fixture');
+    const first = publishPlanInput(project, { ...solved.candidates[0]!, ...finalized.value }, 'initial-transfers', repo.currentTime(), 'Delivery and return.');
+    unwrap(await repo.publishPlan({ ...first, operation: createLocalOperationIntent('publish_plan', SMALL_WORKS_COORDINATOR, first, { id: 'initial-transfers', now: repo.currentTime() }) }));
+    async function progress(root: EntityKey, duty: string, input: ProgressInput, id: string) {
+      const currentRepo = fresh(), current = unwrap(await currentRepo.loadProject(SMALL_WORKS_PROJECT_ROOT));
+      const actor = current.publishers.find(publisher => publisher.root.key === root)!.root.payload.publisher;
+      if (actor.kind !== 'local') throw new Error('fixture');
+      const command = prepareProgressCommand(current, current.proposal!, activeSource(current)!, duty,
+        { mode: 'local', actor, chainId: null }, input, currentRepo.currentTime(), id);
+      unwrap(await currentRepo.replaceBook(command));
+      return unwrap(await fresh().loadProject(SMALL_WORKS_PROJECT_ROOT));
+    }
+    await progress('local:makerspace', 'send', { kind: 'transfer_report', quantity: 6 }, 'reported-six');
+    await progress('local:cedar', 'send', { kind: 'transfer_acknowledgement', reportId: 'report:reported-six', quantity: 2 }, 'received-two');
+    project = await progress('local:makerspace', 'send', { kind: 'transfer_report', correctsReportId: 'report:reported-six', quantity: 4 }, 'correct-four');
+    let row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'send')!;
+    expect(row).toMatchObject({ reportedQuantity: 4, acknowledgedQuantity: 0 });
+    expect(row.historicalStatements.map(item => item.id)).toEqual(expect.arrayContaining(['report:reported-six', 'report:received-two']));
+    expect(deriveExecution(project).outstandingCustodyHolds.map(hold => hold.quantity)).toEqual([4]);
+    project = await progress('local:cedar', 'send', { kind: 'transfer_acknowledgement', reportId: 'report:correct-four', quantity: 2 }, 'still-two');
+    expect(repairInput(project)).toBeNull();
+    await progress('local:makerspace', 'send', { kind: 'transfer_report', correctsReportId: 'report:correct-four', quantity: 2 }, 'correct-two');
+    project = await progress('local:cedar', 'send', { kind: 'transfer_acknowledgement', reportId: 'report:correct-two', quantity: 2 }, 'confirm-two');
+    row = runbookRows(project, project.proposal!, activeSource(project), null).find(item => item.obligation.id === 'send')!;
+    expect(row).toMatchObject({ reportedQuantity: 2, acknowledgedQuantity: 2 });
+    const input = repairInput(project)!, candidate = solveRepair(project, input, [], { maxNodes: 100000, maxCandidates: 1 }).candidates[0]!;
+    const replacement = publishPlanInput(project, candidate, 'remaining-transfers', fresh().currentTime(), 'Deliver the remaining four.', { sourceRecipe: input.recipe });
+    unwrap(await fresh().publishPlan({ ...replacement, operation: createLocalOperationIntent('publish_plan', SMALL_WORKS_COORDINATOR, replacement, { id: 'remaining-transfers', now: fresh().currentTime() }) }));
+    project = await progress('local:makerspace', 'send', { kind: 'transfer_report', quantity: 4 }, 'remaining-four');
+    expect(deriveExecution(project).outstandingCustodyHolds.reduce((sum, hold) => sum + hold.quantity, 0)).toBe(6);
+    await progress('local:cedar', 'send', { kind: 'transfer_acknowledgement', reportId: 'report:remaining-four', quantity: 4 }, 'received-four');
+    await progress('local:cedar', 'return', { kind: 'transfer_report', quantity: 6 }, 'return-six');
+    project = await progress('local:makerspace', 'return', { kind: 'transfer_acknowledgement', reportId: 'report:return-six', quantity: 6 }, 'confirm-return');
+    expect(deriveExecution(project).outstandingCustodyHolds).toEqual([]);
+    expect(deriveExecution(project).completed.map(work => work.obligationId)).toEqual(expect.arrayContaining(['send', 'return']));
+    expect(independentlyValidatePlan(project.proposal!.payload.plan, project.publishers, project.snapshot.blockTimestamp).valid).toBe(true);
+  });
   it('starts custom work empty, scopes directories to the actor and reloads independently', async () => {
     const { repo, fresh } = setup();
     expect(unwrap(await repo.listProjects(owner)).items).toEqual([]);

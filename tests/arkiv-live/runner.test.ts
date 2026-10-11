@@ -3,12 +3,13 @@ import { allocateOperationStep, createOperationController, createOperationIntent
 import { WalletOperationError } from '../../src/data/wallet';
 import type { NativeWalletGateway } from '../../src/data/wallet';
 import { hashCanonical } from '../../src/domain/canonical';
-import { assertJournalContinuity, hydrateOriginalHashes, withCappedPreparation } from './runner';
+import { assertJournalContinuity, expectedProofLineage, hydrateOriginalHashes, withCappedPreparation } from './runner';
 import type { BudgetRecord } from './safety';
-import type { FrozenAction } from './state';
+import type { FrozenAction, ProofState } from './state';
 import { ROOT_ACCOUNT } from './state';
 
 const txHash = `0x${'11'.repeat(32)}` as const;
+const entityKey = (number: number) => `0x${number.toString(16).padStart(64, '0')}` as const;
 function fixture() {
   const store = new MemoryOperationStore();
   const operation = createOperationIntent('create_project', { mode: 'public', chainId: 7738577, actor: { kind: 'wallet', address: ROOT_ACCOUNT } },
@@ -46,6 +47,22 @@ async function admitted() {
 }
 
 describe('proof runner resume boundary', () => {
+  it('requires only the saved revision prefix for each checkpoint and refuses a missing intermediate publication', () => {
+    const state: Pick<ProofState, 'projectRoot' | 'proposals'> = { projectRoot: entityKey(1), proposals: {
+      p1: { proposalKey: entityKey(10), activationKey: entityKey(11), proposalHash: entityKey(12) },
+    } };
+    const first = expectedProofLineage(state, 'p1');
+    expect(first).toEqual([{ projectRoot: state.projectRoot, ...state.proposals.p1 }]);
+    expect(() => expectedProofLineage(state, 'p2')).toThrow('saved p2 proposal reference is missing');
+    state.proposals.p2 = { proposalKey: entityKey(20), activationKey: entityKey(21), proposalHash: entityKey(22) };
+    expect(expectedProofLineage(state, 'p2')).toHaveLength(2);
+    state.proposals.p3 = { proposalKey: entityKey(30), activationKey: entityKey(31), proposalHash: entityKey(32) };
+    expect(expectedProofLineage(state, 'p1')).toEqual(first);
+    expect(expectedProofLineage(state, 'p3')).toEqual(['p1', 'p2', 'p3'].map(name => ({ projectRoot: state.projectRoot,
+      ...state.proposals[name as keyof typeof state.proposals] })));
+    delete state.proposals.p2;
+    expect(() => expectedProofLineage(state, 'p3')).toThrow('saved p2 proposal reference is missing');
+  });
   it('keeps explicit fee options in the real controller and resumes the original prepared intent', async () => {
     const f = fixture();
     await f.controller.prepareStep({ operation: f.operation, step: f.step, batch: f.batch });
