@@ -157,6 +157,13 @@ export function startNewProjectDraft(runtime: AppRuntime): NewProjectDraftState 
   return state(runtime, draft, session, false);
 }
 
+/** Explicit creation chooses its new identity. Clearing a selection only resumes remembered work. */
+export function selectNewProjectDraft(runtime: AppRuntime): NewProjectDraftState {
+  const created = startNewProjectDraft(runtime);
+  runtime.session.selectDraft(created.draft.id);
+  return created;
+}
+
 /** The caller chooses a destination. This copy carries draft text, never signing authority. */
 export function newProjectDraftForSharing(runtime: AppRuntime, draft: SavedProjectDraft): SavedProjectDraft | null {
   const session = runtime.session.getSnapshot();

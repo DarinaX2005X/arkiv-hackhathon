@@ -12,6 +12,8 @@ import { createPlanningController } from './planning';
 import { createProjectDrafts, draftFromRecipePacket, makeDraft } from './drafts';
 import { validateEditorDraft } from './editor';
 import { transferDutyFromDraft } from './PlanReview';
+import { readWorkspaceProjects, type WorkspaceProjectList } from './Workspace';
+import type { Repository } from '../../data/types';
 
 const authority = authorityFor(SMALL_WORKS_COORDINATOR, 'local', null)!;
 const requireOk = <T,>(result: { ok: true; value: T } | { ok: false; error: unknown }): T => {
@@ -19,6 +21,37 @@ const requireOk = <T,>(result: { ok: true; value: T } | { ok: false; error: unkn
 };
 
 describe('project consumer contracts', () => {
+  it('ends a pending own-project read on disconnect and ignores its late result', async () => {
+    const repo = createLocalRepository({ storage: createMemoryStorage(), namespace: 'practice', now: () => SMALL_WORKS_NOW });
+    requireOk(repo.seed(smallWorksRecords()));
+    const result = await repo.listProjects(SMALL_WORKS_COORDINATOR);
+    let release!: (value: Awaited<ReturnType<Repository['listProjects']>>) => void;
+    const pending = new Promise<Awaited<ReturnType<Repository['listProjects']>>>(resolve => { release = resolve; });
+    let state: WorkspaceProjectList = { projects: [], loading: false, error: null };
+    const cancel = readWorkspaceProjects({ listProjects: () => pending }, SMALL_WORKS_COORDINATOR, next => { state = next; });
+    expect(state.loading).toBe(true);
+    cancel();
+    readWorkspaceProjects(repo, null, next => { state = next; });
+    expect(state).toEqual({ projects: [], loading: false, error: null });
+    release(result); await pending; await Promise.resolve();
+    expect(state).toEqual({ projects: [], loading: false, error: null });
+  });
+
+  it('keeps the new account list when an old account read fails later', async () => {
+    const repo = createLocalRepository({ storage: createMemoryStorage(), namespace: 'practice', now: () => SMALL_WORKS_NOW });
+    requireOk(repo.seed(smallWorksRecords()));
+    let reject!: (error: Error) => void;
+    const pending = new Promise<Awaited<ReturnType<Repository['listProjects']>>>((_resolve, fail) => { reject = fail; });
+    let state: WorkspaceProjectList = { projects: [], loading: false, error: null };
+    const cancel = readWorkspaceProjects({ listProjects: () => pending }, SMALL_WORKS_COORDINATOR, next => { state = next; });
+    cancel();
+    readWorkspaceProjects(repo, { kind: 'local', id: 'local-actor:other' }, next => { state = next; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(state).toEqual({ projects: [], loading: false, error: null });
+    reject(new Error('Old request failed')); await Promise.resolve(); await Promise.resolve();
+    expect(state).toEqual({ projects: [], loading: false, error: null });
+  });
+
   it('uses the actual generic Small Works conflict and full Oak assignments', () => {
     const blocked = solve(makeSmallWorksFixture());
     expect(solverSummary(blocked)).toBe('impossible');

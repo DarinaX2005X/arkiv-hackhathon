@@ -18,7 +18,8 @@ export function createPublicRuntime({ storage, namespace, provider, request, now
   let state: ConnectionSnapshot = { connecting: false, error: null, hasProvider: !!provider };
   const listeners = new Set<() => void>();
   const update = (next: Partial<ConnectionSnapshot>) => { state = { ...state, ...next }; listeners.forEach(listener => listener()); };
-  const rpc = createArkivReadClient(request).request;
+  const readClient = createArkivReadClient(request);
+  const rpc = readClient.request;
   const requireGateway = () => {
     if (!gateway) throw new WalletOperationError('Connect your wallet before publishing.', { kind: 'not_sent', code: 'not_connected' });
     return gateway;
@@ -42,6 +43,9 @@ export function createPublicRuntime({ storage, namespace, provider, request, now
   };
   return {
     runtime,
+    // Feature repositories share this read boundary and durable operation controller.
+    // No signer is exposed; writes still pass the live wallet gateway.
+    client: readClient.client, request: rpc, controller, reader: repository.reader,
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async connect(): Promise<boolean> {

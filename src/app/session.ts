@@ -13,7 +13,7 @@ function isSavedSession(value: unknown): value is SavedSession {
   const record = value as Record<string, unknown>;
   return Object.keys(record).sort().join(',') === 'activeDraftId,destination,mode'
     && (record.mode === 'local' || record.mode === 'public')
-    && typeof record.destination === 'string' && record.destination.length <= 512 && record.destination.startsWith('/')
+    && typeof record.destination === 'string' && record.destination.length <= 2048 && record.destination.startsWith('/')
     && (record.activeDraftId === null || (typeof record.activeDraftId === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(record.activeDraftId)));
 }
 export function createSessionStore({ storage = null, namespace = 'partfolk:studio' }: { storage?: StoragePort | null; namespace?: string } = {}) {

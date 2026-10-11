@@ -19,13 +19,14 @@ class FakeProvider implements InjectedWalletProvider {
   readonly listeners = new Map<Event, Set<(...args: unknown[]) => void>>();
   accountResponse: Promise<unknown> | null = null;
   accountFailure: unknown = null;
+  switchFailure: unknown = null;
   async request(args: RpcRequest): Promise<unknown> {
     this.calls.push(structuredClone(args));
     if (args.method === 'eth_requestAccounts') {
       if (this.accountFailure) throw this.accountFailure;
       return this.accountResponse ?? [...this.accounts];
     }
-    if (args.method === 'wallet_switchEthereumChain') return null;
+    if (args.method === 'wallet_switchEthereumChain') { if (this.switchFailure) throw this.switchFailure; return null; }
     if (args.method === 'eth_accounts') return [...this.accounts];
     if (args.method === 'eth_chainId') return this.chain;
     throw new Error(`The fake provider prohibits ${args.method}`);
@@ -125,6 +126,29 @@ describe('public runtime connection boundary without browser automation', () => 
     expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ actor: null, chainId: null, destination, activeDraftId: 'my-draft' });
     expect(draft.load()).toMatchObject({ status: 'ready', value: { text: 'My contribution terms' } });
     expect(provider.calls.map(call => call.method)).toEqual(['eth_requestAccounts']);
+    publicBinding.dispose();
+  });
+
+  it('a denied network switch or unchanged wrong chain keeps the intended event and draft without authority', async () => {
+    const provider = new FakeProvider();
+    const { binding: publicBinding } = binding(provider);
+    const { draft } = retainWork(publicBinding.runtime);
+    const destination = `/events/${KEYS.project}`;
+    publicBinding.runtime.session.navigate({ name: 'sign-in', returnTo: destination });
+    provider.switchFailure = Object.assign(new Error('Declined switch'), { code: 4001 });
+    expect(await publicBinding.connect()).toBe(false);
+    expect(publicBinding.runtime.session.currentRoute()).toEqual({ name: 'sign-in', returnTo: destination });
+    expect(publicBinding.getSnapshot().error).toMatch(/cancelled/i);
+    provider.switchFailure = null;
+    provider.chain = '0x1';
+    expect(await publicBinding.connect()).toBe(false);
+    expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ actor: null, activeDraftId: 'my-draft' });
+    expect(draft.peek()).toEqual({ text: 'My contribution terms' });
+    provider.chain = `0x${TIRAMISU_CHAIN_ID.toString(16)}`;
+    expect(await publicBinding.connect()).toBe(true);
+    publicBinding.disconnect();
+    expect(publicBinding.runtime.session.currentRoute()).toEqual({ name: 'sign-in', returnTo: destination });
+    expect(provider.calls.every(call => !call.method.includes('sendTransaction'))).toBe(true);
     publicBinding.dispose();
   });
 

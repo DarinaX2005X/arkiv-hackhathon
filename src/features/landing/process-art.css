@@ -1,0 +1,63 @@
+.pf-process-art {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  aspect-ratio: 24 / 17;
+  margin-inline: auto;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pf-process-shadow,
+.pf-process-small-shadow {
+  fill: var(--brand-ink);
+  opacity: .12;
+  filter: var(--process-contact);
+}
+.pf-process-small-shadow { opacity: .16; }
+.pf-process-paper { fill: var(--process-paper); }
+.pf-process-paper-side { fill: var(--border-quiet); }
+.pf-process-wall { fill: var(--surface-soft); }
+.pf-process-wall-side { fill: var(--surface-inset); }
+.pf-process-rim, .pf-process-cream { fill: var(--art-cream); }
+.pf-process-inset { fill: var(--surface-inset); }
+.pf-process-window { fill: var(--surface-strong); }
+.pf-process-clay { fill: var(--process-clay); }
+.pf-process-clay-side { fill: color-mix(in srgb, var(--art-clay) 75%, var(--brand-ink)); }
+.pf-process-forest { fill: var(--process-forest); }
+.pf-process-ink { fill: var(--brand-ink); }
+.pf-process-strip { fill: var(--art-sand); }
+.pf-process-strip-side { fill: color-mix(in srgb, var(--art-sand) 85%, var(--brand-ink)); }
+.pf-process-case-side { fill: var(--brand-ink); }
+.pf-process-case-lid { fill: var(--action); }
+.pf-process-latch { fill: var(--art-cream); }
+.pf-process-latch-inset { fill: var(--art-clay); }
+.pf-process-seal { fill: var(--process-forest); }
+.pf-process-seal-side { fill: var(--brand-ink); }
+.pf-process-seal-impression { fill: var(--art-sand); }
+.pf-process-edge,
+.pf-process-frame-edge {
+  fill: none;
+  stroke: var(--surface-work);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pf-process-plan-line,
+.pf-process-paper-line {
+  fill: none;
+  stroke: var(--border-control);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pf-process-schedule-line { fill: none; stroke: var(--border-control); stroke-width: 1.25; }
+.pf-process-case-highlight { fill: none; stroke: var(--art-sand); stroke-width: 1.4; opacity: .7; }
+.pf-process-handle {
+  fill: none;
+  stroke: var(--art-cream);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

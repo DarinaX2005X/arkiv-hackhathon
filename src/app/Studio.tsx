@@ -15,6 +15,8 @@ import { NewProjectRoute, ProjectPage, WorkspaceRoute, createProjectDrafts, draf
 import { ContributionsPage, ProjectAgreementPanel, RequestsPage, type ContributionTemplate } from '../features/contributions';
 import { ExecutionWorkspace } from '../features/execution';
 import { GuidedPractice } from '../features/practice/GuidedPractice';
+import { AccountCommands, AccountPage, SignInPage, workDestination } from '../features/account';
+import { selectNewProjectDraft } from '../features/projects/draft-session';
 
 const sampleRoles = [
   ['coordinator', 'Exhibition coordinator'], ['library', 'Library (exhibition space)'],
@@ -22,7 +24,6 @@ const sampleRoles = [
   ['cedar', 'Cedar (installation or transport)'], ['willow', 'Willow (installation)'],
   ['ash', 'Ash (hosting)'], ['elm', 'Elm (hosting)'], ['oak', 'Oak (transport)'], ['juniper', 'Juniper (installation)'],
 ] as const;
-const localRoles = [['me', 'Me (project coordinator)'], ['participant-1', 'Local contributor 1'], ['participant-2', 'Local contributor 2'], ['participant-3', 'Local contributor 3']] as const;
 const templates = makeSmallWorksFixture({ oak: true, juniper: true }).publishers;
 
 export function practiceTemplate(actor: Actor | null): ContributionTemplate | undefined {
@@ -38,35 +39,16 @@ function WorkspaceControls({ manager }: { manager: StudioWorkspaces }) {
   const connection = useSyncExternalStore(manager.publicBinding.subscribe, manager.publicBinding.getSnapshot, manager.publicBinding.getSnapshot);
   const session = useAppSession();
   const route = parseRoute(session.destination);
-  const change = async (kind: WorkspaceKind) => {
-    const route = kind === 'practice' ? { name: 'demo' as const } : { name: 'workspace' as const };
-    await manager.select(kind, route);
-    window.location.hash = routeHref(route).slice(1);
-  };
-  if (route.name === 'home') return null;
-  const roles = selected.kind === 'practice' ? sampleRoles : localRoles;
-  const label = selected.kind === 'practice' ? 'Small Works example' : selected.kind === 'local' ? 'Saved on this device' : 'Shared projects';
-  const role = selected.kind === 'public' ? session.actor?.kind === 'wallet' ? `${session.actor.address.slice(0, 8)}…${session.actor.address.slice(-4)}` : 'Viewing as a guest'
-    : roles.find(([id]) => session.actor?.kind === 'local' && session.actor.id === `local-actor:${id}`)?.[1];
-  return <div className="pf-workspace-bar"><details className="pf-workspace-controls">
-    <summary><span>{label}</span><span className="pf-secondary">{role}</span><span className="pf-workspace-change">Change</span></summary>
-    <div className="pf-workspace-controls-row"><Select label="Workspace" value={selected.kind} onChange={event => { void change(event.target.value as WorkspaceKind); }} options={[
-      { value: 'practice', label: 'Small Works example' }, { value: 'local', label: 'My local projects' }, { value: 'public', label: 'Shared projects' },
-    ]} />
-      {selected.kind !== 'public' ? <Select label={selected.kind === 'practice' ? 'Practice as' : 'Local role'} value={session.actor?.kind === 'local' ? session.actor.id : ''}
-        onChange={event => manager.setLocalActor({ kind: 'local', id: event.target.value as `local-actor:${string}` })}
-        options={roles.map(([id, label]) => ({ value: `local-actor:${id}`, label }))} />
-        : <div className="pf-stack pf-stack--compact"><span>{session.actor?.kind === 'wallet' ? `Connected: ${session.actor.address.slice(0, 8)}…${session.actor.address.slice(-6)}` : 'Reading without a wallet'}</span><div className="pf-actions">
-          <Button variant="secondary" disabled={connection.connecting} onClick={() => { void manager.publicBinding.connect(); }}>{connection.connecting ? 'Connecting…' : session.actor ? 'Reconnect wallet' : 'Connect wallet'}</Button>
-          {session.actor && <Button variant="quiet" onClick={() => manager.publicBinding.disconnect()}>Disconnect</Button>}
-        </div></div>}
-    </div>
-    <p className="pf-secondary">{selected.kind === 'practice' ? 'A sample group saved on this device. You can play each person’s part.'
-      : selected.kind === 'local' ? 'Try your own project here. Share it when you are ready to invite people.'
-        : 'Everyone signs for their own contribution. Shared projects use the Arkiv Tiramisu test network.'}</p>
-    </details>
-    {selected.kind === 'public' && !session.actor && <Button variant="secondary" disabled={connection.connecting} onClick={() => { void manager.publicBinding.connect(); }}>{connection.connecting ? 'Connecting…' : 'Connect wallet'}</Button>}
-    {connection.error && selected.kind === 'public' && <Notice tone="warning">{connection.error}</Notice>}
+  if (['home', 'sign-in', 'account', 'onboarding'].includes(route.name)) return null;
+  const signIn = { name: 'sign-in' as const, returnTo: workDestination(route) };
+  return <div className="pf-workspace-bar">
+    {selected.kind === 'practice' ? <details className="pf-workspace-controls">
+      <summary><span className="pf-workspace-summary"><strong>Practice only</strong><span className="pf-secondary">Sample people and decisions. Nothing is published.</span></span><span className="pf-workspace-change">Choose a practice role</span></summary>
+      <Select label="Practice as" value={session.actor?.kind === 'local' ? session.actor.id : ''} onChange={event => manager.setLocalActor({ kind: 'local', id: event.target.value as `local-actor:${string}` })} options={sampleRoles.map(([id, label]) => ({ value: `local-actor:${id}`, label }))} />
+    </details> : <div className="pf-workspace-status"><strong>{selected.kind === 'local' ? 'Local work on this device' : session.actor ? 'Your public work' : 'Reading public work'}</strong><span className="pf-secondary">{selected.kind === 'local' ? 'Local projects and drafts are kept in this browser. Publishing a copy is a separate action.' : session.actor ? 'Your wallet signs only when you choose to publish or make a decision.' : 'You can read without signing in. Connect your wallet to find your own records or publish.'}</span></div>}
+    {selected.kind === 'public' && !session.actor && <Link className="pf-button pf-button--secondary" href={routeHref(signIn)}>Sign in to continue</Link>}
+    {selected.kind === 'local' && <Button variant="secondary" onClick={() => { void manager.select('public', { name: 'workspace' }).then(() => { window.location.hash = '/workspace'; }); }}>Open my public work</Button>}
+    {connection.error && selected.kind === 'public' && <Notice tone="warning">{connection.error} <Link href={routeHref(signIn)}>Reconnect wallet</Link></Notice>}
     {selected.issue && <Notice tone="warning">{selected.issue}</Notice>}
   </div>;
 }
@@ -82,12 +64,12 @@ function PracticeGuidance() {
   </ol><p>These are real local domain operations. Resetting practice never clears your own projects.</p></details>;
 }
 
-function PracticeRoute({ manager }: { manager: StudioWorkspaces }) {
+function PracticeRoute({ manager, onStartProject }: { manager: StudioWorkspaces; onStartProject: () => void }) {
   const [revision, setRevision] = useState(0), [resetOpen, setResetOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const openProject = () => { window.location.hash = routeHref({ name: 'project', projectRoot: SMALL_WORKS_PROJECT_ROOT, tab: 'plans' }).slice(1); };
   return <div className="pf-stack"><header className="pf-foundation-intro"><h1>A small exhibition. Everyone brings a part.</h1><p>Bring together a place, equipment and a crew. Then see how the plan changes when someone steps away.</p></header>
     <GuidedPractice repository={manager.practiceRepository} now={manager.runtimes.practice.now} refreshKey={revision} onRefresh={() => setRevision(value => value + 1)} onOpenProject={openProject} />
-    <div className="pf-actions"><Link href={routeHref({ name: 'new-project' })}>Start my own project</Link><Button variant="quiet" onClick={() => setResetOpen(true)}>Start the example again</Button></div>
+    <div className="pf-actions"><Link href={routeHref({ name: 'new-project' })} onClick={event => { event.preventDefault(); onStartProject(); }}>Start my own project</Link><Button variant="quiet" onClick={() => setResetOpen(true)}>Start the example again</Button></div>
     <PracticeGuidance />
     {error && <Notice tone="warning">{error}</Notice>}
     <Dialog open={resetOpen} title="Start the example again?" closeLabel="Keep this example" onClose={() => setResetOpen(false)} footer={<Button disabled={busy} onClick={async () => {
@@ -100,6 +82,11 @@ function PracticeRoute({ manager }: { manager: StudioWorkspaces }) {
 }
 
 export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
+  const startProject = () => {
+    // Explicit creation always starts personal work and never copies sample actors.
+    selectNewProjectDraft(manager.runtimes.public);
+    void manager.select('public', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
+  };
   const share = (source: ProjectRecipe | SavedProjectDraft) => {
     copyRecipeToPublicDraft(manager.runtimes.public, source);
     void manager.select('public', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
@@ -121,12 +108,15 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     const session = useAppSession();
     const practice = manager.getSnapshot().kind === 'practice';
     return <ContributionsPage key={`${practice}:${session.actor?.kind === 'local' ? session.actor.id : session.actor?.address ?? 'visitor'}`} {...props}
-      projectRoot={practice ? SMALL_WORKS_PROJECT_ROOT : undefined} template={practice ? practiceTemplate(session.actor) : undefined} />;
+      projectRoot={props.route.name === 'contributions' ? props.route.projectRoot ?? (practice ? SMALL_WORKS_PROJECT_ROOT : undefined) : undefined} template={practice ? practiceTemplate(session.actor) : undefined} />;
   };
   return {
-    home: LandingRoute, help: HelpRoute, workspace: WorkspaceRoute, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
+    home: props => <LandingRoute {...props} onCreateProject={startProject} />, help: HelpRoute, workspace: WorkspaceRoute, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
+    'sign-in': props => <SignInPage {...props} binding={manager.publicBinding} />,
+    account: props => <AccountPage {...props} binding={manager.publicBinding} />,
+    onboarding: props => <AccountPage {...props} binding={manager.publicBinding} />,
     contributions: Contributions, requests: RequestsPage, project: Project,
-    demo: () => <PracticeRoute manager={manager} />,
+    demo: () => <PracticeRoute manager={manager} onStartProject={startProject} />,
   };
 }
 
@@ -140,7 +130,7 @@ export function Studio({ manager }: { manager: StudioWorkspaces }) {
   // Stable per manager: switching a role never remounts the project or loses a draft.
   const routes = routeRegistry(manager);
   if (state.loading) return <main className="pf-page pf-app-main"><LoadingState title="Opening your workspace" description="Your other projects and drafts are kept separately." /></main>;
-  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} />;
+  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} account={<AccountCommands manager={manager} />} />;
 }
 const registries = new WeakMap<StudioWorkspaces, RouteRegistry>();
 function routeRegistry(manager: StudioWorkspaces) {

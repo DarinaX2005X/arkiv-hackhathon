@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useApp, useAppSession, type AppRuntime } from '../../app/context';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
 import { routeHref } from '../../app/routes';
-import type { PlanDocument, ProjectAggregate, SolverPin } from '../../domain/types';
+import type { ProjectAggregate, SolverPin } from '../../domain/types';
 import type { PublishPlanCommand } from '../../data/types';
 import { createOperationIntent } from '../../data/operations';
-import { finalizePlan, offerFits, validatePlanDocument } from '../../domain/validation';
+import { finalizePlan, offerFits } from '../../domain/validation';
+import { completedWorkContext } from '../../domain/execution';
 import { Button, Dialog, Field, Link, Notice, PlanDiff, Select, Textarea } from '../../ui';
 import { createPlanningController } from './planning';
 import { authorityFor, comparePlans, ownsProject, planningFingerprint, planningInput, publisherName, publishPlanInput, solverSummary } from './selectors';
@@ -15,23 +16,14 @@ import { ProjectPlan } from './ProjectPlan';
 import { PlanReviewEditor } from './PlanReview';
 import { createProjectDrafts, downloadText, draftScope } from './drafts';
 import { validateEditorDraft } from './editor';
-import { canonicalJson, hashCanonical } from '../../domain/canonical';
+import { canonicalJson } from '../../domain/canonical';
 import { solve } from '../../domain/solver';
-
-interface ReviewDraft { fingerprint: string; plan: PlanDocument }
-const isReviewDraft = (value: unknown): value is ReviewDraft => value !== null && typeof value === 'object'
-  && Object.keys(value).sort().join(',') === 'fingerprint,plan' && typeof (value as ReviewDraft).fingerprint === 'string'
-  && validatePlanDocument((value as ReviewDraft).plan).valid;
-const makeReviewStore = (runtime: AppRuntime, key: string) => runtime.drafts(key, 'plan-review', isReviewDraft);
-const reviewStores = new WeakMap<AppRuntime, Map<string, ReturnType<typeof makeReviewStore>>>();
-function retainedReviewStore(runtime: AppRuntime, key: string) {
-  let stores = reviewStores.get(runtime); if (!stores) { stores = new Map(); reviewStores.set(runtime, stores); }
-  let store = stores.get(key); if (!store) { store = makeReviewStore(runtime, key); stores.set(key, store); }
-  return store;
-}
+import { captureProjectContinuation, continueProjectPublication, createPlanReviewStore } from './review';
 
 export function PlansPanel({ project, onRefresh, autoSolve = false }: { project: ProjectAggregate; onRefresh: () => Promise<void>; autoSolve?: boolean }) {
   const runtime = useApp(), session = useAppSession();
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const controller = useMemo(() => createPlanningController(async (input, pins, budget) => {
     await new Promise<void>(resolve => setTimeout(resolve, 0));
     return solve(input, pins, budget);
@@ -46,12 +38,14 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
   useEffect(() => { controller.update(input, pins); }, [controller, fingerprint, project.snapshot.fetchedAt]);
   useEffect(() => { if (autoSolve && input) void controller.run(); }, [autoSolve, controller, fingerprint]);
   const action = useRepositoryAction(`project-plan:${project.root.key}`);
-  const reviewStore = useMemo(() => retainedReviewStore(runtime, `plan-review:${hashCanonical({ projectRoot: project.root.key, scope: draftScope(session.mode, session.actor) }).slice(2)}`), [runtime, project.root.key, session.mode, session.actor]);
-  const [reviewDraft, setReviewDraft] = useState<ReviewDraft | null>(() => { const memory = reviewStore.peek(); if (memory) return memory; const loaded = reviewStore.load(); return loaded.status === 'ready' ? loaded.value : null; });
-  const [reviewOpen, setReviewOpen] = useState(false), [explanation, setExplanation] = useState('');
-  const [formError, setFormError] = useState<string | null>(null), [savedReview, setSavedReview] = useState(true);
+  const scope = draftScope(session.mode, session.actor);
+  const reviewStore = useMemo(() => createPlanReviewStore(runtime, project.root.key, scope), [runtime, project.root.key, scope]);
+  const { draft: reviewDraft, persisted: savedReview } = useSyncExternalStore(reviewStore.subscribe, reviewStore.getSnapshot, reviewStore.getSnapshot);
+  const explanation = reviewDraft?.explanation ?? '';
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [compareIndex, setCompareIndex] = useState(0), [pinRequirement, setPinRequirement] = useState(''), [pinOffer, setPinOffer] = useState(''), [pinQuantity, setPinQuantity] = useState('1');
-  useEffect(() => { const memory = reviewStore.peek(); const saved = memory ? null : reviewStore.load(); setReviewDraft(memory ?? (saved?.status === 'ready' ? saved.value : null)); setReviewOpen(false); setExplanation(''); }, [reviewStore]);
+  useEffect(() => { setReviewOpen(false); setFormError(null); }, [reviewStore]);
   const selected = state.result?.candidates[state.selected] ?? null;
   const authority = authorityFor(session.actor, session.mode, session.chainId), owner = ownsProject(project, session.actor);
   const waiting = action.state.status === 'submitting' || action.state.status === 'needs-verification';
@@ -63,19 +57,24 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
     return matches ? [{ value: JSON.stringify([publisher.root.key, offer.id]), publisherRoot: publisher.root.key, offerId: offer.id, label: `${publisherName(project, publisher.root.key)}: ${offer.title}` }] : [];
   })) : [];
   const reviewPlan = reviewDraft && reviewDraft.fingerprint === fingerprint ? reviewDraft.plan : selected?.plan ?? null;
-  const finalized = reviewPlan && input ? finalizePlan(reviewPlan, input.publishers, project.snapshot) : null;
+  const finalized = reviewPlan && input ? finalizePlan(reviewPlan, input.publishers, project.snapshot, completedWorkContext(project)) : null;
   const openReview = () => {
     const candidate = controller.candidate();
     if (!candidate || !fingerprint) { setFormError(copy.staleResult); return; }
-    const next = reviewDraft?.fingerprint === fingerprint ? reviewDraft : { fingerprint, plan: candidate.plan };
-    setReviewDraft(next); setSavedReview(reviewStore.save(next).persisted); setReviewOpen(true); setFormError(null);
+    const next = reviewDraft?.fingerprint === fingerprint ? reviewDraft : { fingerprint, plan: candidate.plan, explanation };
+    reviewStore.save(next); setReviewOpen(true); setFormError(null);
   };
   const publish = async (resume = false) => {
     if (!authority) return;
+    const canContinue = captureProjectContinuation(runtime, () => mounted.current, () => window.location.hash);
+    const finish = () => continueProjectPublication(canContinue, onRefresh, () => {
+      setReviewOpen(false);
+      window.location.hash = routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' }).slice(1);
+    });
     try {
       if (resume) {
         const result = await action.resume((repository, frozen: PublishPlanCommand) => repository.publishPlan(frozen));
-        if (result.ok && result.value.operation.phase === 'complete') { setReviewOpen(false); await onRefresh(); window.location.hash = routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' }).slice(1); }
+        if (result.ok && result.value.operation.phase === 'complete') await finish();
         return;
       }
       const current = controller.candidate();
@@ -84,9 +83,14 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
       const candidate = { ...current, plan: finalized.value.plan, proposalHash: finalized.value.proposalHash };
       const fields = publishPlanInput(project, candidate, id, now, explanation.trim());
       const result = await action.run({ ...fields, operation: createOperationIntent('publish_plan', authority, fields, { id, now }) }, (repository, command) => repository.publishPlan(command));
-      if (result.ok && result.value.operation.phase === 'complete') { setReviewOpen(false); await onRefresh(); window.location.hash = routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' }).slice(1); }
-      else if (result.ok && result.value.activationKey) setFormError('The plan is activated, but some request deliveries remain pending. Resume the original publication to finish delivery; do not propose another plan.');
-    } catch (error) { setFormError(error instanceof Error ? error.message : 'The selected plan could not be prepared.'); }
+      if (result.ok && result.value.operation.phase === 'complete') await finish();
+      else if (result.ok && result.value.activationKey && canContinue()) setFormError('The plan is activated, but some request deliveries remain pending. Resume the original publication to finish delivery; do not propose another plan.');
+    } catch (error) { if (canContinue()) setFormError(error instanceof Error ? error.message : 'The selected plan could not be prepared.'); }
+  };
+  const reconcile = async () => {
+    const canContinue = captureProjectContinuation(runtime, () => mounted.current, () => window.location.hash);
+    await action.reconcile();
+    if (canContinue()) await onRefresh();
   };
   const usefulHelp = state.result?.reasons.filter(reason => reason.params?.additionalHelpSufficient === true) ?? [];
   return <section className="pf-stack">
@@ -109,7 +113,12 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
       </Notice>
       {usefulHelp.length > 0 && <Notice title="Here is what would help"><ul>{usefulHelp.map((reason, index) => <li key={index}>Adding {reason.params?.missing ?? 1} {String(reason.params?.requirementTitle ?? reason.requirementId ?? 'additional contribution')} would make {String(reason.params?.variantId ?? 'this option')} work.</li>)}</ul></Notice>}
       {state.result.reasons.length > 0 && <details open={!state.result.candidates.length}><summary>Why options are blocked or need attention</summary><ul>{state.result.reasons.map((reason, index) => <li key={index}>{reason.requirementId && <strong>{requirements.find(item => item.id === reason.requirementId)?.title ?? reason.requirementId}: </strong>}{reasonText(reason)}{typeof reason.params?.publisherName === 'string' && <span> {reason.params.publisherName} cannot cover the overlapping duties alone.</span>}</li>)}</ul></details>}
-      {state.result.candidates.length > 0 && <Select label="Choose a plan" value={String(state.selected)} onChange={event => { controller.select(Number(event.target.value)); setReviewDraft(null); setReviewOpen(false); }} options={state.result.candidates.map((candidate, index) => ({ value: String(index), label: `${index + 1}. ${candidate.plan.variant.title} with ${candidate.plan.requiredApprovers.map(root => publisherName(project, root)).join(', ')}` }))} />}
+      {state.result.candidates.length > 0 && <Select label="Choose a plan" value={String(state.selected)} onChange={event => {
+        controller.select(Number(event.target.value));
+        const candidate = controller.candidate();
+        if (reviewDraft && fingerprint && candidate) reviewStore.save({ fingerprint, plan: candidate.plan, explanation });
+        setReviewOpen(false);
+      }} options={state.result.candidates.map((candidate, index) => ({ value: String(index), label: `${index + 1}. ${candidate.plan.variant.title} with ${candidate.plan.requiredApprovers.map(root => publisherName(project, root)).join(', ')}` }))} />}
       {selected && <>
         <Button onClick={openReview} disabled={state.stale || state.running || waiting || !owner || !authority || hasUnsavedNeeds} disabledReason={hasUnsavedNeeds ? 'Save or discard the needs editor changes first.' : !owner ? 'The project coordinator proposes a plan.' : !authority ? 'Select the coordinator account to continue.' : undefined}>{copy.preview}</Button>
         <ProjectPlan project={project} plan={selected.plan} />
@@ -117,15 +126,15 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
       </>}
       <details><summary>About this search</summary><p>{state.result.candidates.length} complete plans found after checking {state.result.nodesVisited} possibilities. When replacing a plan, the search first keeps compatible contributors, then the date and place, then assignments.</p>{state.result.optimality === 'not_proven' && <p>The search did not check every possible repair. Any plan shown passed the full checks.</p>}</details>
     </>}
-    <ActionFeedback action={action} state={action.state} onReconcile={() => { void action.reconcile().then(() => onRefresh()); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
-    <Dialog open={reviewOpen} title="Review the plan with everyone’s part" closeLabel="Keep reviewing later" onClose={() => setReviewOpen(false)} footer={<Button disabled={!finalized?.ok || state.stale || waiting || !authority || !owner || hasUnsavedNeeds} onClick={() => { void publish(); }}>{copy.propose}</Button>}>
+    <ActionFeedback action={action} state={action.state} onReconcile={() => { void reconcile(); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
+    <Dialog open={reviewOpen && owner && reviewDraft !== null} title="Review the plan with everyone’s part" closeLabel="Keep reviewing later" onClose={() => setReviewOpen(false)} footer={<Button disabled={!finalized?.ok || state.stale || waiting || !authority || !owner || hasUnsavedNeeds} onClick={() => { void publish(); }}>{copy.propose}</Button>}>
       {reviewPlan && <div className="pf-stack"><p>Everyone in this plan will review this version and agree again, including people whose assignments have stayed the same.</p>
         {!savedReview && <Notice tone="warning">This review is only retained in memory. Export your work before closing the page.</Notice>}
-        <Button variant="quiet" onClick={() => downloadText('partfolk-proposal-review.json', JSON.stringify({ format: 'partfolk-proposal-review', version: 1, plan: reviewPlan, agreement: 'not_requested' }, null, 2))}>Export proposed terms for review</Button>
+        <Button variant="quiet" onClick={() => downloadText('partfolk-proposal-review.json', JSON.stringify({ format: 'partfolk-proposal-review', version: 1, plan: reviewPlan, explanation, agreement: 'not_requested' }, null, 2))}>Export proposed terms for review</Button>
         <ProjectPlan project={project} plan={finalized?.ok ? finalized.value.plan : reviewPlan} />
-        <PlanReviewEditor project={project} plan={reviewPlan} disabled={waiting} onChange={plan => { if (!fingerprint || !input) return; const result = finalizePlan(plan, input.publishers, project.snapshot); const next = { fingerprint, plan: result.ok ? result.value.plan : plan }; setReviewDraft(next); setSavedReview(reviewStore.save(next).persisted); }} />
+        <PlanReviewEditor project={project} plan={reviewPlan} disabled={waiting || !owner} onChange={plan => { if (!fingerprint || !input) return; const result = finalizePlan(plan, input.publishers, project.snapshot, completedWorkContext(project)); reviewStore.save({ fingerprint, plan: result.ok ? result.value.plan : plan, explanation }); }} />
         {finalized && !finalized.ok && <Notice tone="warning" title="Review these plan terms"><ul>{finalized.reasons.map((reason, index) => <li key={index}>{reasonText(reason)}</li>)}</ul></Notice>}
-        <Textarea label="Explain this version to contributors" value={explanation} onChange={event => setExplanation(event.target.value)} hint="This note is public. It does not replace the full agreed terms." disabled={waiting} />
+        <Textarea label="Explain this version to contributors" value={explanation} onChange={event => { if (reviewDraft) reviewStore.save({ ...reviewDraft, explanation: event.target.value }); }} hint="This note is public. It does not replace the full agreed terms." disabled={waiting || !owner} />
         {project.proposal && <PlanDiff title="Changes from the active plan" labels={{ requirement: 'Requirement', before: 'Active plan', after: 'New proposal' }} rows={comparePlans(project.proposal.payload.plan, reviewPlan, project)} />}
         <Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' })}>Review the currently active agreement</Link>
         {formError && <Notice tone="warning">{formError}</Notice>}

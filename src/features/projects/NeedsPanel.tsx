@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
-import { routeHref } from '../../app/routes';
+import { routeHref, routePath } from '../../app/routes';
 import { canonicalJson } from '../../domain/canonical';
 import type { ProjectAggregate } from '../../domain/types';
 import type { ReplaceProjectCommand } from '../../data/types';
@@ -27,7 +27,7 @@ export function NeedsPanel({ project, onRefresh, onDraftChange }: { project: Pro
   const action = useRepositoryAction(`project-edit:${project.root.key}`);
   const [failure, setFailure] = useState<string | null>(null);
   const owner = ownsProject(project, session.actor);
-  if (!owner) return <section className="pf-stack"><ProjectNeeds project={project} /><p>Only the coordinator can change these needs.</p>{state && state.payload.lifecycle !== 'closed' && <Link href={routeHref({ name: 'contributions' })}>Prepare my contribution</Link>}</section>;
+  if (!owner) return <section className="pf-stack"><ProjectNeeds project={project} /><p>Only the coordinator can change these needs.</p>{state && state.payload.lifecycle !== 'closed' && <Link href={routeHref({ name: 'contributions', projectRoot: project.root.key, returnTo: routePath({ name: 'project', projectRoot: project.root.key, tab: 'needs' }) })}>Prepare my contribution</Link>}</section>;
   if (!state || !draft) return <Notice tone="warning">A unique current project record is required to edit these needs.</Notice>;
   const validation = validateEditorDraft(draft.editor);
   const authority = authorityFor(session.actor, session.mode, session.chainId);

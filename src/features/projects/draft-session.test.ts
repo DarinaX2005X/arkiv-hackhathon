@@ -3,7 +3,7 @@ import { createAppRuntime, type AppRuntime } from '../../app/context';
 import type { StoragePort } from '../../app/storage';
 import { createMemoryStorage } from '../../data/local';
 import { TIRAMISU_CHAIN_ID, type Actor, type ProjectRecipe } from '../../domain/types';
-import { newProjectDraftForSharing, openNewProjectDraft, saveNewProjectDraft, startNewProjectDraft } from './draft-session';
+import { newProjectDraftForSharing, openNewProjectDraft, saveNewProjectDraft, selectNewProjectDraft, startNewProjectDraft } from './draft-session';
 import { createProjectDrafts, draftScope, makeDraft, type SavedProjectDraft } from './drafts';
 import { validateEditorDraft } from './editor';
 
@@ -60,6 +60,27 @@ function connect(runtime: AppRuntime, actor: Actor = WALLET_A) {
 }
 
 describe('new project draft session ownership', () => {
+  it('explicit creation selects a fresh draft without losing remembered work or its journal', () => {
+    const storage = createMemoryStorage(), runtime = runtimeWith(storage);
+    runtime.session.setMode('public'); connect(runtime);
+    const previous = saveVisibleRaw(runtime);
+    const journalKey = 'draft-session-test:pending-publication';
+    storage.setItem(journalKey, 'Original publication remains available');
+
+    const created = selectNewProjectDraft(runtime);
+    expect(created.draft.id).not.toBe(previous.id);
+    expect(created.draft.editor.title).toBe('');
+    expect(runtime.session.getSnapshot().activeDraftId).toBe(created.draft.id);
+    expect(openNewProjectDraft(runtime).draft).toEqual(created.draft);
+    expect(createProjectDrafts(runtime, SCOPE_A).get(previous.id)).toEqual(previous);
+    expect(storage.getItem(journalKey)).toBe('Original publication remains available');
+
+    const reloaded = runtimeWith(storage); connect(reloaded);
+    expect(openNewProjectDraft(reloaded).draft.id).toBe(created.draft.id);
+    reloaded.session.selectDraft(previous.id);
+    expect(openNewProjectDraft(reloaded).draft).toEqual(previous);
+  });
+
   it('opens without selecting a draft on behalf of the component', () => {
     const runtime = runtimeWith();
     runtime.session.setMode('public');

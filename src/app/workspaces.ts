@@ -5,16 +5,27 @@ import type { InjectedWalletProvider } from '../data/wallet';
 import type { RpcRequest } from '../data/arkiv';
 import { createAppRuntime } from './context';
 import { createPublicRuntime } from './network';
-import { parseRoute, type Route } from './routes';
+import { parseRoute, routePath, safeReturnPath, type Route } from './routes';
 import { isPublicEntityKey } from './ids';
-import type { StoragePort } from './storage';
+import { createDraftStore, type StoragePort } from './storage';
+
+interface ReturnContext { kind: 'local' | 'public'; destination: string }
+function isReturnContext(value: unknown): value is ReturnContext | null {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return Object.keys(item).sort().join(',') === 'destination,kind' && (item.kind === 'local' || item.kind === 'public')
+    && typeof item.destination === 'string' && safeReturnPath(item.destination) === item.destination;
+}
 
 export type WorkspaceKind = 'practice' | 'local' | 'public';
 export const LOCAL_COORDINATOR: Actor = { kind: 'local', id: 'local-actor:me' };
 export function workspaceForRoute(route: Route, current: WorkspaceKind): WorkspaceKind {
   if (route.name === 'demo' || (route.name === 'project' && route.projectRoot === SMALL_WORKS_PROJECT_ROOT)) return 'practice';
-  if (route.name === 'project') return isPublicEntityKey(route.projectRoot) ? 'public' : 'local';
-  if (route.name === 'new-project' && current === 'practice') return 'local';
+  if (route.name === 'project' || (route.name === 'contributions' && route.projectRoot)) return isPublicEntityKey(route.projectRoot) ? 'public' : route.projectRoot === SMALL_WORKS_PROJECT_ROOT ? 'practice' : 'local';
+  if (['sign-in', 'account', 'onboarding', 'events', 'event', 'my-events'].includes(route.name)) return 'public';
+  if (route.name === 'new-project' && current === 'practice') return 'public';
+  if (route.name === 'workspace' && current === 'practice') return 'public';
   return current;
 }
 
@@ -30,12 +41,16 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
   let practice = newPracticeRuntime();
   const local = createAppRuntime({ repository: localRepository, storage, namespace: 'partfolk:studio:local', now });
   const publicBinding = createPublicRuntime({ storage, namespace: 'partfolk:studio:public', provider, request, now });
+  const returnStore = createDraftStore({ storage, key: 'partfolk:studio:account-return', kind: 'account-return', validate: isReturnContext, now });
+  const savedReturn = returnStore.load();
+  let accountReturn: ReturnContext | null = savedReturn.status === 'ready' ? savedReturn.value : null;
   practice.session.setMode('local'); practice.session.setAccount(SMALL_WORKS_COORDINATOR);
   local.session.setMode('local'); local.session.setAccount(LOCAL_COORDINATOR);
   const runtimes = { practice, local, public: publicBinding.runtime };
-  let initial: WorkspaceKind = 'local';
+  let initial: WorkspaceKind = 'public';
   try { const saved = storage?.getItem('partfolk:studio:workspace'); if (saved === 'practice' || saved === 'local' || saved === 'public') initial = saved; } catch { /* Session exposes storage availability. */ }
   let state = { kind: initial, runtime: runtimes[initial], loading: false, issue: null as string | null, generation: 0 };
+  let previousRoute = state.runtime.session.currentRoute();
   let requestVersion = 0;
   let seeded = false;
   const listeners = new Set<() => void>();
@@ -59,6 +74,7 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
       let issue: string | null = null;
       try { storage?.setItem('partfolk:studio:workspace', kind); } catch { issue = 'Your workspace choice is kept in memory only. Export important work before leaving.'; }
       if (route) runtimes[kind].session.navigate(route);
+      if (route) previousRoute = route;
       update({ kind, runtime: runtimes[kind], loading: false, issue });
     } catch (error) {
       if (version === requestVersion) update({ kind, runtime: runtimes[kind], loading: false,
@@ -71,9 +87,20 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     select,
     async followRoute(route: Route) {
-      const kind = workspaceForRoute(route, state.kind);
+      const accountDetour = ['sign-in', 'account', 'onboarding', 'help'].includes(route.name);
+      if (accountDetour && 'returnTo' in route && route.returnTo && state.kind !== 'practice'
+        && !['sign-in', 'account', 'onboarding', 'help'].includes(previousRoute.name)) {
+        // Remember the source namespace as well as the URL: a local new draft
+        // and a public new draft deliberately have the same editor route.
+        accountReturn = { kind: state.kind, destination: route.returnTo };
+        returnStore.save(accountReturn);
+      }
+      let kind = workspaceForRoute(route, state.kind);
+      if (!accountDetour && accountReturn?.destination === routePath(route)
+        && !['project', 'event', 'events', 'my-events'].includes(route.name)) kind = accountReturn.kind;
+      if (!accountDetour && accountReturn) { accountReturn = null; returnStore.save(null); }
       if (kind !== state.kind || (kind === 'practice' && !seeded)) await select(kind, route);
-      else state.runtime.session.navigate(route);
+      else { state.runtime.session.navigate(route); previousRoute = route; }
     },
     async resetPractice() {
       const nextEpoch = practiceEpoch + 1;
@@ -94,7 +121,7 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
       update({ generation: state.generation + 1, ...(state.kind === 'practice' ? { runtime: practice } : {}) });
     },
     setLocalActor(actor: Actor) {
-      if (state.kind === 'public' || actor.kind !== 'local') throw new TypeError('Choose a local role only in a local workspace.');
+      if (state.kind !== 'practice' || actor.kind !== 'local') throw new TypeError('Sample roles are only available in practice.');
       state.runtime.session.setAccount(actor);
     },
     initialRoute: () => parseRoute(runtimes[initial].session.getSnapshot().destination),

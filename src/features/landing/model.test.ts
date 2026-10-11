@@ -23,6 +23,17 @@ describe('the introductory coverage sheet', () => {
     expect(previewQuantity(6, 'board')).toBe('6 boards');
   });
 
+  it('computes a complete replacement without retaining the withdrawn driver', () => {
+    const original = createCoveragePreview()!;
+    const replacement = createCoveragePreview(true)!;
+    expect(replacement).not.toBeNull();
+    for (const row of replacement.rows) expect(row.contributions.reduce((sum, contribution) => sum + contribution.quantity, 0)).toBe(row.quantity);
+    expect(replacement.rows.find(row => row.id === 'transport')?.contributions.map(item => item.owner)).toEqual(['Cedar']);
+    expect(replacement.rows.find(row => row.id === 'installation')?.contributions.map(item => item.owner).sort()).toEqual(['Juniper', 'Willow']);
+    expect(replacement.rows.flatMap(row => row.contributions).some(item => item.owner === 'Oak')).toBe(false);
+    expect(original.rows.find(row => row.id === 'transport')?.contributions.map(item => item.owner)).toEqual(['Oak']);
+  });
+
   it('uses separate real destinations for editable practice and a custom draft', () => {
     for (const name of ['demo', 'new-project', 'workspace', 'contributions', 'requests'] as const) {
       expect(parseRoute(routeHref({ name }))).toEqual({ name });

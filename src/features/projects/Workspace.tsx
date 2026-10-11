@@ -3,35 +3,45 @@ import { useApp, useAppSession } from '../../app/context';
 import type { RouteViewProps } from '../../app/App';
 import { parseRoute, routeHref } from '../../app/routes';
 import { isPublicEntityKey } from '../../app/ids';
-import type { ProjectSummary } from '../../data/types';
+import type { ProjectSummary, Repository } from '../../data/types';
+import type { Actor } from '../../domain/types';
 import { Button, EmptyState, Field, Link, Notice, Select, StatusLabel } from '../../ui';
-import { downloadText, makeDraft } from './drafts';
+import { downloadText } from './drafts';
+import { selectNewProjectDraft } from './draft-session';
 import { useProjectDrafts } from './hooks';
 import { projectsCopy as copy, repositoryErrorText } from './catalog';
 
+export interface WorkspaceProjectList { projects: ProjectSummary[]; loading: boolean; error: string | null }
+
+/** Each read owns its result until the account or route changes. Disconnect ends loading immediately. */
+export function readWorkspaceProjects(repository: Pick<Repository, 'listProjects'> | null, actor: Actor | null, update: (state: WorkspaceProjectList) => void) {
+  let cancelled = false;
+  update({ projects: [], error: null, loading: Boolean(repository && actor) });
+  if (repository && actor) {
+    void repository.listProjects(actor).then(result => {
+      if (cancelled) return;
+      update(result.ok ? { projects: result.value.items, loading: false,
+        error: result.value.snapshot.completeness === 'complete' ? null : 'The project list is incomplete. Existing drafts remain available below.' }
+        : { projects: [], loading: false, error: repositoryErrorText(result.error) });
+    }).catch(() => {
+      if (!cancelled) update({ projects: [], loading: false, error: 'The project list could not be read. Your drafts remain available below.' });
+    });
+  }
+  return () => { cancelled = true; };
+}
+
 export function WorkspaceRoute(_props: RouteViewProps) {
   const runtime = useApp(), session = useAppSession();
-  const { storage, scope, changed } = useProjectDrafts();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]), [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false), [filter, setFilter] = useState('active'), [search, setSearch] = useState('');
+  const { storage, changed } = useProjectDrafts();
+  const [{ projects, loading, error }, setProjectList] = useState<WorkspaceProjectList>({ projects: [], loading: false, error: null });
+  const [filter, setFilter] = useState('active'), [search, setSearch] = useState('');
   const [publicId, setPublicId] = useState(''), [importError, setImportError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    let cancelled = false;
-    setProjects([]); setError(null);
-    if (!runtime.repository || !session.actor) return;
-    setLoading(true);
-    runtime.repository.listProjects(session.actor).then(result => {
-      if (cancelled) return;
-      if (result.ok) { setProjects(result.value.items); if (result.value.snapshot.completeness !== 'complete') setError('The project list is incomplete. Existing drafts remain available below.'); }
-      else setError(repositoryErrorText(result.error));
-    }).catch(() => { if (!cancelled) setError('The project list could not be read. Your drafts remain available below.'); }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [runtime.repository, session.actor]);
+  useEffect(() => readWorkspaceProjects(runtime.repository, session.actor, setProjectList), [runtime.repository, session.actor]);
   const shown = projects.filter(project => filter === 'all' || (filter === 'archived' ? project.state?.lifecycle === 'closed' : project.state?.lifecycle !== 'closed'))
     .filter(project => `${project.state?.recipe.title ?? ''} ${project.state?.recipe.outcome ?? ''}`.toLowerCase().includes(search.toLowerCase()))
     .sort((left, right) => (right.state?.createdAt ?? 0) - (left.state?.createdAt ?? 0));
-  const create = () => { const draft = makeDraft(scope, undefined, runtime.now()); storage.upsert(draft); runtime.session.selectDraft(draft.id); window.location.hash = '/projects/new'; };
+  const create = () => { selectNewProjectDraft(runtime); window.location.hash = '/projects/new'; };
   return <div className="pf-stack project-workspace">
     <header className="project-heading"><div><h1>{copy.title}</h1><p>Shape the work, choose a complete plan and ask each owner to agree.</p></div><Button onClick={create}>{copy.create}</Button></header>
     <form className="pf-sheet project-open" onSubmit={event => { event.preventDefault(); if (!isPublicEntityKey(publicId.trim())) { setImportError('Enter the full public project ID.'); return; } window.location.hash = routeHref({ name: 'project', projectRoot: publicId.trim() as `0x${string}`, tab: 'needs' }).slice(1); }}>

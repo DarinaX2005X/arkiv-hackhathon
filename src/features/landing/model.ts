@@ -10,10 +10,11 @@ export interface CoveragePreview {
   title: string; variantTitle: string; timeZone: string;
   rows: CoveragePreviewRow[];
 }
+export type IllustrationMoment = 'agreed' | 'withdrawn' | 'replacement';
 
 /** A fixed, explicitly local illustration derived from the same data and solver as practice. */
-export function createCoveragePreview(): CoveragePreview | null {
-  const input = makeSmallWorksFixture({ oak: true });
+export function createCoveragePreview(replacement = false): CoveragePreview | null {
+  const input = makeSmallWorksFixture(replacement ? { juniper: true } : { oak: true });
   const result = solve(input);
   const candidate = result.candidates.find(item => item.plan.variant.id === 'sunday');
   if (!candidate) return null;

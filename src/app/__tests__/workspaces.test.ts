@@ -71,7 +71,7 @@ describe('Studio workspace isolation without rendering', () => {
     [{ name: 'project', projectRoot: SMALL_WORKS_PROJECT_ROOT, tab: 'plans' }, 'local', 'practice'],
     [{ name: 'project', projectRoot: 'local:custom-project', tab: 'needs' }, 'practice', 'local'],
     [{ name: 'project', projectRoot: `0x${'1'.repeat(64)}`, tab: 'agreement' }, 'practice', 'public'],
-    [{ name: 'new-project' }, 'practice', 'local'],
+    [{ name: 'new-project' }, 'practice', 'public'],
     [{ name: 'new-project' }, 'public', 'public'],
     [{ name: 'contributions' }, 'practice', 'practice'],
   ] as const)('selects route workspace %#', (route, current, expected) => {
@@ -91,7 +91,7 @@ describe('Studio workspace isolation without rendering', () => {
     await restored.followRoute(restored.initialRoute());
     expect(restored.getSnapshot().issue).toBeNull();
     await restored.followRoute({ name: 'new-project' });
-    expect(restored.getSnapshot().kind).toBe('local');
+    expect(restored.getSnapshot().kind).toBe('public');
     expect(restored.getSnapshot().runtime.session.currentRoute()).toEqual({ name: 'new-project' });
     const customProjects = await restored.localRepository.listProjects(LOCAL_COORDINATOR);
     expect(customProjects.ok && customProjects.value.items).toEqual([]);
@@ -136,6 +136,45 @@ describe('Studio workspace isolation without rendering', () => {
     expect(() => workspaces.setLocalActor({ kind: 'local', id: 'local-actor:cedar' })).toThrow();
     expect(workspaces.runtimes.public.session.getSnapshot().actor).toBeNull();
     workspaces.dispose();
+  });
+
+  it('opens personal public work by default without creating a sample, profile or wallet authority', () => {
+    const { storage, values } = storagePort();
+    const manager = createStudioWorkspaces({ storage, request: neverNetwork });
+    expect(manager.getSnapshot().kind).toBe('public');
+    expect(manager.runtimes.public.session.getSnapshot().actor).toBeNull();
+    expect(values.has('partfolk:local:practice')).toBe(false);
+    expect(values.has('partfolk:local:custom')).toBe(false);
+    expect([...values.keys()].some(key => key.includes('account-0x'))).toBe(false);
+    expect(() => manager.setLocalActor({ kind: 'local', id: 'local-actor:cedar' })).toThrow();
+    manager.dispose();
+  });
+
+  it('preserves the local editor namespace and draft through sign-in, Help, reload and return', async () => {
+    const { storage } = storagePort();
+    const manager = createStudioWorkspaces({ storage, request: neverNetwork });
+    await manager.select('local', { name: 'new-project' });
+    manager.runtimes.local.session.selectDraft('local-ongoing');
+    const draft = manager.runtimes.local.drafts('local-ongoing', 'text', textDraft);
+    draft.save({ text: 'A real local draft' });
+    const auth = { name: 'sign-in', returnTo: '/projects/new' } as const;
+    // HashNavigation can update the old runtime before the workspace follower.
+    manager.runtimes.local.session.navigate(auth);
+    await manager.followRoute(auth);
+    expect(manager.getSnapshot().kind).toBe('public');
+    await manager.followRoute({ name: 'help', returnTo: '/projects/new' });
+    manager.dispose();
+    const restored = createStudioWorkspaces({ storage, request: neverNetwork });
+    await restored.followRoute(restored.initialRoute());
+    await restored.followRoute({ name: 'new-project' });
+    expect(restored.getSnapshot().kind).toBe('local');
+    expect(restored.runtimes.local.session.getSnapshot().activeDraftId).toBe('local-ongoing');
+    expect(restored.runtimes.local.drafts('local-ongoing', 'text', textDraft).load()).toMatchObject({ status: 'ready', value: { text: 'A real local draft' } });
+    expect(restored.runtimes.public.session.getSnapshot().actor).toBeNull();
+    await restored.select('public', { name: 'workspace' });
+    await restored.followRoute({ name: 'new-project' });
+    expect(restored.getSnapshot().kind).toBe('public');
+    restored.dispose();
   });
 
   it('a later route choice wins over an earlier asynchronous practice selection', async () => {

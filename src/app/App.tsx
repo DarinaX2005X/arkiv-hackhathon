@@ -2,6 +2,7 @@ import { useEffect, type ComponentType, type ReactNode } from 'react';
 import { AppProvider, useApp, useAppSession, type AppRuntime } from './context';
 import { parseRoute, routeHref, type Route } from './routes';
 import { BrandMark, Button, EmptyState, Notice } from '../ui';
+import { workDestination } from '../features/account/account';
 
 export interface RouteViewProps { route: Route }
 export type RouteRegistry = Partial<Record<Route['name'], ComponentType<RouteViewProps>>>;
@@ -27,7 +28,7 @@ function HashNavigation() {
   return null;
 }
 
-export function AppShell({ children, controls }: { children: ReactNode; controls?: ReactNode }) {
+export function AppShell({ children, controls, account }: { children: ReactNode; controls?: ReactNode; account?: ReactNode }) {
   const { copy, session } = useApp();
   const state = useAppSession();
   const t = copy.text.bind(copy, 'shell');
@@ -47,10 +48,14 @@ export function AppShell({ children, controls }: { children: ReactNode; controls
     <header className="pf-app-header">
       <a className="pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><span className="pf-wordmark">{t('brand')}</span></a>
       <nav aria-label={t('navigation')} className="pf-app-navigation">
-        {navigation.map(item => <a key={item.name} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: state.destination } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') ? 'page' : undefined}>{t(item.label)}</a>)}
+        {(route.name === 'home' ? navigation.filter(item => item.name === 'workspace' || item.name === 'help') : navigation).map(item => <a key={item.name} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') ? 'page' : undefined}>{t(item.label)}</a>)}
       </nav>
+      {account}
     </header>
-    {controls ?? <div className="pf-mode-line"><span>{state.mode === 'local' ? t('localMode') : t('publicMode')}</span>{state.mode === 'public' && !state.actor && <span>{t('disconnected')}</span>}</div>}
+    {controls ?? (route.name !== 'home' && <div className="pf-mode-line" role="status">
+      <span>{state.mode === 'local' ? 'Saved on this device' : state.actor ? 'Shared project. Wallet connected.' : 'Browsing shared projects. Read-only until you connect a wallet.'}</span>
+      {state.mode === 'local' ? <span className="pf-secondary">No account needed</span> : !state.actor && <span className="pf-secondary">Connect a wallet when you are ready to publish or contribute</span>}
+    </div>)}
     <main className="pf-page pf-app-main" id="main-content" tabIndex={-1}>
       {state.storageIssue && <Notice tone="warning" title={t(needsRecovery ? 'recoveryTitle' : 'storageTitle')}>
         <p>{t(needsRecovery ? 'recoveryBody' : 'storageBody')}</p>
@@ -58,7 +63,18 @@ export function AppShell({ children, controls }: { children: ReactNode; controls
       </Notice>}
       {children}
     </main>
-    <footer className="pf-app-footer"><span>Everyone brings a part.</span><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>About public projects</a><a href="./desk.html">Open the contributor view</a></footer>
+    <footer className="pf-app-footer">
+      <div className="pf-footer-intro">
+        <a className="pf-footer-brand" href={routeHref({ name: 'home' })}><BrandMark /><strong>{t('brand')}</strong></a>
+        <p>Bring your event together. Keep everyone in control of their part.</p>
+        <p className="pf-secondary">People publish their own offers and decisions on Arkiv.</p>
+      </div>
+      <div className="pf-footer-links" aria-label="Footer navigation">
+        <div className="pf-footer-group"><strong>Your work</strong><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a><a href={routeHref({ name: 'requests' })}>Requests</a></div>
+        <div className="pf-footer-group"><strong>Learn</strong><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>How public projects work</a><a href={routeHref({ name: 'help', topic: 'agreement', returnTo: state.destination })}>Agreements and ownership</a><a href="./desk.html">Open contributor view</a></div>
+      </div>
+      <div className="pf-footer-meta"><span>Drafts stay in this browser. Published project details and decisions are public.</span></div>
+    </footer>
   </>;
 }
 
@@ -79,13 +95,13 @@ function FoundationView({ route }: RouteViewProps) {
   return <section className="pf-sheet"><h1>{t(keys[0])}</h1><EmptyState title={t(keys[0])}>{t(keys[1])}</EmptyState></section>;
 }
 
-function RoutedApp({ routes, controls }: { routes: RouteRegistry; controls?: ReactNode }) {
+function RoutedApp({ routes, controls, account }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode }) {
   const state = useAppSession();
   const route = parseRoute(state.destination);
   const View = routes[route.name] ?? FoundationView;
-  return <><HashNavigation /><AppShell controls={controls}><View route={route} /></AppShell></>;
+  return <><HashNavigation /><AppShell controls={controls} account={account}><View route={route} /></AppShell></>;
 }
 /** MAIN composes the feature registry; Desk may use only AppProvider/AppShell. */
-export function RootApp({ runtime, routes = {}, controls }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode }) {
-  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} /></AppProvider>;
+export function RootApp({ runtime, routes = {}, controls, account }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode }) {
+  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} account={account} /></AppProvider>;
 }

@@ -1,9 +1,10 @@
 import { useId, type CSSProperties } from 'react';
+import type { IllustrationMoment } from './model';
 
 /** Original explanatory artwork, not a screenshot or live activity.
  * Board count comes from the example requirement. Objects share one oblique
  * camera and light from the upper left. Palette comes from shared tokens. */
-export function ExhibitionArt({ boardCount }: { boardCount: number }) {
+export function ExhibitionArt({ boardCount, moment = 'agreed' }: { boardCount: number; moment?: IllustrationMoment }) {
   const shadow = `exhibition-shadow-${useId().replaceAll(':', '')}`;
   const boards = [[167, 306], [249, 264], [331, 222], [290, 376], [372, 334], [454, 292]] as const;
   const materials = { '--pf-art-ivory': `url(#${shadow}-ivory)`, '--pf-art-wall': `url(#${shadow}-wall)`,
@@ -11,7 +12,11 @@ export function ExhibitionArt({ boardCount }: { boardCount: number }) {
     '--pf-art-sand': `url(#${shadow}-sand)`, '--pf-art-contact-filter': `url(#${shadow}-contact)` } as CSSProperties;
   return <svg className="pf-exhibition-art" style={materials} viewBox="0 0 720 565" role="img" aria-labelledby={`${shadow}-title ${shadow}-description`}>
     <title id={`${shadow}-title`}>Everyone brings a part of the exhibition</title>
-    <desc id={`${shadow}-description`}>An illustrated library room with display boards, people hanging artwork, and a helper bringing framed work on a trolley. The working example uses the same people, space and equipment needs.</desc>
+    <desc id={`${shadow}-description`}>{moment === 'withdrawn'
+      ? 'Illustration: the exhibition room and team are still here, but the artworks wait on a trolley without a driver. Oak has withdrawn transport.'
+      : moment === 'replacement'
+        ? 'Illustration: Juniper joins installation and Cedar takes transport. This new arrangement needs fresh agreement from every owner.'
+        : 'Illustration: a library room with six display boards, a team preparing the exhibition and Oak bringing artworks on a trolley. Each owner agreed to version 1.'}</desc>
     <defs>
       <filter id={shadow} x="-25%" y="-30%" width="150%" height="170%"><feGaussianBlur stdDeviation="16" /></filter>
       <filter id={`${shadow}-contact`} x="-30%" y="-80%" width="170%" height="260%"><feGaussianBlur stdDeviation="3" /></filter>
@@ -50,15 +55,16 @@ export function ExhibitionArt({ boardCount }: { boardCount: number }) {
       </g>
     </g>)}
     <g transform="translate(218 398)"><ellipse className="pf-art-contact" cx="18" cy="15" rx="29" ry="10" /><path className="pf-art-ink" d="m0-5 27-14 27 15-27 15Z" /><path className="pf-art-tool-front" d="M0-5v17l27 15V11Z" /><path className="pf-art-tool-side" d="M27 11v16l27-14V-4Z" /><path className="pf-art-tool-handle" d="m16-11 10-6 16 9v8" /><path className="pf-art-cream" d="m24 8 6-3v7l-6 3Z" /></g>
-    <Person x={152} y={358} pose="hang" coat="clay" /><Person x={394} y={430} pose="work" coat="forest" /><Person x={570} y={392} pose="welcome" coat="clay" /><Person x={520} y={433} pose="stand" coat="forest" />
-    <g className="pf-art-transport">
+    <Person x={152} y={358} pose="hang" coat="clay" /><Person x={394} y={430} pose="work" coat={moment === 'replacement' ? 'clay' : 'forest'} /><Person x={570} y={392} pose="welcome" coat="clay" /><Person x={520} y={433} pose="stand" coat="forest" />
+    <g className={`pf-art-transport pf-art-transport--${moment}`}>
       <path className="pf-art-path" d="M74 513c43 6 60 16 91 7s43-16 60-21" />
       <g transform="translate(128 449)">
         <ellipse className="pf-art-contact" cx="18" cy="36" rx="47" ry="12" /><path className="pf-art-trolley" d="m-6-55 5-4 26 79 29-10 3 7-39 13Z" /><path className="pf-art-trolley-edge" d="m-7-57-17-9-6 4 16 9Z" />
         <g transform="matrix(.93 .37 -.24 .88 -13 -46)"><path className="pf-art-frame-side" d="M0 0 7-5h45v69l-7 5H0Z" /><path className="pf-art-frame" d="M0 0h45v69H0Z" /><path className="pf-art-cream" d="M6 6h33v57H6Z" /><path className="pf-art-clay" d="M11 47V29a12 12 0 0 1 24 0v18Z" /><path className="pf-art-ink" d="M12 50h22v7H12Z" /></g>
         <ellipse className="pf-art-wheel" cx="18" cy="31" rx="8" ry="10" /><ellipse className="pf-art-wheel-hub" cx="17" cy="30" rx="3" ry="4" /><ellipse className="pf-art-wheel" cx="51" cy="17" rx="6" ry="8" />
       </g>
-      <Person x={76} y={479} pose="carry" coat="forest" />
+      {moment !== 'withdrawn' && <Person x={76} y={479} pose="carry" coat={moment === 'replacement' ? 'clay' : 'forest'} />}
+      {moment === 'withdrawn' && <path className="pf-art-missing-transport" d="m50 484 34-18 28 16-33 19Z" />}
     </g>
   </svg>;
 }

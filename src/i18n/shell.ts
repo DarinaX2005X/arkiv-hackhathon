@@ -2,9 +2,9 @@ import { defineCatalog } from './index';
 
 export const shellCopy = defineCatalog({
   brand: 'Partfolk', tagline: 'Everyone brings a part.',
-  skip: 'Skip to main content', navigation: 'Main navigation', projects: 'Projects',
+  skip: 'Skip to main content', navigation: 'Main navigation', projects: 'My projects',
   contributions: 'My contributions', requests: 'Requests', help: 'Help',
-  localMode: 'Local work · nothing published', publicMode: 'Public project view',
+  localMode: 'Local work. Nothing published.', publicMode: 'Public project view',
   disconnected: 'Wallet not connected',
   heading: 'Bring people, places and equipment into one workable plan.',
   description: 'Turn offers from different communities into a shared plan. Everyone confirms their part, and you can see what needs replacing when things change.',
