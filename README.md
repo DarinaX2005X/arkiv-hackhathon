@@ -1,157 +1,153 @@
-# Partfolk
+<p align="center">
+  <img src="docs/assets/partfolk-logo.svg" alt="Partfolk — three separate parts form one P" width="104" height="104">
+</p>
 
-<img src="public/partfolk-mark.svg" alt="Partfolk mark" width="64" height="64">
+<h1 align="center">Partfolk</h1>
 
-**Find an event. Make one happen.**
+<p align="center"><strong>Find an event. Make one happen.</strong></p>
 
-Partfolk brings organizers, contributors and visitors into one event ecosystem. Organizers combine people, spaces and equipment into a workable event; contributors keep control of what they offer and which exact arrangement they accept; visitors discover published events and manage their registration.
+<p align="center">
+  Bring people, spaces and equipment together.<br>
+  Keep every contribution and agreement in its owner's hands.
+</p>
 
-The shared record lives on **Arkiv**. Each contributor owns their offers and decisions, so an organizer cannot turn someone else's old agreement into approval of a changed plan. Independent clients can read the same records and verify the agreed version without Partfolk's application server or a private account database.
+<p align="center">
+  <img src="docs/assets/stack-arkiv.svg" alt="Arkiv SDK 0.8.1" height="34">
+  <img src="docs/assets/stack-react.svg" alt="React 19.3.0" height="34">
+  <img src="docs/assets/stack-typescript.svg" alt="TypeScript 5.9.2" height="34">
+  <img src="docs/assets/stack-vite.svg" alt="Vite 8.3.4" height="34">
+  <img src="docs/assets/stack-viem.svg" alt="viem 2.57.4" height="34">
+  <img src="docs/assets/stack-node.svg" alt="Node.js 22.12 or newer" height="34">
+</p>
 
-**Current availability:** runnable locally, with public Arkiv integration implemented. A hosted production URL, a complete live product demonstration and final user browser acceptance are pending. The included network evidence establishes earlier SDK capabilities, not the entire product journey.
+<p align="center">
+  <a href="#try-partfolk">Try Partfolk</a>&nbsp;&nbsp; / &nbsp;&nbsp;
+  <a href="#see-the-mechanism-in-four-steps">Explore the example</a>&nbsp;&nbsp; / &nbsp;&nbsp;
+  <a href="#why-arkiv">Why Arkiv</a>&nbsp;&nbsp; / &nbsp;&nbsp;
+  <a href="docs/protocol.md">Protocol</a>
+</p>
 
-## Try it locally
+Partfolk is one ecosystem for **organizers, contributors and visitors**. Organizers turn available skills, spaces and equipment into an event. Contributors decide which exact arrangement they accept. Visitors find published events and manage their registration.
 
-Use **Node.js 22.12.0 or newer** and npm. From the checked-out repository directory:
+**Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
+
+The application runs locally today. Public Arkiv integration is implemented; a hosted release and a complete live product demonstration are still pending.
+
+## One event, three ways to take part
+
+<img src="docs/assets/event-ecosystem.svg" alt="Organizers coordinate an event, contributors bring time, space and equipment, and visitors choose to join. All roles belong to the same ecosystem." width="960">
+
+| Your part | What you can do |
+| --- | --- |
+| **Organize** | Describe needs, admit contributions, compare arrangements, collect agreement, publish the visitor page and run the event |
+| **Contribute** | Offer time, a space or equipment; set availability; accept, decline or withdraw commitments; record work and equipment transfers |
+| **Attend** | Browse by date, format and location; check registration rules; request or reserve a place; follow changes in **My events** |
+
+One wallet can do all three. A welcome tour introduces the workspace after sign-in and can be replayed from Help. Connecting the wallet alone does not publish a profile, create a project or approve a plan.
+
+## Try Partfolk
+
+Use **Node.js 22.12.0 or newer** and npm. From the repository directory:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-On Windows PowerShell, use `npm.cmd` instead of `npm`, especially when forwarding arguments after `--`. Development has been checked on Windows with Node.js 22.13.0 and npm 10.9.2; other operating systems have not been independently verified for this release.
+Open [Partfolk at localhost:5173](http://127.0.0.1:5173/). No environment file, API key, database or container is needed. On Windows PowerShell, use `npm.cmd` instead of `npm`, especially when forwarding arguments after `--`.
 
-| Local destination | What to open |
+| Start here | Local route |
 | --- | --- |
-| Partfolk | [http://127.0.0.1:5173/](http://127.0.0.1:5173/) |
-| Guided Small Works example | [http://127.0.0.1:5173/#/demo](http://127.0.0.1:5173/#/demo) |
-| Published events | [http://127.0.0.1:5173/#/events](http://127.0.0.1:5173/#/events) |
-| My projects and drafts | [http://127.0.0.1:5173/#/workspace](http://127.0.0.1:5173/#/workspace) |
+| Explore Small Works without a wallet | [Guided example](http://127.0.0.1:5173/#/demo) |
+| Find published events | [Browse events](http://127.0.0.1:5173/#/events) |
+| Create or resume your own work | [My projects](http://127.0.0.1:5173/#/workspace) |
 
-These are local addresses and work while the development server is running. Vite uses a strict port: if 5173 is occupied, startup fails instead of changing the address. Stop with Ctrl+C and use the same command to restart.
+These links work while the development server is running. Port 5173 is strict; an occupied port produces an error. Stop with Ctrl+C and restart with the same command.
 
-Successful startup prints the local URL. An HTTP check can confirm that the entry page is served without opening a browser:
+The example initializes when opened. Public browsing needs no wallet; an empty catalogue is not filled with fictional events. Publishing and registration require an injected Ethereum-compatible EOA wallet on **Arkiv Tiramisu**, testnet gas, browser storage and Web Locks support.
 
-```sh
-node --input-type=module -e "const r = await fetch('http://127.0.0.1:5173/'); console.log(r.status); if (!r.ok) process.exitCode = 1;"
-```
+## See the mechanism in four steps
 
-Expect `200`. This confirms server reachability, not the user flow or wallet interaction.
+**Small Works** is a shared exhibition. Saturday lacks enough display boards. Sunday has the resources, but Cedar cannot install the exhibition and transport its artworks at the same time.
 
-No environment file, API key, container, application database or migration is required. The example is initialized when you open it. Reading public events and trying the local example need no wallet. An empty public catalogue means no verified matching events were returned; it is not populated with fictional events.
+<img src="docs/assets/exact-agreement.svg" alt="Small Works first assigns transport to Oak and installation to Cedar and Willow. When Oak withdraws, Cedar takes transport and Juniper joins Willow. Every required contributor must approve the revised version." width="960">
 
-## A first useful session
+1. **Find a workable arrangement.** Choose **Add Oak and find a plan**. Oak transports the artworks; Cedar and Willow install. The proposal includes equipment delivery and return.
+2. **Agree to this version.** Choose **Play the group's agreement**. Each fictional contributor records a separate local decision. The plan becomes ready when every required agreement matches.
+3. **See what changes.** Choose **Let Oak withdraw**. The old plan loses readiness, while its decisions remain attached to their original version.
+4. **Repair and agree again.** Choose **Add Juniper and update the plan**, then **Play fresh agreement**. Juniper installs with Willow, freeing Cedar for transport. Every required owner approves the new version.
 
-Open the guided **Small Works** example. A shared exhibition needs a venue, display boards, equipment, installers, hosts and artwork transport. Saturday lacks enough boards. Sunday has the resources, but Cedar cannot install and transport artworks at the same time.
+Choose **Explore the full project** to inspect people, history and the run sheet. The full practice lets you switch fictional roles, record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
 
-1. Choose **Add Oak and find a plan**. Oak handles transport, leaving Cedar and Willow available to install. A proposal includes the equipment handover and return.
-2. Choose **Play the group's agreement**. The example records a separate local decision for every required contributor. The plan becomes ready only after those decisions agree with the same version.
-3. Choose **Let Oak withdraw**. The existing plan loses readiness; the earlier agreements remain attached to their original version.
-4. Choose **Add Juniper and update the plan**. Juniper installs with Willow, freeing Cedar for transport. Choose **Play fresh agreement** to approve the revised arrangement.
-5. Choose **Explore the full project**. Inspect the people, exact agreement, history and run sheet. In the full practice, switch between fictional roles to record their own work and equipment transfers. Export the outcome as JSON or a readable HTML run sheet.
+Practice uses real local domain operations with fictional identities and a controlled clock. Its agreement buttons simulate the separate owners. Progress survives reload; **Start the example again** resets only the example.
 
-This example uses the real local domain operations with fictional identities and a controlled practice clock. Its group-agreement buttons simulate the separate owners for learning; they never sign public agreements. Progress survives reload in the same browser, and **Start the example again** resets only the example.
+**Make it yours:** choose **Create an event**, enter an outcome, time zone, date/place options and requirements. Drafts live in **My projects**, with reopen, export, import and delete actions. Publishing is explicit. Reusing a recipe creates new work without copying anyone's approvals.
 
-To make your own event, choose **Create an event** or **Start my own project**. Enter a title, outcome, time zone, date/place options and required people or resources. Your draft appears in **My projects**, where you can reopen, export, import or delete it. Publishing is an explicit wallet action. Copying or reusing a recipe starts new work without inheriting another project's approvals.
+## Events people can actually join
 
-## One event, three ways to take part
+Events can be **online**, **in person** or **hybrid**. Physical events name a country, city and venue; online participation uses a public HTTPS link or public joining instructions. Each event displays its own named time zone.
 
-| Role | Work in Partfolk | Result |
-| --- | --- | --- |
-| Organizer | Describe needs; review and admit incoming offers; compare feasible arrangements; publish an exact proposal; request agreement; publish the visitor page and run the event | A coordinated event with an inspectable agreement, registration policy and history |
-| Contributor | Offer time, a place or equipment; declare availability and capacity; review requests; accept, decline or withdraw their own commitment; report work and acknowledge transfers | Control of their own resources and decisions across projects |
-| Visitor | Browse by title, dates, format, country/city, availability and deadline; review public details; register or request a place; reconfirm changed terms; withdraw | Registrations and current event details together in **My events** |
+Organizers can set a deadline, limited or unlimited places, an optional waiting list and open or wallet-invitation-only admission. Registration can be closed and reopened after validation; events can be cancelled or ended.
 
-The same wallet can do all three. Signing in connects an injected Ethereum-compatible wallet to Arkiv Tiramisu. It does not create a public profile, publish a project or approve anything. Device preferences choose a starting page; a modal welcome tour introduces the workspace and can be replayed from Help.
+<img src="docs/assets/registration-paths.svg" alt="Unlimited open events register a valid signed decision directly. Limited or invitation-only events keep requests pending until the organizer admits the exact request and reserves a place. Waiting-list participation is optional." width="960">
 
-### Places, formats and registration
+**A request is not always a reservation.** For limited and invitation-only events, the organizer admits the exact signed request. Seat updates consume the reviewed previous event state in one native Arkiv batch, so competing updates cannot both consume that predecessor. Reservations cannot exceed capacity. Missing evidence or withdrawal does not silently free a place or promote a waiter; the organizer explicitly releases or replaces it.
 
-An event can be **online**, **in person** or **hybrid**. Physical events have a country, city and venue; online participation has a public HTTPS address or public joining instructions. Dates use a named IANA time zone. Catalogue date filters use the visitor's local zone, while each event displays its own zone.
+**Deadlines use chain inclusion time.** An ordinary signup must be included before its deadline, which may be set up to the event end. A timely request can be admitted later. The queue is displayed by creation block and entity key, while the organizer decides admissions.
 
-Organizers can set a registration deadline, unlimited or limited capacity, an optional waiting list for limited events, and open or wallet-invitation-only admission. They can close registration, reopen it after validation, cancel the event or mark it ended. New registration also stops after the scheduled end or when the underlying contributor agreement is no longer ready.
+**Changed terms need a new decision.** A new date, venue or other public terms creates an immutable release for visitors to review. Existing reservations stay held until released or rebound to the new exact request. An internal contributor-plan repair can preserve unchanged visitor terms.
 
-An ordinary signup must be included onchain before its deadline, which can be set up to the event end. The client's typed timestamp cannot backdate a late request. A timely request can be admitted later. The waiting list is displayed by creation block and then entity key, while the organizer chooses admissions.
+For a managed reservation, after-deadline reconfirmation requires the wallet to remain held and appear in the new release's authorized list. Previously registered visitors without held reservations need an explicitly later deadline. These exceptions do not silently reopen ordinary registration. The [event contract](arkiv/schema.md#event-participation-extension) specifies the full rules.
 
-For unlimited open events, a valid attendee decision registers directly. Limited and invitation-only events use **organizer admission**: a signed request is pending until the organizer reserves a place for that exact request and event release. Joining the waiting list is an explicit choice. A displayed count or request alone is not a reservation, and withdrawal does not automatically promote a waiter.
+Registration has no ticket payments. Invitations establish eligibility, not privacy or a verified human identity. New joins pause if the underlying contributor agreement is no longer ready; scheduled end also stops joining.
 
-Seat changes create a successor event state and consume the exact reviewed previous state in one native Arkiv batch. Two competing updates cannot both consume that same predecessor. Capacity is checked against the retained reservations; it is not inferred from a browser counter. Missing or conflicting request evidence remains unverified and does not silently free a seat. The organizer explicitly releases or replaces reservations.
+## Why Arkiv
 
-Public event terms are immutable releases. Changing a date, venue or other audience terms creates a new release, preserves the old terms for comparison and requires visitors to reconfirm. Existing reservations remain occupied until explicitly released or rebound to the visitor's new exact request. Repairing only the internal contributor plan can preserve the audience release, so an unchanged visitor arrangement does not need a new attendance decision.
+The event is shared; authority stays with each author.
 
-For managed reservations, a changed release records which held attendees the organizer authorizes to reconfirm after the deadline; a wallet must still be held and listed for that exception. The owner then admits the new exact request. For previously registered attendees without held reservations, changing terms after the deadline requires the organizer to explicitly choose a later deadline. These changes do not silently reopen ordinary registration. [The event contract](arkiv/schema.md#event-participation-extension) describes the full rules.
+<img src="docs/assets/arkiv-exchange.svg" alt="Separate owner wallets authorize writes to Arkiv. Partfolk, the independent Partner Desk and the read-only project verifier each read the shared public records directly." width="960">
 
-Registration is free of ticket payments in this implementation. A wallet invitation establishes eligibility; it does not make an event or its invitation list private. A registration is a recorded decision, not proof of physical attendance or a verified real-world identity.
-
-### From preparation to the run sheet
-
-The deterministic solver checks dates, resource quantities, overlapping commitments, individual availability and typed conditions. Separate offers do not allow one person to perform two simultaneous jobs. Proposed equipment handovers and returns extend the relevant reservation interval.
-
-Every candidate passes an independent evaluator before it can become a proposal. A repair favors retaining contributors, then the chosen date/variant, then quantities and assignment terms. When the search budget is exhausted, the result reports the limit instead of claiming impossibility or a proven optimal plan.
-
-The run sheet records tasks, handovers, recipient acknowledgements, returns and unresolved work. A planned return is not a recorded return. Completed reports and outstanding equipment custody survive a later withdrawal or project closure. Exports preserve the selected version, evidence status and outstanding obligations; importing a recipe never imports someone else's consent.
-
-## Why Arkiv is part of the mechanism
-
-Partfolk stores independently authored records rather than treating the organizer's page as the authority for everyone's agreement.
-
-1. The organizer owns a project root, its working state, immutable proposals and the current activation.
-2. Each contributor owns a publisher root and a current book of resources, offers, decisions, grants and execution records. Acceptance and its capacity reservation are written together in one book replacement.
-3. Consent binds the exact project, activation, proposal key and canonical hash. Every material contributor-plan revision requires fresh approval from every required owner, even when someone's individual task stayed unchanged.
-4. The visitor extension adds immutable event releases, an organizer-owned event state and independently owned attendance states. Visitor consent binds the exact audience release and hash.
-5. A reader authenticates creators, ownership, readonly flags, schemas, hashes and indexed attributes at one canonical block. It reads every required page and derives readiness from the resulting evidence.
-
-No single `ready` field written by the organizer decides the result. Missing evidence, expired records, stale reads and conflicting current records remain distinct from agreement. Normal replacements create the successor and delete the exact prior records atomically. The solver and policy checks run in the clients; there is no Partfolk smart contract enforcing a global lock across owners.
-
-```mermaid
-flowchart LR
-  O[Organizer in Partfolk] --> C[Shared domain rules]
-  P[Contributor in Partfolk or Partner Desk] --> C
-  V[Visitor in Partfolk] --> E[Event and attendance rules]
-  C --> R[Direct Arkiv readers]
-  E --> R
-  C --> J[Durable operation journal]
-  E --> J
-  J --> W[Owner's injected wallet]
-  W --> A[Arkiv Tiramisu entities]
-  R --> A
-  CLI[Read-only verifier CLI] --> R
-```
-
-The full contracts are in [arkiv/schema.md](arkiv/schema.md) and [docs/protocol.md](docs/protocol.md). [arkiv/friction.md](arkiv/friction.md) records SDK constraints and implementation findings.
-
-### What is saved where
-
-| Data | Persistence and authority |
+| Record owner | What they control |
 | --- | --- |
-| Project/contribution drafts, account label, tour progress | This browser's local storage; not a public profile or cross-device backup |
-| Local projects and Small Works practice | Separate local repositories; simulated local owners cannot authorize public writes |
-| Published projects, offers, plans, decisions and event registrations | Public Arkiv entities, authenticated by the creating wallet and current ownership |
-| Pending action and transaction journals | Origin-specific browser storage; frozen requests and evidence, never private keys |
-| JSON/HTML exports | Files the user saves; dated evidence, not imported signing authority |
+| **Organizer** | Project needs, admitted contributors, exact proposals, active plan, public releases and managed reservations |
+| **Contributor** | Their resources, offers, decisions, capacity grants and execution statements |
+| **Visitor** | Their attendance request, reconfirmation and withdrawal |
 
-Returning with the same wallet lets another client discover its public records. Drafts, device settings and pending journals do not automatically move between devices or origins. Deleting a local draft does not delete a published project. Disconnecting clears signing authority while preserving saved work.
+A contributor's consent binds the **project, activation, proposal key and canonical hash**. Every material plan revision needs fresh approval from every required owner, including someone whose own task stayed unchanged. Visitor consent similarly binds the exact audience release.
 
-Public payloads and indexed attributes are readable by others. Keep private contact details, private meeting credentials and secrets out of them. Expiration or deletion cannot retract copies already read. Entity lifetime is a block deadline; extending storage does not renew a consent deadline or guarantee retention until a particular wall-clock date.
+A reader checks authorship, ownership, schemas, hashes and all required records at one canonical block. It derives readiness from that evidence. Expired records, incomplete reads and competing versions remain visible as unavailable or unverified state.
 
-### Recovering an interrupted write
+The deterministic solver checks capacity, availability, overlapping commitments and typed conditions. Each candidate passes a separate evaluator. Repair favors retaining contributors and minimizing changes; a search limit is reported rather than presented as proof of impossibility.
 
-The writer freezes the intended action, owner, expected predecessor keys, lifetime and operation ID before sending. It persists each phase and verifies the transaction, receipt, native events and entity readback. Project initialization and proposal publication can have multiple recoverable phases.
+Native create-and-delete batches replace exact current records. The solver and policies run in the clients: Partfolk is not escrow or a smart contract locking all owners' resources.
 
-If a response is lost, retain the same browser data and reconnect the same wallet. Use the offered request-check or continuation action to reconcile the original operation. A timeout or empty search does not establish that nothing was sent. Clearing the journal or creating a replacement request can lose the evidence needed for recovery. Detailed recovery states and operator actions are in [docs/operations.md](docs/operations.md).
+Read the [data schema](arkiv/schema.md), [full protocol](docs/protocol.md) and [Arkiv implementation findings](arkiv/friction.md) for the technical contract.
 
-## Independent clients under the same Partfolk brand
+### Your drafts, their public record
 
-**Partner Desk** is a separate technical client for contributors and agreement inspection. It has its own entry point, runtime, storage namespace and wallet connection, and reads Arkiv directly. It demonstrates that published work remains usable without the organizer's running Studio process; it is not a second event ecosystem or a required step for ordinary users.
+| Stays in this browser | Published on Arkiv |
+| --- | --- |
+| Drafts, device label and tour progress | Projects, offers and immutable proposals |
+| Local projects and isolated practice | Independently authored decisions and grants |
+| Pending-action and transaction journals | Event releases, admissions and attendance states |
 
-Start it in another terminal:
+The same wallet can discover its public records from another client. Drafts and pending journals do not automatically move between browsers or origins. Deleting a draft does not delete a published project; disconnecting preserves saved work.
+
+Public records are readable by others. Keep private contact details and meeting credentials out of them. Expiration cannot retract copies already read, and extending storage does not renew consent.
+
+**Interrupted transaction?** Keep the same browser data, reconnect the same wallet and use the offered request-check or continuation action. Partfolk reconciles the original operation and verifies its receipt and records. A timeout does not mean nothing was sent; clearing a journal can destroy recovery evidence. See [operation recovery](docs/operations.md#pending-writes-and-recovery).
+
+## Read the same agreement independently
+
+**Partner Desk** is a technical client within Partfolk for contributors and agreement inspection. Its separate build, runtime and wallet connection read Arkiv directly, without the organizer's Studio process.
 
 ```sh
 npm run dev:desk
 ```
 
-Open [http://127.0.0.1:5174/desk.html](http://127.0.0.1:5174/desk.html). It accepts public project/publisher keys and supported invitation links. Public project keys contain 32 bytes (`0x` followed by 64 hexadecimal characters); `local:` identifiers belong only to local practice/work.
+Open [Partner Desk at localhost:5174/desk.html](http://127.0.0.1:5174/desk.html) and use a public project/publisher key or supported invitation link. It is optional for ordinary users.
 
-The read-only CLI constructs a fresh Arkiv reader without Studio or browser storage:
+The read-only CLI verifies the contributor project and agreement:
 
 ```sh
 npm run verify -- --help
@@ -160,82 +156,54 @@ npm run verify -- PROJECT_ROOT --export project-snapshot.json
 npm run verify -- PROJECT_ROOT --block 123456 --json
 ```
 
-Replace `PROJECT_ROOT` with a real public project root and `123456` with the historical block you intend to inspect. `--export` refuses to overwrite an existing file. Historical output describes that block, not current readiness. The verifier checks the contributor project/agreement; event registration has its own extension reader and is not a separate CLI mode.
+Replace `PROJECT_ROOT` with a real 32-byte public entity key and `123456` with the historical block to inspect. A `local:` identifier is not public. Exports refuse to overwrite files; historical output describes that block, not current readiness.
 
-Exit `0` means the project produced a classified result, which may still need approval or repair. Inspect `readiness.status`, reasons, snapshot time/block, approval counts and history completeness. Unverified results/errors return `1`; missing arguments return `2`.
+Exit `0` means a classified result, not necessarily a ready agreement. Inspect `readiness.status`, reasons, approvals and snapshot time. Unverified results return `1`; missing arguments return `2`. Event registration uses the extension reader rather than a separate CLI mode.
 
-## Configuration, builds and checks
+## Build and verify
 
-There are **no required or optional application environment variables** in the current runtime. Network settings are source configuration, not `.env` overrides:
+```sh
+npm run check
+```
 
-| Setting | Value / source |
+This runs TypeScript checks, unit and integration suites, offline probe/helper tests and both production builds.
+
+| Command | Use |
 | --- | --- |
-| Network | Arkiv Tiramisu testnet, chain ID `7738577` |
-| Public RPC | `https://rpc.tiramisu.db-chain.testnet.arkiv.network` |
-| Explorer | `https://tiramisu.explorer.arkiv.network` |
-| Native entity address | `0x4400000000000000000000000000000000000044` |
-| SDK | `@arkiv-network/sdk` `0.8.1`, locked in `package-lock.json` |
-| Read configuration | [src/data/arkiv/client.ts](src/data/arkiv/client.ts) |
-| Wallet configuration | [src/data/wallet/gateway.ts](src/data/wallet/gateway.ts) |
+| `npm run typecheck` | Application TypeScript |
+| `npm run test:unit` | Domain, data and application behavior |
+| `npm run test:integration` | Multi-role flows, process isolation and recovery |
+| `npm run test:bootstrap` | Historical probe-script tests |
+| `npm run build` | Main bundle in `dist/`, including Studio and Desk |
+| `npm run build:desk` | Independent Desk bundle in `dist-desk/` |
+| `npm run preview` | Built main app at `http://127.0.0.1:4173/` |
+| `npm run preview:desk` | Built Desk at `http://127.0.0.1:4174/desk.html` |
 
-Public writes require an injected EOA wallet on Tiramisu, testnet gas, browser storage and Web Locks support. The app requests the account and switches/adds the network on connection; sending rechecks wallet and RPC chain identity. It never accepts a private key or provides a signing server. Historical wallet/probe scripts are development evidence tools, not install or seed commands.
+Build before previewing. Deploy the generated static files over HTTPS, keeping HTML and assets together. Both builds use relative assets and hash routing. No application server, database migration or signing secret is required.
 
-| Command | Purpose |
-| --- | --- |
-| `npm run check` | Full offline product gate: TypeScript, unit/integration tests, bootstrap/probe tests, live-runner safety tests and both builds |
-| `npm run typecheck` | Application TypeScript check |
-| `npm run test:unit` | Domain, data, application and feature unit tests |
-| `npm run test:integration` | Typed multi-role, independent-process and recovery integration tests |
-| `npm run test:bootstrap` | Offline tests of historical first-write and atomic-probe scripts |
-| `npm run build` | Main static bundle, including `index.html` and `desk.html`, in `dist/` |
-| `npm run build:desk` | Independently deployable Desk in `dist-desk/` |
-| `npm run preview` | Serve the built main bundle at `http://127.0.0.1:4173/` |
-| `npm run preview:desk` | Serve the built Desk at `http://127.0.0.1:4174/desk.html` |
+There are no application environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). Historical signer/probe scripts are not installation prerequisites. See [operations](docs/operations.md) for deployment details and troubleshooting.
 
-The check command does not broadcast transactions or use browser automation. Build before the corresponding preview command. All development and preview ports are strict. There is no `npm start` script.
+The implementation is organized around `src/domain/` for constraints and consent, `src/data/` for repositories and transaction recovery, and `src/features/` for product flows. `src/domain/events/` and `src/data/events/` implement visitor participation; `src/desk/` and `src/cli/` provide independent clients.
 
-For deployment, serve the contents of `dist/` over HTTPS; an independent Desk deployment serves `dist-desk/` with `desk.html` as its entry. Both builds use relative asset paths and hash routing. Keep each HTML entry with its generated assets. No server process, database migration or signing secret belongs in the deployment. Hosting configuration and a production origin are not yet delivered. See [operations](docs/operations.md) for HTTP reachability checks, recovery and lifetime maintenance.
+### What the evidence establishes
 
-The main implementation boundaries are:
+The verified source baseline passed TypeScript, unit/integration checks and both builds. Clean installation and static serving were also checked with Node.js 22.13.0 and npm 10.9.2.
 
-| Path | Responsibility |
-| --- | --- |
-| `src/app/` | Main entry, routes, sessions, local/public/practice workspaces and recovery |
-| `src/features/` | Organizer, contributor, visitor, practice, account and execution flows |
-| `src/domain/` | Canonical hashing, constraints, solver, exact consent and execution |
-| `src/domain/events/` | Audience terms, release hashes, attendance and admission rules |
-| `src/data/arkiv/` | Authenticated block-pinned reads, native writes and verification |
-| `src/data/events/` | Event extension repository using the shared transaction boundary |
-| `src/data/operations/`, `src/data/wallet/` | Durable reconciliation and injected-wallet authority |
-| `src/desk/`, `src/cli/` | Independent Desk and read-only verifier |
+- [Integration scenarios](tests/integration/README.md) cover three-role participation, independent client processes, changed plans, interrupted operations and execution exports against a strict native-ledger fixture.
+- [Bootstrap](arkiv/evidence/bootstrap.json) and [atomic transition](arkiv/evidence/atomic-transition.json) artifacts record historical Tiramisu capabilities. The atomic probe replaced A with B and rejected a stale A-to-C estimate; it did not mine a stale rollback.
+- [Live product proof tooling](tests/arkiv-live/README.md) is separate. Its tests and the earlier capabilities are not a completed public product demonstration.
 
-The UI uses React, TypeScript and Vite, with the official Arkiv SDK, viem and the Temporal polyfill. No AI service runs in the product.
+## Current boundaries
 
-## Evidence and current limits
+- **Release status:** hosting and a complete live product demonstration remain pending. Final visual, mobile and real-wallet acceptance is still outstanding.
+- **Readiness is dated:** owners can withdraw, delete records or let them expire. Agreement is neither future availability nor proof of physical completion.
+- **Audience details are organizer-authored:** public schedule and location are entered separately from contributor duties. The current validator does not establish their semantic correspondence.
+- **Admission is bounded:** limited capacity and invitation lists support up to 512 entries. Waiters are not automatically promoted. Read and payload limits are defined in the [schema](arkiv/schema.md).
+- **Public records are not permanent:** RPC/indexer availability and entity lifetime matter. Missing pages or conflicting records stay unverified; historical gaps remain explicit.
+- **Recovery depends on retained evidence:** separate origins do not share journals or submission locks. Avoid concurrent writes from the same wallet in different clients.
 
-On **11 October 2026**, source revision `ae4c839` passed the full product gate: 777 unit tests, 22 integration tests, 19 bootstrap/probe tests, 42 live-proof-helper safety tests and 102 live-proof-helper unit tests, together with application/integration/helper TypeScript checks and both production builds. These helper checks were offline.
+## License
 
-A fresh isolated checkout of that revision, without private planning files, local signer data or an environment file, also passed `npm ci`, both builds and the 27-test event-domain suite on Node.js 22.13.0 / npm 10.9.2. Its development and production preview entries returned HTTP `200`; all linked assets inspected in the two production entries returned `200`. Temporary ports 5183, 4183 and 4184 kept this check separate from the existing workspace servers. No browser rendering, wallet interaction or network broadcast was part of those checks.
+Partfolk is [MIT licensed](LICENSE). IBM Plex Sans retains its [SIL Open Font License](public/fonts/IBM-Plex-Sans/license.txt); dependencies retain their respective licenses.
 
-The repository separates several kinds of evidence:
-
-- Unit tests exercise domain constraints, consent, authorization, malformed data, conflicts, UI state models and recovery logic.
-- [Integration tests](tests/integration/README.md) use production readers/writers with a strict in-memory native ledger. They cover organizer/contributor/attendee journeys, fresh client processes, competing projects, repair, interruption recovery and execution exports. They do not broadcast to Tiramisu or prove browser behavior.
-- [Bootstrap evidence](arkiv/evidence/bootstrap.json) records an actual historical SDK create/read/query check. [Atomic transition evidence](arkiv/evidence/atomic-transition.json) records A-to-B replacement and rejection of a stale A-to-C gas estimate. It explicitly records `staleBroadcast: false` and `minedRollbackTested: false`.
-- [Live product proof tooling](tests/arkiv-live/README.md) exists separately. A completed funded multi-party product proof is still pending; a runner and its offline tests are not that proof.
-
-Material limits remain visible:
-
-- **No hosted release or completed public product demonstration is claimed here.** Final visual, mobile, accessibility-in-browser and real wallet interaction acceptance belongs to user testing and remains separate from code checks.
-- **Readiness is a dated observation.** It is not escrow, a promise of future availability, a global lock across owners or proof that work happened. Owners can withdraw, delete records or let them expire.
-- **Public audience details remain organizer-authored.** Publication binds a ready contributor plan, but the audience schedule and location are entered separately; the current validator does not establish that every published visitor time or venue matches the contributor duties. Organizers must check that correspondence.
-- **RPC and bounded reads matter.** The default reader permits 160 pages, 4,000 entities and 50 project publishers, with 100 records per page and one cursor restart. Incomplete reads remain unverified. Proposal lineage is bounded to 32 proposals; unavailable history is shown as a gap. Snapshot confidence expires after 60 seconds.
-- **Managed event sizes are bounded.** Limited capacity and invitation lists support at most 512 entries. Release/attendance payloads are bounded to 64 KiB and event state to 120 KiB. Admissions are explicit organizer decisions, not automatic first-come allocation. Missing evidence does not release a place.
-- **Public does not mean permanent or private.** Records expire and clients depend on the configured RPC/indexer. Invite-only registration is public eligibility control. Wallet authorship does not establish a human identity or prevent one person using multiple wallets.
-- **Browser storage is operational state.** Losing a draft or pending journal cannot be repaired from a name or a cached success label. Separate origins do not share journals or submission locks. Avoid concurrent writes from the same wallet in different clients.
-
-## License and materials
-
-Partfolk is available under the [MIT License](LICENSE). Bundled IBM Plex Sans files retain their [font license](public/fonts/IBM-Plex-Sans/license.txt). Library dependencies retain their respective licenses.
-
-VibeMachina supplied development guidance for planning, design, delegated implementation and review. The application does not need that skill, private planning files or the original author's local configuration to install, run or verify public records.
+The README diagrams are original explanatory illustrations, not interface screenshots. VibeMachina supplied development guidance; it is not a runtime dependency.

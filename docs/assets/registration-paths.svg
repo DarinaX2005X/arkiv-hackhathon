@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="346" viewBox="0 0 960 346" role="img" aria-labelledby="title desc">
+  <title id="title">Two registration paths, one clear place status</title>
+  <desc id="desc">For unlimited open registration, a valid signed attendance decision registers directly. For limited or invitation-only events, the signed request stays pending until the organizer admits that exact request to a reserved place. The optional waiting list needs explicit opt-in. Changed public terms require reconfirmation.</desc>
+  <rect width="960" height="346" rx="24" fill="#f3f5ec"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="36" y="48" fill="#1e3b2d" font-size="27" font-weight="700">Know when a place is yours</text>
+    <text x="36" y="104" fill="#596d53" font-size="19" font-weight="700">Unlimited + open</text>
+    <rect x="320" y="75" width="206" height="54" rx="12" fill="#fff" stroke="#bbcab2" stroke-width="1.5"/>
+    <text x="423" y="109" text-anchor="middle" fill="#284833" font-size="20">Sign your decision</text>
+    <path d="M540 102H685M675 94L685 102L675 110" fill="none" stroke="#63844e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="703" y="75" width="221" height="54" rx="12" fill="#d4e9b3"/>
+    <text x="813" y="109" text-anchor="middle" fill="#284833" font-size="20" font-weight="700">Registered</text>
+    <path d="M36 151H924" stroke="#d9e1ce"/>
+    <text x="36" y="193" fill="#596d53" font-size="19" font-weight="700">Limited or invited</text>
+    <rect x="320" y="165" width="206" height="54" rx="12" fill="#fff" stroke="#bbcab2" stroke-width="1.5"/>
+    <text x="423" y="199" text-anchor="middle" fill="#284833" font-size="20">Request a place</text>
+    <path d="M540 192H685M675 184L685 192L675 200" fill="none" stroke="#63844e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="612" y="172" text-anchor="middle" fill="#6e754f" font-size="16">Pending</text>
+    <rect x="703" y="165" width="221" height="54" rx="12" fill="#163e2d"/>
+    <text x="813" y="188" text-anchor="middle" fill="#e3f2d6" font-size="17">Organizer admits</text>
+    <text x="813" y="210" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">Place reserved</text>
+    <path d="M423 219V244H530" fill="none" stroke="#c4b78e" stroke-width="2" stroke-dasharray="5 5"/>
+    <text x="545" y="251" fill="#716445" font-size="17">Optional waiting list, by your choice</text>
+    <rect x="36" y="279" width="888" height="40" rx="10" fill="#e3e9d7"/>
+    <text x="480" y="305" text-anchor="middle" fill="#41563b" font-size="18">New public terms? Review and confirm the new version.</text>
+  </g>
+</svg>

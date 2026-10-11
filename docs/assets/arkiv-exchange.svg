@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Owner-authorized writes, independent public reads</title>
+  <desc id="desc">Each organizer, contributor and visitor uses their own wallet to authorize writes to Arkiv. Solid arrows run from the owners to shared public records. Dashed arrows run from Arkiv to Partfolk, the independently built Partner Desk and the read-only project verifier, showing data read directly by each client. The clients verify authorship and exact versions without a shared Partfolk application database.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#173d30"/><stop offset="1" stop-color="#0b2b20"/></linearGradient>
+    <marker id="write-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1L8 5L1 9" fill="none" stroke="#c9e99b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="read-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1L8 5L1 9" fill="none" stroke="#b5d6db" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect width="960" height="420" rx="24" fill="url(#bg)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="36" y="48" fill="#f4f7e8" font-size="27" font-weight="700">Each owner signs. Every client can verify.</text>
+    <text x="36" y="89" fill="#bfd4ba" font-size="17">Separate wallets</text>
+    <text x="704" y="89" fill="#bfd4ba" font-size="17">Direct public reads</text>
+    <g fill="#254d3a" stroke="#52775b" stroke-width="1.2">
+      <rect x="36" y="109" width="228" height="64" rx="12"/>
+      <rect x="36" y="190" width="228" height="64" rx="12"/>
+      <rect x="36" y="271" width="228" height="64" rx="12"/>
+    </g>
+    <g fill="#f3f6e8" font-size="21" font-weight="700">
+      <text x="54" y="136">Organizer</text><text x="54" y="217">Contributor</text><text x="54" y="298">Visitor</text>
+    </g>
+    <g fill="#c7d9bc" font-size="16">
+      <text x="54" y="158">Project and event records</text><text x="54" y="239">Offers and agreements</text><text x="54" y="320">Attendance decisions</text>
+    </g>
+    <g fill="none" stroke="#c9e99b" stroke-width="2.5" marker-end="url(#write-arrow)">
+      <path d="M277 141H363"/><path d="M277 222H363"/><path d="M277 303H363"/>
+    </g>
+    <rect x="377" y="109" width="214" height="226" rx="18" fill="#eff4df"/>
+    <g fill="none" stroke="#496b43" stroke-width="2.2">
+      <path d="M454 140H508V176H454Z"/><path d="M447 148V184H501M440 156V192H494"/>
+      <path d="M466 151H496M466 160H489"/>
+    </g>
+    <text x="484" y="230" text-anchor="middle" fill="#23462e" font-size="30" font-weight="700">Arkiv</text>
+    <text x="484" y="260" text-anchor="middle" fill="#486344" font-size="18">Shared public records</text>
+    <text x="484" y="294" text-anchor="middle" fill="#5b7250" font-size="16">Authorship</text>
+    <text x="484" y="315" text-anchor="middle" fill="#5b7250" font-size="16">and exact versions</text>
+    <g fill="none" stroke="#b5d6db" stroke-width="2.5" stroke-dasharray="5 5" marker-end="url(#read-arrow)">
+      <path d="M605 141H690"/><path d="M605 222H690"/><path d="M605 303H690"/>
+    </g>
+    <g fill="#f2f5e8">
+      <rect x="704" y="109" width="220" height="64" rx="12"/>
+      <rect x="704" y="190" width="220" height="64" rx="12"/>
+      <rect x="704" y="271" width="220" height="64" rx="12"/>
+    </g>
+    <g fill="#23452f" font-size="21" font-weight="700">
+      <text x="722" y="136">Partfolk</text><text x="722" y="217">Partner Desk</text><text x="722" y="298">Verifier CLI</text>
+    </g>
+    <g fill="#566d4f" font-size="15">
+      <text x="722" y="158">Organize, contribute, attend</text><text x="722" y="239">Contributions and agreement</text><text x="722" y="320">Read-only project verification</text>
+    </g>
+    <path d="M36 380H75" fill="none" stroke="#c9e99b" stroke-width="2.5" marker-end="url(#write-arrow)"/>
+    <text x="89" y="386" fill="#d3e3c6" font-size="17">Owner-authorized writes</text>
+    <path d="M478 380H517" fill="none" stroke="#b5d6db" stroke-width="2.5" stroke-dasharray="5 5" marker-end="url(#read-arrow)"/>
+    <text x="531" y="386" fill="#d3e3c6" font-size="17">Public records read by each client</text>
+  </g>
+</svg>

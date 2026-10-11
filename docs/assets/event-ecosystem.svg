@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="392" viewBox="0 0 960 392" role="img" aria-labelledby="title desc">
+  <title id="title">One event, three ways to take part</title>
+  <desc id="desc">Organizers bring an idea and coordinate the event. Contributors offer time, space and equipment and own their decisions. Visitors discover the published event and register. All three meet around one event, with independently authored records on Arkiv.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#183f32"/><stop offset="1" stop-color="#09291f"/></linearGradient>
+    <linearGradient id="paper" x2=".3" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#edf1e7"/></linearGradient>
+  </defs>
+  <rect width="960" height="392" rx="24" fill="url(#bg)"/>
+  <circle cx="880" cy="25" r="210" fill="none" stroke="#2d5644" stroke-width="1.5"/>
+  <circle cx="80" cy="405" r="205" fill="none" stroke="#2d5644" stroke-width="1.5"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="38" y="49" fill="#f8f8ed" font-size="27" font-weight="700">One event. Everyone has a part.</text>
+    <path d="M242 206H350M610 206H718M480 284V318" fill="none" stroke="#add4b4" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="242" cy="206" r="5" fill="#c8ed89"/><circle cx="718" cy="206" r="5" fill="#c8ed89"/>
+    <g transform="translate(52 100)">
+      <circle cx="74" cy="45" r="42" fill="#c8ed89"/>
+      <g fill="none" stroke="#15382a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="53" y="26" width="42" height="38" rx="5"/><path d="M53 38H95M63 20V31M85 20V31M64 49H70M78 49H84M64 57H70"/>
+      </g>
+      <text x="74" y="113" text-anchor="middle" fill="#fff" font-size="25" font-weight="700">Organize</text>
+      <text x="74" y="144" text-anchor="middle" fill="#d1dfd4" font-size="19">Bring the idea</text>
+      <text x="74" y="171" text-anchor="middle" fill="#d1dfd4" font-size="19">Gather the people</text>
+    </g>
+    <g transform="translate(354 95)">
+      <path d="M15 10L245 27V200L15 183Z" fill="#062217" opacity=".45"/>
+      <rect x="0" y="0" width="252" height="192" rx="14" fill="url(#paper)" stroke="#fff" stroke-width="2"/>
+      <path d="M0 14Q0 0 14 0H238Q252 0 252 14V46H0Z" fill="#e0edba"/>
+      <circle cx="22" cy="23" r="5" fill="#466b37"/><circle cx="40" cy="23" r="5" fill="#789955"/><circle cx="58" cy="23" r="5" fill="#a5bd77"/>
+      <text x="126" y="92" text-anchor="middle" fill="#1a382b" font-size="29" font-weight="700">A shared event</text>
+      <text x="126" y="127" text-anchor="middle" fill="#526653" font-size="19">Online, in person</text>
+      <text x="126" y="153" text-anchor="middle" fill="#526653" font-size="19">or a little of both</text>
+    </g>
+    <g transform="translate(750 100)">
+      <circle cx="74" cy="45" r="42" fill="#f6dba2"/>
+      <g fill="none" stroke="#4f482b" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="74" cy="34" r="10"/><path d="M56 64V59C56 45 92 45 92 59V64M101 32L108 39L101 46"/>
+      </g>
+      <text x="74" y="113" text-anchor="middle" fill="#fff" font-size="25" font-weight="700">Take part</text>
+      <text x="74" y="144" text-anchor="middle" fill="#d1dfd4" font-size="19">Find your event</text>
+      <text x="74" y="171" text-anchor="middle" fill="#d1dfd4" font-size="19">Choose to join</text>
+    </g>
+    <rect x="295" y="312" width="370" height="49" rx="24" fill="#29533e" stroke="#5e8469"/>
+    <text x="480" y="343" text-anchor="middle" fill="#f1f5dd" font-size="20" font-weight="700">Contribute time, space or equipment</text>
+  </g>
+</svg>
