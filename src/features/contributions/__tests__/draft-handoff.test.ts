@@ -56,6 +56,34 @@ describe('guest contribution draft handoff', () => {
     expect(drafts.getVisitorSnapshot().value?.draft).toEqual(entered);
     expect(drafts.exportVisitor()).toContain('half typed');
   });
+  it('keeps an exportable guest handoff and invitation through sign-in when storage is null', () => {
+    const { app, drafts, fingerprint } = setup(null);
+    expect(drafts.session(null, 'new').getSnapshot()).toMatchObject({ draft: entered, saved: false });
+    app.session.navigate({ name: 'sign-in', returnTo: destination }); app.session.setAccount(wallet, TIRAMISU_CHAIN_ID);
+    app.session.navigate({ name: 'contributions', projectRoot: project, returnTo: `/projects/${project}/agreement` });
+    const remounted = contributionDrafts(app);
+    expect(remounted.editorOpen(wallet)).toBe(true);
+    expect(remounted.getVisitorSnapshot()).toMatchObject({ value: { draft: entered, destination, owner: null, phase: 'available' }, issue: { code: 'unavailable' } });
+    expect(JSON.parse(remounted.exportVisitor()!).payload).toMatchObject({ draft: entered, destination });
+    expect(choose(remounted, fingerprint).ok).toBe(false);
+    expect(remounted.session(wallet, 'new').getSnapshot().exists).toBe(false);
+    expect(remounted.getVisitorSnapshot().value?.draft).toEqual(entered);
+  });
+  it('keeps an exportable guest handoff when storage reads throw and never writes a reservation or wallet draft', () => {
+    const written: string[] = [];
+    const storage: StoragePort = { getItem: () => { throw new Error('Storage read denied'); }, setItem: key => { written.push(key); }, removeItem: () => undefined };
+    const { app, drafts, fingerprint } = setup(storage);
+    app.session.navigate({ name: 'sign-in', returnTo: destination }); app.session.setAccount(wallet, TIRAMISU_CHAIN_ID);
+    app.session.navigate({ name: 'contributions', projectRoot: project, returnTo: `/projects/${project}/agreement` });
+    const remounted = contributionDrafts(app);
+    expect(remounted.editorOpen(wallet)).toBe(true);
+    expect(remounted.getVisitorSnapshot()).toMatchObject({ value: { draft: entered, destination, owner: null, phase: 'available' }, issue: { code: 'unavailable' } });
+    expect(JSON.parse(remounted.exportVisitor()!).payload).toMatchObject({ draft: entered, destination });
+    expect(choose(remounted, fingerprint).ok).toBe(false);
+    expect(remounted.session(wallet, 'new').getSnapshot().exists).toBe(false);
+    expect(remounted.getVisitorSnapshot().value?.draft).toEqual(entered);
+    expect(written.filter(key => key.includes(':draft:'))).toEqual([]);
+  });
   it('requires a concrete choice before replacing an existing or unreadable wallet draft', () => {
     const { storage, values } = memory(), { app, drafts, fingerprint } = setup(storage);
     app.session.setAccount(wallet, TIRAMISU_CHAIN_ID); const target = drafts.session(wallet, 'new');

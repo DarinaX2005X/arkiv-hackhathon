@@ -67,6 +67,14 @@ function createContributionDrafts(runtime: AppRuntime) {
           // A stale guest tab cannot turn an already-owned snapshot back into an unowned draft.
           state = { ...state, draft: structuredClone(value), saved: false, exists: true };
           for (const observer of observers) observer();
+          if (durable.status === 'unavailable' && current.mode === 'public' && parseRoute(current.destination).name === 'contributions'
+            && (!visitor.value || visitor.value.phase === 'available')
+            && (!visitor.issue || ['unavailable', 'write_failed'].includes(visitor.issue.code))) {
+            // Keep the handoff visible/exportable through sign-in even when nothing can be read.
+            // Its durable version is unchanged, so adoption still requires a fresh ownership check and reservation.
+            visitor = { value: { draft: structuredClone(value), destination: current.destination, owner: null, phase: 'available' }, issue: durable.issue };
+            emitVisitor();
+          }
           return false;
         }
       }
