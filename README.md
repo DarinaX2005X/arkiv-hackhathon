@@ -65,7 +65,15 @@ Open [Partfolk at localhost:5173](http://127.0.0.1:5173/). No environment file, 
 
 These links work while the development server is running. Port 5173 is strict; an occupied port produces an error. Stop with Ctrl+C and restart with the same command.
 
-The local example initializes when opened. The public catalogue reads authored Arkiv records and needs no wallet for browsing. Synthetic demonstration events, when published, will be labeled **TEST EVENT**, with `[PARTFOLK TEST EVENT]` on the first line of the current release's conditions. These are public test records, not invitations to real gatherings; their publication is not yet confirmed.
+The local example initializes when opened. The public catalogue reads authored Arkiv records and needs no wallet for browsing. Three published synthetic events carry **TEST EVENT**, with `[PARTFOLK TEST EVENT]` on the first line of their current release's conditions. These are public test records, not invitations to real gatherings. The marker is an authored declaration, not an independent certification.
+
+| Published test event | Date and format | Recorded registration |
+| --- | --- | --- |
+| [Sketchbook exchange](https://partfolk.vercel.app/#/events/0x73b09be8ed1e8f98bf76b331b3d46aedc8affe82be1e56dc7946acf28ba96299) | 24 October 2026, online | 3 going |
+| [Bookbinding at a shared table](https://partfolk.vercel.app/#/events/0x4237eacdb4079255ecb729b5888d827a43300dd963f9c18fc164c8aa2d141d90) | 25 October 2026, in person, Almaty | 3 going, 1 waitlisted |
+| [Community audio walk workshop](https://partfolk.vercel.app/#/events/0x7bb81a521f301f642d512752d313ba0016c3e292ee0ddf55d1e9b0725eea065c) | 26 October 2026, hybrid, London | 2 going |
+
+These counts come from the [11 October evidence export](arkiv/evidence/test-events.json), at blocks 446077, 446084 and 446092 respectively. Public RPC query quotas can temporarily prevent catalogue or event reads; an unavailable read does not mean the catalogue is empty.
 
 Publishing and registration require an injected Ethereum-compatible EOA wallet on **Arkiv Tiramisu**, testnet gas, browser storage and Web Locks support.
 
@@ -202,6 +210,8 @@ node node_modules/tsx/dist/cli.mjs src/cli/verify.ts 0xf4e900fa56b9989f196b53cee
 
 The recorded result at block **444117** is `ready` with **7/7 approvals** and all three proposal versions. This proves the dated public agreement with synthetic owners; it does not establish current readiness, real-world identities or physical execution.
 
+The separate [event participation proof](arkiv/evidence/test-events.json) records three published TEST EVENT releases and nine attendance records across seven synthetic wallets, including three admitted places and one waiter for the limited event. Publication and participation added 43 confirmed native transactions, bringing the combined total to 135. Cumulative accounted spend is **0.067061464022387640 test GLM**, within the **0.1 test GLM** cap. These are dated testnet records; they do not establish real attendance or successful browser interaction.
+
 The verified source baseline passed TypeScript, unit/integration checks and both builds. Clean installation and static serving were also checked with Node.js 22.13.0 and npm 10.9.2.
 
 - [Integration scenarios](tests/integration/README.md) cover three-role participation, independent client processes, changed plans, interrupted operations and execution exports against a strict native-ledger fixture.
@@ -209,7 +219,7 @@ The verified source baseline passed TypeScript, unit/integration checks and both
 
 ## Current boundaries
 
-- **Release status:** the hosted application and public contributor-workflow proof are available. Synthetic catalogue events have not yet been confirmed, and a public demonstration video is not available. Browser and wallet UI acceptance is separate from the protocol proof.
+- **Release status:** the hosted application, public contributor-workflow proof and three synthetic catalogue events with participation evidence are available. A public demonstration video is not available. Browser and wallet UI acceptance is separate from the protocol proof.
 - **Readiness is dated:** owners can withdraw, delete records or let them expire. Agreement is neither future availability nor proof of physical completion.
 - **Audience details are organizer-authored:** public schedule and location are entered separately from contributor duties. The current validator does not establish their semantic correspondence.
 - **Admission is bounded:** limited capacity and invitation lists support up to 512 entries. Waiters are not automatically promoted. Read and payload limits are defined in the [schema](arkiv/schema.md).

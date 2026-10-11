@@ -121,3 +121,9 @@ The [completed public proof](evidence/product-proof.json) exercises SDK 0.8.1 on
 Expected: withdrawal invalidates readiness, and a changed or restored plan cannot inherit earlier consent. Observed: P1 was Ready with seven approvals at block 442076, then Changed with six after withdrawal at 442152. Repaired P2 and restored P3 each began with zero current approvals and became Ready only after seven fresh decisions. P3's final snapshot at block 444117 retains the complete P1 → P2 → P3 lineage. The independent verifier reproduced the recorded states at their exact blocks.
 
 This establishes a real public contributor-agreement workflow, beyond the earlier primitive probes. It is dated evidence of synthetic consent, not a claim about current readiness, physical work, visitor registration or browser interaction.
+
+## Public event participation verification
+
+The [event evidence export](evidence/test-events.json) records three published synthetic TEST EVENT releases on Tiramisu and nine attendance records across seven wallets. Production repository reads at blocks 446077, 446084 and 446092 verified the online, in-person and hybrid events respectively. The unlimited events had three and two going; the limited event had three admitted places and one waiter. Every current release starts its conditions with `[PARTFOLK TEST EVENT]`, an authored declaration rather than an independent certification.
+
+The event run added 43 confirmed native transactions with zero transferred value and no additional funding transactions. Combined with the original proof, the exported budget contains 135 confirmed transactions and cumulative accounted spend of 0.067061464022387640 test GLM against the 0.1 test GLM cap. This establishes dated synthetic registration evidence. It does not prove real attendance, browser interaction or continuing anonymous RPC availability; public query quotas can still block a complete read.
