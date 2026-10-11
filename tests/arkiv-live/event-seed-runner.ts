@@ -15,6 +15,7 @@ import { createEventRepository } from '../../src/data/events';
 import type { EventRepositoryContract } from '../../src/data/events';
 import { BrowserOperationStore, MemoryOperationStore, createOperationController, createOperationIntent } from '../../src/data/operations';
 import type { OperationStore } from '../../src/data/operations';
+import { inspectReconciliationJournal, operationBinding } from '../../src/data/operations/reconciliation';
 import type { CommandBase, OperationKind, Result, WriteAuthority } from '../../src/data/types';
 import { createWalletGateway, WalletOperationError } from '../../src/data/wallet';
 import type { NativeWalletGateway } from '../../src/data/wallet';
@@ -130,14 +131,28 @@ export function validateSeedState(input: unknown): EventSeedState {
 
 /** Requires the common app journal and reconciled budget to agree before skipping a completed action. */
 export function seedActionConfirmed(action: SeedAction, store: OperationStore, budget: BudgetRecord[]): boolean {
-  const records = store.list().filter(record => record.operation.id === action.command.operation.id);
+  const { operation: input, ...fields } = action.command;
+  const records = store.list().filter(record => record.operation.id === input.id).sort((left, right) => left.revision - right.revision);
   if (!action.confirmed || !records.length) return false;
-  const keys = records.flatMap(record => record.step.confirmedKeys);
-  if (canonicalJson(keys) !== canonicalJson(action.confirmedKeys)) return false;
-  return records.every(record => {
+  const latest = records.at(-1)!.operation, attempt = store.getAttempt(input.id);
+  if (input.inputHash !== hashCanonical(fields) || input.inputHash !== hashCanonical(input.input)
+    || latest.phase !== 'complete' || latest.pendingPublisherRoots.length !== 0
+    || operationBinding(latest) !== operationBinding(input) || attempt?.state !== 'native-started'
+    || operationBinding(attempt.operation) !== operationBinding(input)
+    || !inspectReconciliationJournal(input, latest, store.get.bind(store), attempt).complete
+    || records.length !== latest.steps.length
+    || canonicalJson(attempt.nativeStepIds) !== canonicalJson(latest.steps.map(step => step.id))) return false;
+  // Serialized journal object keys are UUID-sorted, not native execution order.
+  const ordered = latest.steps.map(step => records.find(record => record.step.id === step.id)!);
+  const keys = ordered.flatMap(record => record.step.confirmedKeys);
+  if (!keys.length || new Set(keys).size !== keys.length || canonicalJson(keys) !== canonicalJson(latest.confirmedKeys)
+    || canonicalJson(keys) !== canonicalJson(action.confirmedKeys)
+    || budget.filter(record => record.kind === 'native' && record.id.startsWith(`${input.id}:`)).length !== records.length) return false;
+  return ordered.every(record => {
     const native = budget.find(item => item.id === `${record.operation.id}:${record.step.id}`);
     const request = record.admission?.request;
-    return record.step.status === 'confirmed' && record.operation.phase === 'complete' && record.operation.inputHash === action.command.operation.inputHash
+    return canonicalJson(record.operation) === canonicalJson(latest) && record.step.status === 'confirmed'
+      && record.operation.phase === 'complete' && record.operation.inputHash === input.inputHash
       && !!request && !!record.receipt && native?.kind === 'native' && native.status === 'confirmed'
       && native.transactionHash === record.receipt.transactionHash && native.transactionHash === record.step.transactionHash
       && native.plan.from === request.from.toLowerCase() && native.plan.to === request.to.toLowerCase() && native.plan.data === request.data.toLowerCase()

@@ -1,6 +1,6 @@
 # Synthetic public proof runner
 
-This operator-invoked helper exercises the production Arkiv repository, SDK serializer, wallet gateway, operation journal, domain solver and independent CLI. It does not use a browser or the Studio server. The fixtures and automated tests are **not live product evidence**. No public product transaction, signer initialization, or deployment was performed while writing this helper. Execution is deferred until the user resumes work.
+This operator-invoked helper exercises the production Arkiv repository, SDK serializer, wallet gateway, operation journal, domain solver and independent CLI. It does not use a browser or the Studio server. The fixtures and automated tests are **not live product evidence**. The completed [public proof](../../arkiv/evidence/product-proof.json) records 92 confirmed transactions and seven independently verified, dated agreement snapshots.
 
 Run from the repository root. These checks use isolated fixtures and never access demonstration keys or the live network:
 
@@ -10,7 +10,7 @@ node --import tsx --test tests/arkiv-live/safety.test.ts
 node node_modules/vitest/vitest.mjs run --config tests/arkiv-live/vitest.config.ts
 ```
 
-## Operator commands for the resumed session
+## Operator commands
 
 The default command reads the official Tiramisu chain identity, genesis and coordinator balance, and prints the proposed transaction counts. It creates no signers and sends no transactions:
 
@@ -18,7 +18,7 @@ The default command reads the official Tiramisu chain identity, genesis and coor
 node --import tsx tests/arkiv-live/runner.ts --phase prepare
 ```
 
-Only after resuming the authorized proof, initialize nine dedicated synthetic publisher signers locally. This command creates sensitive ignored files under `.local/product-proof`; it does not broadcast or load the coordinator secret. It refuses to reset existing state or a spend ledger:
+The completed run already has nine dedicated synthetic publisher signers. The command below documents their original initialization. It refuses to reset existing state or a spend ledger; do not recreate the completed run's identities or journals.
 
 ```powershell
 node --import tsx tests/arkiv-live/runner.ts --phase prepare --initialize
@@ -47,7 +47,7 @@ Replace the placeholder with the actual reviewed commit. Repeat the same phase c
 | `p3-propose` | 9 | New P3 restores P1 material terms and names P2 as predecessor; zero current approvals |
 | `p3-accept` | 7 | Seven fresh P3 approvals; Ready with P1 → P2 → P3 lineage |
 
-The planned total is 92 sends. Every transfer principal, every paid receipt fee, and each unresolved maximum reservation counts against the global 0.1 test GLM ceiling, including the earlier **0.000326176000652352** test GLM capability probes. Counting child funding and child fees is deliberately conservative. Current SDK estimates receive a 20% gas allowance, capped at 2,000,000 gas and 2 gwei max fee. Failed mined transactions still cost gas. Exceeding a cap stops the run.
+The original run completed all 92 planned sends. Every transfer principal, every paid receipt fee, and each unresolved maximum reservation counts against the global 0.1 test GLM ceiling, including the earlier **0.000326176000652352** test GLM capability probes. Counting child funding and child fees is deliberately conservative. Current SDK estimates receive a 20% gas allowance, capped at 2,000,000 gas and 2 gwei max fee. Failed mined transactions still cost gas. Exceeding a cap stops the run.
 
 The public snapshots use synthetic October 17–18, 2026 London activities. The runner must not be used as a current readiness demonstration after those activities or consent deadlines; a new reviewed scenario is then needed. Entity lifetime is nominal 90-day storage admission, not a guarantee of UTC retention or physical availability.
 
@@ -63,7 +63,7 @@ To verify after the operator has actually stopped Studio, use the following flag
 node --import tsx tests/arkiv-live/runner.ts --phase verify --studio-stopped
 ```
 
-After every phase has completed, export a new evidence file; existing files cannot be overwritten:
+The completed export is [arkiv/evidence/product-proof.json](../../arkiv/evidence/product-proof.json). Preserve that artifact. The command below shows the original export; any additional export must use an unused output filename. Existing files cannot be overwritten:
 
 ```powershell
 node --import tsx tests/arkiv-live/runner.ts --phase export --output arkiv/evidence/product-proof.json

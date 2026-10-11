@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { toHex } from 'viem';
 import { createArkivRepository } from '../../src/data/arkiv';
 import { createEventRepository } from '../../src/data/events';
-import { BrowserOperationStore, createOperationController, createOperationIntent, MemoryOperationStore } from '../../src/data/operations';
+import { allocateOperationStep, BrowserOperationStore, createOperationController, createOperationIntent, MemoryOperationStore } from '../../src/data/operations';
+import type { StoredOperationAttempt, StoredOperationStep } from '../../src/data/operations';
 import { createWalletGateway } from '../../src/data/wallet';
 import type { NativeTransactionRequest, NativeWalletGateway, RpcRequest as WalletRequest } from '../../src/data/wallet';
 import { audienceHash, deriveEventAvailability, isTestEventTerms, validateEventPayload } from '../../src/domain/events';
 import { deriveReadiness } from '../../src/domain/readiness';
-import { hashCanonical } from '../../src/domain/canonical';
+import { canonicalJson, hashCanonical } from '../../src/domain/canonical';
 import { validateRecipe } from '../../src/domain/validation';
 import type { AccountAddress } from '../../src/domain/types';
 import { createNativeLedger } from '../integration/support/native-ledger';
@@ -17,7 +18,7 @@ import { BudgetLedger, createBudgetDocument, LIVE_CHAIN_ID, PRIOR_SPEND_WEI } fr
 import type { BudgetRecord, ReadRpc } from './safety';
 import { ROOT_ACCOUNT } from './state';
 import { boundSeedGateway, createSeedState, EventSeedRun, parseSeedOptions, seedActionConfirmed, validateSeedState } from './event-seed-runner';
-import type { EventSeedState, SeedClient, SeedRuntime } from './event-seed-runner';
+import type { EventSeedState, SeedAction, SeedClient, SeedRuntime } from './event-seed-runner';
 import { SEED_ATTENDEES, SEED_CONSENT_UNTIL, SEED_IDS, SEED_LIFETIME_SECONDS, SEED_RUN_ID, SEED_TRANSACTION_COUNT, seedRecipe, seedTerms } from './event-seed-scenario';
 
 const NOW = Date.parse('2026-10-11T13:00:00Z');
@@ -25,6 +26,79 @@ const address = (number: number): AccountAddress => `0x${number.toString(16).pad
 const accounts = Object.fromEntries(ACTOR_IDS.map((actor, index) => [actor, address(index + 10)])) as EventSeedState['accounts'];
 const parent = { runId: 'fixture-original-proof', actors: accounts, genesisHash: `0x${'aa'.repeat(32)}` as const, completedPhases: ['p3-accept' as const] };
 const initial = () => createSeedState(parent, 'a'.repeat(40), NOW);
+
+/** Deterministic multi-step journal whose UUID-style lexical order reverses execution order. */
+function confirmedPublication(method: 'publishEvent' | 'publishPlan') {
+  const fields = { lifetimeSeconds: SEED_LIFETIME_SECONDS };
+  const operation = createOperationIntent(method === 'publishEvent' ? 'publish_event' : 'publish_plan',
+    { mode: 'public', chainId: LIVE_CHAIN_ID, actor: { kind: 'wallet', address: ROOT_ACCOUNT } }, fields,
+    { id: `pfe:${SEED_RUN_ID}:deterministic-${method}`, now: NOW });
+  const phases = method === 'publishEvent' ? ['proposal_pending', 'activation_pending'] as const
+    : ['proposal_pending', 'activation_pending', 'fanout_pending'] as const;
+  const key = (number: number) => `0x${number.toString(16).padStart(64, '0')}` as const;
+  const budget: BudgetRecord[] = [];
+  const records: StoredOperationStep[] = phases.map((phase, index) => {
+    const batch = { creates: [{ payloadJson: canonicalJson({ synthetic: true, step: index }), attributes: {}, lifetimeSeconds: SEED_LIFETIME_SECONDS, salt: `${index + 1}` as `${bigint}` }] };
+    const step = allocateOperationStep(operation, phase, batch, []);
+    step.id = `${3 - index}0000000-0000-4000-8000-000000000000`;
+    step.inputHash = hashCanonical(batch); step.status = 'confirmed'; step.confirmedKeys = [key(index + 1)]; step.transactionHash = key(index + 11);
+    operation.steps.push(step); operation.confirmedKeys.push(...step.confirmedKeys); operation.transactionHash = step.transactionHash;
+    const request: NativeTransactionRequest = { from: ROOT_ACCOUNT, to: '0x4400000000000000000000000000000000000044',
+      data: `0x123${index}`, value: '0x0', chainId: toHex(LIVE_CHAIN_ID), gas: '0x186a0', maxFeePerGas: '0x77359400', maxPriorityFeePerGas: '0x1' };
+    const blockNumber = `${100 + index}` as `${bigint}`;
+    budget.push({ id: `${operation.id}:${step.id}`, kind: 'native', status: 'confirmed', transactionHash: step.transactionHash,
+      signedTransaction: null, receipt: null, maximumCostWei: '200000000000000',
+      plan: { chainId: LIVE_CHAIN_ID, from: ROOT_ACCOUNT.toLowerCase(), to: request.to, data: request.data, value: '0', nonce: index,
+        gas: '100000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' } });
+    return { version: 1, revision: 12, operation, step, batch,
+      prepared: { batch, account: ROOT_ACCOUNT, chainId: LIVE_CHAIN_ID, request,
+        transactionOptions: { gas: '100000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' },
+        estimatedGas: '80000', preparedAtBlock: '99', estimatedCostWei: null, estimatedMaximumCostWei: '200000000000000', estimatePolicy: 'explicit-cap' },
+      admission: { request, at: NOW }, submissionHash: step.transactionHash,
+      receipt: { operationId: operation.id, transactionHash: step.transactionHash, entityKeys: [...step.confirmedKeys], consumedKeys: [], blockNumber, confirmedAt: NOW }, error: null };
+  });
+  operation.phase = 'complete';
+  const action: SeedAction = { actor: 'coordinator', method, command: { ...fields, operation: createOperationIntent(operation.kind, operation.authority, fields, { id: operation.id, now: NOW }) },
+    confirmed: true, confirmedKeys: [...operation.confirmedKeys] as SeedAction['confirmedKeys'] };
+  const attempt: StoredOperationAttempt = { version: 1, revision: 1, operation: structuredClone(action.command.operation), attemptId: 'deterministic-attempt',
+    state: 'native-started', nativeStepIds: operation.steps.map(step => step.id), startedAt: NOW, settledAt: null };
+  function roundTrip(savedRecords = records, savedAttempt: StoredOperationAttempt | null = attempt) {
+    let serialized: string | null = null;
+    const storage = { getItem: () => serialized, setItem: (_key: string, value: string) => { serialized = value; } };
+    const writer = new BrowserOperationStore(storage, { key: 'synthetic-roundtrip', locks: new MemoryOperationStore() });
+    writer.putMany(structuredClone(savedRecords));
+    if (savedAttempt) writer.putAttemptCAS(structuredClone(savedAttempt), null);
+    return new BrowserOperationStore({ getItem: () => serialized, setItem: () => { throw new Error('Read-only reloaded fixture'); } },
+      { key: 'synthetic-roundtrip', locks: new MemoryOperationStore() });
+  }
+  return { action, records, budget, attempt, roundTrip };
+}
+
+describe('confirmed seed publication resume after canonical journal serialization', () => {
+  it.each(['publishEvent', 'publishPlan'] as const)('uses authenticated native order for %s after a real BrowserOperationStore round trip', method => {
+    const f = confirmedPublication(method), restored = f.roundTrip();
+    expect(restored.list().map(record => record.step.id)).toEqual([...f.attempt.nativeStepIds].reverse());
+    expect(restored.list().flatMap(record => record.step.confirmedKeys)).not.toEqual(f.action.confirmedKeys);
+    expect(seedActionConfirmed(f.action, restored, f.budget)).toBe(true);
+  });
+
+  it.each(['action-keys', 'operation-keys', 'step-order', 'attempt-order', 'missing-step', 'missing-attempt', 'missing-budget', 'extra-budget', 'receipt-hash'] as const)
+    ('rejects real %s corruption despite ignoring serialized enumeration order', changed => {
+      const f = confirmedPublication('publishPlan');
+      let records = structuredClone(f.records), attempt: StoredOperationAttempt | null = structuredClone(f.attempt);
+      const budget = structuredClone(f.budget);
+      if (changed === 'action-keys') f.action.confirmedKeys.reverse();
+      if (changed === 'operation-keys') records.forEach(record => { record.operation.confirmedKeys = [...record.operation.confirmedKeys].reverse(); });
+      if (changed === 'step-order') records.forEach(record => { record.operation.steps = [...record.operation.steps].reverse(); });
+      if (changed === 'attempt-order') attempt.nativeStepIds.reverse();
+      if (changed === 'missing-step') records = records.slice(1);
+      if (changed === 'missing-attempt') attempt = null;
+      if (changed === 'missing-budget') budget.pop();
+      if (changed === 'extra-budget') budget.push({ ...budget[0]!, id: `${f.action.command.operation.id}:orphan-step` });
+      if (changed === 'receipt-hash') records[0]!.receipt!.transactionHash = `0x${'ff'.repeat(32)}`;
+      expect(seedActionConfirmed(f.action, f.roundTrip(records, attempt), budget)).toBe(false);
+    });
+});
 
 /** This fixture has no private keys or real RPC. It records mock budget bindings, not signed live proof. */
 function workspace(options: { broadcast?: boolean; maxTransactions?: number; loseAt?: number } = {}) {
@@ -104,8 +178,16 @@ describe('three public TEST events through the production repositories', () => {
     // Fresh source/roster reads at the review date, not a future now paired with an old snapshot.
     f.ledger.setTime(Date.parse('2026-10-23T12:00:00Z')); await opened.run.verify();
     const publicJSON = JSON.stringify(list.value.items); expect(publicJSON).not.toContain('privateKey'); expect(publicJSON).not.toContain('https://');
-    // Reopening serialised action state + the common operation journal never recreates a confirmed record.
-    const resumed = f.restart(); await resumed.run.run(); expect(f.ledger.sends).toHaveLength(43);
+    // Reopen through the real canonical journal serializer, whose object enumeration is UUID-sorted.
+    let serialized = JSON.stringify({ version: 1, records: {}, attempts: Object.fromEntries(Object.values(f.saved().actions)
+      .map(action => [action.command.operation.id, opened.store.getAttempt(action.command.operation.id)])) });
+    const persisted = new BrowserOperationStore({ getItem: () => serialized, setItem: (_key, value) => { serialized = value; } },
+      { key: 'completed-seed-roundtrip', locks: new MemoryOperationStore() });
+    persisted.putMany(opened.store.list());
+    const restored = new BrowserOperationStore({ getItem: () => serialized, setItem: () => { throw new Error('Completed resume must remain read-only'); } },
+      { key: 'completed-seed-roundtrip', locks: new MemoryOperationStore() });
+    const resumed = f.restart(); resumed.runtime.confirmed = action => seedActionConfirmed(action, restored, f.records);
+    await resumed.run.run(); expect(f.ledger.sends).toHaveLength(43);
   }, 30_000);
 
   it('blocks opening without contributor consent and preserves the original command through a lost release response', async () => {
