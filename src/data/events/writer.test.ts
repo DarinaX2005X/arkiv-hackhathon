@@ -244,6 +244,70 @@ describe('event publication and registration through the frozen native journal',
     expect(unwrap(await reopened.reconcile(command.operation))).toMatchObject({ status: 'unverified', error: { code: 'unverified' } });
     expect(f.control.sends).toBe(3);
   });
+  it('durably attests rejected validation before all three event mutation entry points reach native preparation', async () => {
+    const f = harness(); const first = await published(f);
+    const publication = f.command('publish_event', { projectRoot: KEYS.project, terms, source: f.source,
+      expectedHeads: [first.state.key], lifetimeSeconds: 1 }, 'invalid-publication');
+    const replacement = f.command('replace_event', { projectRoot: KEYS.project, releaseKey: first.release.key,
+      audienceHash: first.release.payload.audienceHash, source: f.source, status: 'closed' as const,
+      expectedHeads: [first.state.key], lifetimeSeconds: 1 }, 'invalid-event-state');
+    const attendance = f.command('replace_attendance', { projectRoot: KEYS.project, releaseKey: first.release.key,
+      audienceHash: first.release.payload.audienceHash, decision: 'going' as const,
+      expectedHeads: [], lifetimeSeconds: 1 }, 'invalid-attendance', STRANGER);
+    const cases = [
+      { operation: publication.operation, run: () => f.repository.publishEvent(publication) },
+      { operation: replacement.operation, run: () => f.repository.replaceEvent(replacement) },
+      { operation: attendance.operation, run: () => f.repository.replaceAttendance(attendance) },
+    ];
+    const restored = createEventRepository({ request: f.read,
+      controller: createOperationController({ store: f.store, gateway: f.gateway, now: () => f.rpc.timestamp }), now: () => f.rpc.timestamp });
+    for (const item of cases) {
+      expect(await item.run()).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(f.controller.getOperation(item.operation.id)).toBeUndefined();
+      expect(unwrap(await restored.reconcile(item.operation))).toMatchObject({ status: 'not_sent', evidence: 'preflight-journal' });
+    }
+    expect(f.control.sends).toBe(2);
+  });
+  it('retries the same operation only after its failed source read settles before native preparation', async () => {
+    const f = harness(); const command = publish(f); let fail = true;
+    const request: RpcRequest = async args => {
+      if (fail && args.method === 'eth_chainId') { fail = false; throw new Error('The preflight RPC is unavailable.'); }
+      return f.read(args);
+    };
+    const repository = createEventRepository({ request, controller: f.controller, now: () => f.rpc.timestamp });
+    expect(await repository.publishEvent(command)).toMatchObject({ ok: false, error: { code: 'network' } });
+    expect(f.store.list()).toEqual([]);
+    expect(unwrap(await repository.reconcile(command.operation))).toMatchObject({ status: 'not_sent', evidence: 'preflight-journal' });
+    expect(unwrap(await repository.publishEvent(command)).value.state.status).toBe('unique');
+    expect(f.control.sentTypes).toEqual([['event_release'], ['event_state']]);
+  });
+  it('keeps an in-flight preflight attempt unresolved when reopened from the same durable store', async () => {
+    const f = harness(); const command = publish(f); let enter!: () => void; let release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const request: RpcRequest = async args => {
+      if (args.method === 'eth_chainId') { enter(); await pending; throw new Error('The interrupted preflight has now failed.'); }
+      return f.read(args);
+    };
+    const active = createEventRepository({ request, controller: f.controller, now: () => f.rpc.timestamp }).publishEvent(command);
+    await entered;
+    const restored = createEventRepository({ request: f.read,
+      controller: createOperationController({ store: f.store, gateway: f.gateway, now: () => f.rpc.timestamp }), now: () => f.rpc.timestamp });
+    expect(unwrap(await restored.reconcile(command.operation))).toMatchObject({ status: 'unverified' });
+    expect(f.store.list()).toEqual([]); expect(f.control.sends).toBe(0);
+    release(); expect((await active).ok).toBe(false);
+    expect(unwrap(await restored.reconcile(command.operation))).toMatchObject({ status: 'not_sent', evidence: 'preflight-journal' });
+  });
+  it('keeps native preparation unknown when a preparation wrapper fails before the step record exists', async () => {
+    const f = harness(); const command = publish(f);
+    const capped = { ...f.controller, prepareStep: async () => { throw new Error('The preparation wrapper failed before its native checkpoint.'); } };
+    const repository = createEventRepository({ request: f.read, controller: capped, now: () => f.rpc.timestamp });
+    expect((await repository.publishEvent(command)).ok).toBe(false);
+    expect(f.store.list()).toEqual([]); expect(f.control.sends).toBe(0);
+    expect(unwrap(await repository.reconcile(command.operation))).toMatchObject({ status: 'unverified' });
+    expect((await f.repository.publishEvent(command)).ok).toBe(false);
+    expect(f.control.sends).toBe(0);
+  });
   it('attests no send only from its actual persisted unadmitted step', async () => {
     const f = harness(); const { release } = await published(f); f.control.account = STRANGER;
     const command = attendanceCommand(f, release);
@@ -390,6 +454,24 @@ describe('event publication and registration through the frozen native journal',
       status: 'open' as const, expectedHeads: [cancelled.value.key], lifetimeSeconds: LIFETIME,
     }, 'reopen-unavailable-source'))).ok).toBe(false);
     expect(f.control.sends).toBe(sends);
+  });
+  it.each(['closed', 'cancelled'] as const)('publishes %s through a fresh envelope read during contributor RPC failure', async status => {
+    const f = harness(); const first = await published(f); let contributorQueries = 0;
+    const request: RpcRequest = async args => {
+      if (args.method === 'arkiv_query' && String((args.params as unknown[])[0]).includes("entity_type = str('book_state')")) {
+        contributorQueries++; throw new Error('The contributor RPC is unavailable.');
+      }
+      return f.read(args);
+    };
+    const repository = createEventRepository({ request, controller: f.controller, now: () => f.rpc.timestamp });
+    const envelope = unwrap(await repository.loadEvent(KEYS.project, { includeSource: false }));
+    expect(envelope.state.status).toBe('unique'); expect(envelope.release?.key).toBe(first.release.key);
+    const result = unwrap(await repository.replaceEvent(f.command('replace_event', {
+      projectRoot: KEYS.project, releaseKey: first.release.key, audienceHash: first.release.payload.audienceHash, source: f.source,
+      status, expectedHeads: [first.state.key], lifetimeSeconds: LIFETIME,
+    }, `source-rpc-${status}`)));
+    expect(result.value.payload.status).toBe(status); expect(contributorQueries).toBe(0);
+    expect(f.control.sentTypes.at(-1)).toEqual(['event_state']);
   });
   it('closes registration independently from cancellation and rejects premature or elapsed-end joins', async () => {
     const f = harness(); const first = await published(f);

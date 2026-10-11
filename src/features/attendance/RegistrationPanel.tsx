@@ -21,10 +21,11 @@ export interface RegistrationPanelProps {
   now: number;
   unverified?: boolean;
   refresh: () => Promise<EventRead | null>;
+  refreshWithdrawal: () => Promise<EventRead | null>;
   storage?: StoragePort | null;
 }
 
-export function RegistrationPanel({ repository, session, projectRoot, read, now, unverified = false, refresh, storage: suppliedStorage }: RegistrationPanelProps) {
+export function RegistrationPanel({ repository, session, projectRoot, read, now, unverified = false, refresh, refreshWithdrawal, storage: suppliedStorage }: RegistrationPanelProps) {
   const storage = suppliedStorage === undefined ? browserEventStorage() : suppliedStorage;
   const store = useMemo(() => joinTargetStore(storage, projectRoot), [storage, projectRoot]);
   const [target, setTarget] = useState<JoinTarget | null>(null);
@@ -67,6 +68,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
   const freshConfirmation = registered;
   const savedCommand = action.recoverableCommand as ReplaceAttendanceCommand | null;
   const retryingWithdrawal = savedRetry && savedCommand?.decision === 'withdrawn';
+  const refreshSavedDecision = savedCommand?.decision === 'withdrawn' ? refreshWithdrawal : refresh;
   const canConfirm = signedIn && correctChain && availability === 'open' && ownKnown && target && !changedTerms && !differentWallet
     && acknowledged && !submitting && !unresolved && !storageIssue && !registered && state.status !== 'confirmed';
   const signInHref = routeHref({ name: 'sign-in', returnTo: routePath({ name: 'event', projectRoot }) });
@@ -81,7 +83,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
 
   async function checkOriginal() {
     if (busy.current) return; busy.current = true; setChecking(true); setMessage(null);
-    try { await action.reconcile(); await refresh(); }
+    try { await action.reconcile(); await refreshSavedDecision(); }
     finally { busy.current = false; setChecking(false); }
   }
 
@@ -125,7 +127,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
     busy.current = true; setChecking(true); setMessage(null);
     const selected = withdrawal;
     try {
-      const fresh = await refresh();
+      const fresh = await refreshWithdrawal();
       if (!fresh) { setMessage('Your registration could not be refreshed. No withdrawal was sent.'); return; }
       const prepared = prepareWithdrawal(fresh, selected, sessionRef.current, Date.now());
       if (!prepared.ok) { setMessage(prepared.message); setAcknowledged(false); return; }
@@ -139,7 +141,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
         : await action.run(prepared.command, (repo, command) => repo.replaceAttendance(command));
       setAcknowledged(false);
       if (!result.ok) { setMessage(eventError(result.error)); return; }
-      const verified = await refresh();
+      const verified = await refreshWithdrawal();
       const recorded = verified?.attendance && attendanceStatus(verified.attendance, verified.event, Date.now(), verified.myEvent?.registeredRelease ?? null) === 'withdrawn';
       if (recorded) { setWithdrawal(null); setTarget(null); clearJoinTarget(storage, projectRoot); }
       else setMessage('The transaction was recorded. Refresh your registration to verify that the withdrawal is current.');
@@ -156,7 +158,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
     {availability !== 'open' && <Notice tone={availabilityCopy[availability].tone} title={availabilityCopy[availability].label}>{availabilityCopy[availability].explanation}</Notice>}
     {ownStatus === 'needs_review' && <Notice tone="warning" title="Review this new version">The organizer published a new version of this event. Your earlier registration belongs to the previous version. Review the latest details before confirming again.</Notice>}
     {signedIn && !ownKnown && !unresolved && <Notice tone="warning" actions={<Button variant="secondary" onClick={() => void refresh()} disabled={submitting}>Check my registration</Button>}>Your existing registration could not be fully checked. No new decision will be sent until it is verified.</Notice>}
-    {state.status === 'confirmed' && !freshConfirmation && !withdrawn && <Notice tone="warning" actions={<><Button variant="secondary" onClick={() => void refresh()} disabled={submitting}>Refresh my registration</Button>
+    {state.status === 'confirmed' && !freshConfirmation && !withdrawn && <Notice tone="warning" actions={<><Button variant="secondary" onClick={() => void refreshSavedDecision()} disabled={submitting}>Refresh my registration</Button>
       {ownKnown && availability === 'open' && <Button variant="secondary" onClick={chooseCurrent}>Review a new registration</Button>}</>}>Your earlier transaction is confirmed. Check the current event and registration before making another decision.</Notice>}
     {message && <Notice tone="warning" role="status">{message}</Notice>}
     {storageIssue && <Notice tone="warning">This browser could not retain your selected event safely. Keep this page open. Enable browser storage and reopen the event before sending a registration.</Notice>}

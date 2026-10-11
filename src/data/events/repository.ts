@@ -16,7 +16,7 @@ export class EventRepository implements EventRepositoryContract {
   }
   listEvents(filters?: EventFilters, options?: ReadOptions) { return asResult(() => this.reader.listEvents(filters, options)); }
   loadEvent(root: EntityKey, options?: EventReadOptions) { return asResult(() => this.reader.loadEvent(root, options)); }
-  listMyEvents(actor: Actor, options?: ReadOptions) { return asResult(() => this.reader.listMyEvents(actor, options)); }
+  listMyEvents(actor: Actor, options?: EventReadOptions) { return asResult(() => this.reader.listMyEvents(actor, options)); }
   publishEvent(command: PublishEventCommand) { return asResult(() => this.writer.publishEvent(command)); }
   replaceEvent(command: ReplaceEventCommand) { return asResult(() => this.writer.replaceEvent(command)); }
   replaceAttendance(command: ReplaceAttendanceCommand) { return asResult(() => this.writer.replaceAttendance(command)); }

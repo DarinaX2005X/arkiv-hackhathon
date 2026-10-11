@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { toHex } from 'viem';
+import { createArkivRepository } from '../../src/data/arkiv';
+import type { RpcRequest as ArkivRpcRequest } from '../../src/data/arkiv/client';
+import { NOW, PUBLISHER, readyFixture } from '../../src/data/__tests__/arkiv-fixture';
 import { allocateOperationStep, createOperationController, createOperationIntent, MemoryOperationStore } from '../../src/data/operations';
-import { WalletOperationError } from '../../src/data/wallet';
-import type { NativeWalletGateway } from '../../src/data/wallet';
+import { createWalletGateway, WalletOperationError } from '../../src/data/wallet';
+import type { NativeWalletGateway, RpcRequest as WalletRpcRequest } from '../../src/data/wallet';
 import { hashCanonical } from '../../src/domain/canonical';
 import { assertJournalContinuity, expectedProofLineage, hydrateOriginalHashes, withCappedPreparation } from './runner';
 import type { BudgetRecord } from './safety';
@@ -71,6 +75,53 @@ describe('proof runner resume boundary', () => {
     expect(prepared.prepared!.transactionOptions).toEqual({ gas: '120000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' });
     expect(prepared.admission).toBeNull(); expect(prepared.step.id).toBe(f.step.id);
     expect(f.estimates()).toBe(3); // Initial cap estimate + preparation, then one re-preparation with original caps.
+  });
+  it('recovers a capped estimate RPC failure through the production writer and the same saved intent', async () => {
+    const source = readyFixture(); const store = new MemoryOperationStore();
+    const control = { failEstimate: true, estimates: 0, walletPrompts: 0 };
+    const request: ArkivRpcRequest = async args => {
+      if (args.method === 'eth_estimateGas') {
+        control.estimates++;
+        // The cap resolver must enter only after the real writer has saved this exact native batch.
+        expect(store.list()).toHaveLength(1);
+        expect(store.list()[0]?.admission).toBeNull();
+        if (control.failEstimate) throw new Error('Transient unsigned estimate failure');
+        return toHex(100_000);
+      }
+      if (args.method === 'eth_gasPrice') return '0x2';
+      return source.rpc.request(args);
+    };
+    const provider = { request: async (args: WalletRpcRequest): Promise<unknown> => {
+      if (args.method === 'eth_accounts') return [PUBLISHER];
+      if (args.method === 'eth_chainId') return toHex(7738577);
+      if (args.method !== 'eth_sendTransaction') throw new Error(`Unexpected mocked wallet method ${args.method}`);
+      control.walletPrompts++;
+      throw { code: 4001, message: 'Mocked user rejection; no signer or network exists in this test.' };
+    } };
+    const gateway = createWalletGateway({ provider, publicRpc: { request } });
+    const controller = withCappedPreparation(createOperationController({ store, gateway, now: () => NOW }), store, gateway);
+    const repository = createArkivRepository({ request, controller, now: () => NOW });
+    const fields = { publisherRoot: source.book.publisherRoot, expectedHeads: [entityKey(4)],
+      book: { ...structuredClone(source.book), predecessorKeys: [entityKey(4)] }, lifetimeSeconds: 91 * 86_400 };
+    const command = { ...fields, operation: createOperationIntent('replace_book', {
+      mode: 'public', actor: { kind: 'wallet', address: PUBLISHER }, chainId: 7738577,
+    }, fields, { id: 'unit:capped-writer-retry', now: NOW }) };
+    expect(await repository.replaceBook(command)).toMatchObject({ ok: false, error: { code: 'network' } });
+    const failed = store.list()[0]!;
+    expect(failed).toMatchObject({ step: { status: 'failed-before-send' }, prepared: null, admission: null, submissionHash: null });
+    expect(controller.getAttempt(command.operation.id)).toMatchObject({ state: 'native-started', nativeStepIds: [failed.step.id] });
+    expect(await repository.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'not_sent', evidence: 'native-journal' } });
+    expect(control.walletPrompts).toBe(0);
+    // A restarted controller uses the retained failed step; a new operation ID is unnecessary.
+    const restoredController = withCappedPreparation(createOperationController({ store, gateway, now: () => NOW }), store, gateway);
+    const restored = createArkivRepository({ request, controller: restoredController, now: () => NOW });
+    control.failEstimate = false;
+    expect(await restored.replaceBook(command)).toMatchObject({ ok: false, error: { code: 'rejected' } });
+    expect(store.list()).toHaveLength(1); expect(store.list()[0]!.step.id).toBe(failed.step.id);
+    expect(store.list()[0]!.prepared?.transactionOptions).toEqual({ gas: '120000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' });
+    expect(control.walletPrompts).toBe(1);
+    expect(control.estimates).toBe(4); // Failed cap estimate, cap resolution, preparation, final pre-send re-estimate.
+    expect(await restored.reconcile(command.operation)).toMatchObject({ ok: true, value: { status: 'not_sent', evidence: 'native-journal' } });
   });
   it('blocks a missing journal for a partially sent action', async () => {
     const f = await admitted();

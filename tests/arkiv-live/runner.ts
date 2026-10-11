@@ -134,15 +134,15 @@ export function hydrateOriginalHashes(store: OperationStore, records: BudgetReco
 export function withCappedPreparation(controller: OperationController, store: OperationStore, gateway: NativeWalletGateway): OperationController {
   return { ...controller, prepareStep: async input => {
     const saved = store.get(input.operation.id, input.step.id);
-    let caps = saved?.prepared?.transactionOptions;
-    if (!caps) {
+    const caps = saved?.prepared?.transactionOptions;
+    if (caps) return controller.prepareStep({ ...input, transactionOptions: caps });
+    return controller.prepareStep(input, async () => {
       ensure(input.operation.authority.mode === 'public', 'The proof requires a public signer.');
       const estimate = await gateway.prepare(input.batch, input.operation.authority.actor.address, FEES);
       const gas = (BigInt(estimate.estimatedGas) * 120n + 99n) / 100n;
       ensure(gas <= MAX_GAS, 'The actual SDK gas estimate exceeds the approved limit.');
-      caps = { ...FEES, gas: gas.toString() as `${bigint}` };
-    }
-    return controller.prepareStep({ ...input, transactionOptions: caps });
+      return { ...FEES, gas: gas.toString() as `${bigint}` };
+    });
   } };
 }
 

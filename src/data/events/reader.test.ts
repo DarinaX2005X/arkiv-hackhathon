@@ -293,6 +293,71 @@ describe('independent event reads through the SDK with a readonly RPC fixture', 
       .loadEvent(KEYS.project, { includeSource: true }), 'stale_snapshot');
   });
 
+  it('explicitly skips an open event source during a contributor RPC outage without claiming it is open', async () => {
+    const { rpc } = fixture();
+    rpc.queryOverride = call => {
+      if (call.query.includes("entity_type = str('book_state')")) throw new Error('Contributor RPC unavailable');
+      return undefined;
+    };
+    const repository = new EventRepository({ request: rpc.request, now: () => NOW });
+    for (const options of [undefined, { includeSource: true }]) {
+      const failed = await repository.loadEvent(KEYS.project, options);
+      expect(failed.ok).toBe(false);
+      if (failed.ok) throw new Error('Contributor traversal failure must fail the source read.');
+      expect(failed.error.code).toBe('network');
+      expect(codes(failed.error.reasons)).toContain('rpc_error');
+    }
+    const beforeEnvelope = rpc.queries.length;
+    const envelope = await repository.loadEvent(KEYS.project, { includeSource: false });
+    expect(envelope.ok).toBe(true);
+    if (!envelope.ok) throw new Error('The independently authenticated event envelope should remain readable.');
+    expect(envelope.value.root?.key).toBe(KEYS.project);
+    expect(envelope.value.state).toMatchObject({ status: 'unique', entity: { key: STATE, payload: { status: 'open' } } });
+    expect(envelope.value.release?.key).toBe(RELEASE);
+    expect(envelope.value.sourceProject).toBeNull();
+    expect(envelope.value.diagnostics).toEqual([]);
+    expect(envelope.value.snapshot.completeness).toBe('complete');
+    expect(deriveEventAvailability(envelope.value, NOW)).toBe('unverified');
+    expect(rpc.queries.slice(beforeEnvelope).every(query => !query.query.includes("entity_type = str('book_state')"))).toBe(true);
+  });
+
+  it('restores authenticated own decisions across events without contributor reads when explicitly requested', async () => {
+    const { rpc, root, release, state, attendance } = fixture(); rpc.pageSize = 1;
+    const otherRoot = entityKey(211), otherRelease = entityKey(212), otherState = entityKey(213), otherAttendance = entityKey(214);
+    const source = { ...state.source, projectRoot: otherRoot };
+    rpc.put(rawEntity(otherRoot, root, COORDINATOR));
+    rpc.put(rawEvent(otherRelease, { ...release, projectRoot: otherRoot, source }, COORDINATOR));
+    rpc.put(rawEvent(otherState, { ...state, projectRoot: otherRoot, releaseKey: otherRelease, source }, COORDINATOR));
+    rpc.put(rawEvent(otherAttendance, { ...attendance, projectRoot: otherRoot, releaseKey: otherRelease }, STRANGER));
+    rpc.put(rawEvent(entityKey(215), { ...attendance, attendee: COORDINATOR }, COORDINATOR));
+    rpc.queryOverride = call => {
+      if (call.query.includes("entity_type = str('book_state')")) throw new Error('Contributor RPC unavailable');
+      return undefined;
+    };
+    const repository = new EventRepository({ request: rpc.request, now: () => NOW });
+    for (const options of [undefined, { includeSource: true }]) {
+      const strict = await repository.listMyEvents({ kind: 'wallet', address: STRANGER }, options);
+      expect(strict.ok).toBe(false);
+      if (strict.ok) throw new Error('The requested source traversal must report the contributor RPC failure.');
+      expect(strict.error.code).toBe('network');
+    }
+    const beforeEnvelope = rpc.queries.length;
+    const saved = await repository.listMyEvents({ kind: 'wallet', address: STRANGER }, { includeSource: false });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) throw new Error('Own authenticated decisions should remain readable for withdrawal.');
+    expect(saved.value.items).toHaveLength(2); expect(saved.value.diagnostics).toEqual([]);
+    expect(saved.value.snapshot.completeness).toBe('complete');
+    for (const item of saved.value.items) {
+      expect(item.attendance).toMatchObject({ status: 'unique', entity: { provenance: { creator: { kind: 'wallet', address: STRANGER } }, payload: { decision: 'going' } } });
+      expect(item.registeredRelease?.key).toBe(item.projectRoot === KEYS.project ? RELEASE : otherRelease);
+      expect(item.event?.state.status).toBe('unique'); expect(item.event?.release?.key).toBe(item.registeredRelease?.key);
+      expect(item.event?.sourceProject).toBeNull(); expect(item.diagnostics).toEqual([]);
+      expect(deriveEventAvailability(item.event!, NOW)).toBe('unverified');
+      expect(attendanceStatus(item.attendance, item.event!, NOW, item.registeredRelease)).toBe('unverified');
+    }
+    expect(rpc.queries.slice(beforeEnvelope).every(query => !query.query.includes("entity_type = str('book_state')"))).toBe(true);
+  });
+
   it('rejects the whole catalogue when the bounded traversal cannot finish', async () => {
     const { rpc, state } = fixture(); rpc.pageSize = 1;
     rpc.put(rawEvent(entityKey(104), { ...state, operationId: 'another-head' }, COORDINATOR));

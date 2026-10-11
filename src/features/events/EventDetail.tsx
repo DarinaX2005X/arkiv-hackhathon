@@ -15,7 +15,7 @@ import './events.css';
 export interface EventDetailProps { projectRoot: PublicEntityKey; repository: EventRepositoryContract | null; session: AppSession; storage?: StoragePort | null }
 
 export function EventDetail({ projectRoot, repository, session, storage }: EventDetailProps) {
-  const { value, pending, error, refresh } = useEventRead(repository, projectRoot, session);
+  const { value, pending, error, refresh, refreshWithdrawal } = useEventRead(repository, projectRoot, session);
   const now = useEventClock();
   const event = value?.event;
   const terms = event?.release?.payload.terms;
@@ -39,7 +39,7 @@ export function EventDetail({ projectRoot, repository, session, storage }: Event
         </>}
         <EventEvidence event={event} />
       </article>
-      <RegistrationPanel projectRoot={projectRoot} repository={repository} session={session} read={value} now={now} unverified={Boolean(error || pending)} refresh={refresh} storage={storage} />
+      <RegistrationPanel projectRoot={projectRoot} repository={repository} session={session} read={value} now={now} unverified={Boolean(error || pending)} refresh={refresh} refreshWithdrawal={refreshWithdrawal} storage={storage} />
     </div>}
   </section>;
 }

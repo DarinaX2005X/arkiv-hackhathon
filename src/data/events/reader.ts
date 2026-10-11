@@ -106,7 +106,8 @@ export class EventReader {
     }
     // Terminal audience outcomes are authenticated by the event envelope itself. A missing
     // contributor must not erase a coordinator's cancellation or prevent publishing it.
-    // Publication/opening explicitly requests the source, and a live open page always reads it.
+    // Publication/opening explicitly requests the source; an ordinary live open page reads it too.
+    // Explicit envelope-only reads let the organizer close or cancel during a contributor outage.
     const needsSource = sourcePolicy === 'required' || (sourcePolicy === 'automatic'
       && (result.state.status === 'missing' || (result.state.status === 'unique' && result.state.entity.payload.status === 'open'
         && (!result.release || result.release.payload.terms.endsAt > context.snapshot.blockTimestamp))));
@@ -127,7 +128,8 @@ export class EventReader {
 
   async loadEvent(projectRoot: EntityKey, options: EventReadOptions = {}): Promise<EventAggregate> {
     const context = await this.core.context(options);
-    const result = await this.event(context, projectRoot, options.includeSource ? 'required' : 'automatic');
+    const result = await this.event(context, projectRoot, options.includeSource === false ? 'skip'
+      : options.includeSource === true ? 'required' : 'automatic');
     await this.core.finish(context); return result;
   }
 
@@ -165,7 +167,7 @@ export class EventReader {
     await this.core.finish(context); return { items, snapshot: context.snapshot, diagnostics };
   }
 
-  async listMyEvents(actor: Actor, options: ReadOptions = {}): Promise<ListResult<MyEvent>> {
+  async listMyEvents(actor: Actor, options: EventReadOptions = {}): Promise<ListResult<MyEvent>> {
     const account = this.core.walletActor(actor); const context = await this.core.context(options);
     // Include malformed authored heads so an invalid second head cannot disappear from a wallet's list.
     const rows = await this.core.query(context, [eq('project', EVENTS_NAMESPACE), eq('entity_type', 'attendance_state')], account);
@@ -182,7 +184,8 @@ export class EventReader {
       const projectRoot = publicKey(rootKey);
       const attendance = await this.scope<AttendanceState>(context, 'attendance_state', projectRoot, account);
       const item: MyEvent = { projectRoot, attendance, event: null, registeredRelease: null, diagnostics: [...scopeReasons(attendance)] };
-      item.event = await this.event(context, projectRoot);
+      item.event = await this.event(context, projectRoot, options.includeSource === false ? 'skip'
+        : options.includeSource === true ? 'required' : 'automatic');
       item.diagnostics.push(...item.event.diagnostics);
       if (attendance.status === 'unique' && item.event.root) {
         try {

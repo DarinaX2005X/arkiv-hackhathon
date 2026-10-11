@@ -190,15 +190,49 @@ describe('public request journal loss', () => {
     await action.resume(async () => { callbacks++; return { ok: true, value: null }; });
     expect(callbacks).toBe(0); expect(action.getSnapshot().status).toBe('needs-verification'); expect(action.clear()).toBe(false);
   });
-  it('never downgrades observed send evidence to not sent even if an incomplete journal claims it', async () => {
+  it.each(['native-journal', 'preflight-journal'] as const)('never downgrades observed send evidence to not sent even if %s claims it', async evidence => {
     const command = publicCommand();
     command.operation.steps = [{ id: 'known-send', phase: 'initial_state_pending', status: 'unverified',
       transactionHash: null, confirmedKeys: [], expectedHeads: [], inputHash: command.operation.inputHash }];
-    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation: { ...operation, steps: [] }, evidence: 'native-journal' } }) };
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation: { ...operation, steps: [] }, evidence } }) };
     const action = createRepositoryActionController({ repository: repo, store: store(), getActor: () => publicActor });
     await action.run(command, async () => { throw new Error('Lost response'); });
     await action.reconcile();
     expect(action.getSnapshot().operation?.steps[0]?.status).toBe('unverified');
     expect(action.getSnapshot().status).toBe('needs-verification'); expect(action.clear()).toBe(false);
+  });
+  it('rechecks a public rejected envelope on return before allowing it to be cleared', async () => {
+    const command = publicCommand(); const journal = store();
+    journal.save({ status: 'rejected', command: command as unknown as Record['command'], operation: command.operation });
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => ({ ok: true, value: { status: 'not_sent', operation } }) };
+    const reopened = createRepositoryActionController({ repository: repo, store: journal, getActor: () => publicActor });
+    expect(reopened.getSnapshot().status).toBe('needs-verification'); expect(reopened.clear()).toBe(false);
+    await reopened.reconcile();
+    expect(reopened.getSnapshot().status).toBe('needs-verification'); expect(reopened.clear()).toBe(false);
+  });
+  it('retries the same frozen request after durable preflight rejection and retains it if the retry becomes unknown', async () => {
+    const command = publicCommand(); const journal = store();
+    let preflightOnly = true; let checks = 0;
+    const repo = { mode: 'public' as const, reconcile: async (operation: OperationIntent): Promise<Result<ReconciliationResult>> => {
+      checks++;
+      return preflightOnly
+        ? { ok: true, value: { status: 'not_sent', operation, evidence: 'preflight-journal' } }
+        : { ok: true, value: { status: 'unverified', operation, error: { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false } } };
+    } };
+    const action = createRepositoryActionController({ repository: repo, store: journal, getActor: () => publicActor });
+    await action.run(command, async () => ({ ok: false, error: { code: 'network', reasons: [], retryable: true } }));
+    expect(action.getSnapshot().status).toBe('needs-verification');
+    await action.reconcile();
+    expect(action.getSnapshot().status).toBe('rejected');
+    const reopened = createRepositoryActionController({ repository: repo, store: journal, getActor: () => publicActor });
+    expect(reopened.getSnapshot().status).toBe('needs-verification');
+    let resumed = 0;
+    await reopened.resume(async (_, saved) => {
+      resumed++; expect(checks).toBe(2); expect(saved).toEqual(command);
+      preflightOnly = false; throw new Error('The wallet response was interrupted');
+    });
+    expect(resumed).toBe(1); expect(reopened.getSnapshot().operation?.id).toBe(command.operation.id);
+    await reopened.resume(async () => { resumed++; return { ok: true, value: null }; });
+    expect(resumed).toBe(1); expect(reopened.getSnapshot().status).toBe('needs-verification'); expect(reopened.clear()).toBe(false);
   });
 });

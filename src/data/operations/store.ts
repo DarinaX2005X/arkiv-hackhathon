@@ -2,7 +2,8 @@ import { canonicalJson, hashCanonical } from '../../domain/canonical';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import { WalletOperationError } from '../wallet/types';
 import { assertOperationId } from './intent';
-import type { OperationLockProvider, OperationStore, StoredOperationStep } from './types';
+import { operationBinding } from './reconciliation';
+import type { OperationLockProvider, OperationStore, StoredOperationAttempt, StoredOperationStep } from './types';
 
 export const DEFAULT_OPERATION_STORAGE_KEY = 'partfolk:wallet-operations:v1';
 const clone = <T>(value: T): T => JSON.parse(canonicalJson(value)) as T;
@@ -42,8 +43,46 @@ function validateRecord(value: unknown): StoredOperationStep {
   } catch (error) { throw storageError(error); }
 }
 
+function validateAttempt(value: unknown): StoredOperationAttempt {
+  try {
+    if (!value || typeof value !== 'object') throw new Error('Invalid attempt.');
+    const record = value as StoredOperationAttempt;
+    const authority = record.operation?.authority;
+    if (record.version !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
+      || !Number.isSafeInteger(record.startedAt) || record.startedAt < 0
+      || !Number.isSafeInteger(record.operation?.createdAt) || record.operation.createdAt < 0
+      || authority?.mode !== 'public' || authority.chainId !== TIRAMISU_CHAIN_ID || authority.actor?.kind !== 'wallet'
+      || !/^0x[\da-fA-F]{40}$/.test(authority.actor.address)
+      || record.operation.inputHash !== hashCanonical(record.operation.input)
+      || !Array.isArray(record.operation.steps) || !Array.isArray(record.operation.expectedHeads)
+      || !Array.isArray(record.nativeStepIds) || new Set(record.nativeStepIds).size !== record.nativeStepIds.length) throw new Error('Invalid attempt fields.');
+    assertOperationId(record.operation.id); assertOperationId(record.attemptId);
+    record.nativeStepIds.forEach(assertOperationId);
+    if (!['preflight', 'native-started', 'rejected-before-native'].includes(record.state)
+      || (record.state === 'native-started') !== (record.nativeStepIds.length > 0)
+      || (record.state === 'rejected-before-native'
+        ? !Number.isSafeInteger(record.settledAt) || record.settledAt! < record.startedAt
+        : record.settledAt !== null)) throw new Error('Invalid attempt state.');
+    return clone(record);
+  } catch (error) { throw storageError(error); }
+}
+
+function checkAttemptRevision(record: StoredOperationAttempt, current: StoredOperationAttempt | undefined, expectedRevision: number | null): void {
+  if ((current?.revision ?? null) !== expectedRevision || record.revision !== (expectedRevision ?? 0) + 1) throw busy();
+  if (current && operationBinding(record.operation) !== operationBinding(current.operation)) throw storageError();
+  if (current?.state === 'native-started' && (record.state !== 'native-started' || record.attemptId !== current.attemptId
+    || current.nativeStepIds.some(id => !record.nativeStepIds.includes(id)))) throw storageError();
+}
+
+interface JournalDocument {
+  version: 1;
+  records: Record<string, StoredOperationStep>;
+  attempts: Record<string, StoredOperationAttempt>;
+}
+
 export class MemoryOperationStore implements OperationStore {
   private records = new Map<string, StoredOperationStep>();
+  private attempts = new Map<string, StoredOperationAttempt>();
   private active = new Set<string>();
   get(operationId: string, stepId: string): StoredOperationStep | undefined {
     const value = this.records.get(identity(operationId, stepId));
@@ -54,6 +93,19 @@ export class MemoryOperationStore implements OperationStore {
   putMany(records: StoredOperationStep[]): void {
     const checked = records.map(validateRecord);
     for (const record of checked) this.records.set(identity(record.operation.id, record.step.id), record);
+  }
+  getAttempt(operationId: string): StoredOperationAttempt | undefined {
+    const value = this.attempts.get(operationId);
+    return value === undefined ? undefined : clone(value);
+  }
+  putAttemptCAS(input: StoredOperationAttempt, expectedRevision: number | null): void {
+    const record = validateAttempt(input);
+    checkAttemptRevision(record, this.attempts.get(record.operation.id), expectedRevision);
+    this.attempts.set(record.operation.id, record);
+  }
+  runOperationExclusive<T>(operationId: string, action: () => Promise<T>): Promise<T> {
+    assertOperationId(operationId);
+    return this.runExclusive(`operation:${operationId}`, action);
   }
   async runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T> {
     if (this.active.has(scope)) throw busy();
@@ -72,11 +124,11 @@ export class BrowserOperationStore implements OperationStore {
     this.storage = storage; this.key = options.key ?? DEFAULT_OPERATION_STORAGE_KEY;
     this.lockKey = options.lockKey; this.locks = options.locks;
   }
-  private read(): Record<string, StoredOperationStep> {
+  private read(): JournalDocument {
     try {
       const raw = this.storage.getItem(this.key);
-      if (raw === null) return {};
-      const document = JSON.parse(raw) as { version?: unknown; records?: unknown };
+      if (raw === null) return { version: 1, records: {}, attempts: {} };
+      const document = JSON.parse(raw) as { version?: unknown; records?: unknown; attempts?: unknown };
       if (document.version !== 1 || !document.records || typeof document.records !== 'object' || Array.isArray(document.records)) throw new Error('Unsupported journal version.');
       const records: Record<string, StoredOperationStep> = {};
       for (const [id, value] of Object.entries(document.records)) {
@@ -84,22 +136,52 @@ export class BrowserOperationStore implements OperationStore {
         if (id !== identity(record.operation.id, record.step.id)) throw new Error('Journal identity mismatch.');
         records[id] = record;
       }
-      return records;
+      const attempts: Record<string, StoredOperationAttempt> = {};
+      if (document.attempts !== undefined) {
+        if (!document.attempts || typeof document.attempts !== 'object' || Array.isArray(document.attempts)) throw new Error('Invalid attempt journal.');
+        for (const [id, value] of Object.entries(document.attempts)) {
+          const attempt = validateAttempt(value);
+          if (id !== attempt.operation.id) throw new Error('Attempt identity mismatch.');
+          Object.defineProperty(attempts, id, { value: attempt, enumerable: true, writable: true, configurable: true });
+        }
+      }
+      return { version: 1, records, attempts };
     } catch (error) { if (error instanceof WalletOperationError) throw error; throw storageError(error); }
   }
-  get(operationId: string, stepId: string): StoredOperationStep | undefined { return this.read()[identity(operationId, stepId)]; }
-  list(): StoredOperationStep[] { return Object.values(this.read()); }
+  get(operationId: string, stepId: string): StoredOperationStep | undefined { return this.read().records[identity(operationId, stepId)]; }
+  list(): StoredOperationStep[] { return Object.values(this.read().records); }
   put(record: StoredOperationStep): void { this.putMany([record]); }
   putMany(records: StoredOperationStep[]): void {
     const checked = records.map(validateRecord);
     const document = this.read();
-    for (const record of checked) document[identity(record.operation.id, record.step.id)] = record;
-    try { this.storage.setItem(this.key, canonicalJson({ version: 1, records: document })); }
+    for (const record of checked) document.records[identity(record.operation.id, record.step.id)] = record;
+    this.write(document);
+  }
+  getAttempt(operationId: string): StoredOperationAttempt | undefined {
+    const attempts = this.read().attempts;
+    return Object.hasOwn(attempts, operationId) ? attempts[operationId] : undefined;
+  }
+  putAttemptCAS(input: StoredOperationAttempt, expectedRevision: number | null): void {
+    const record = validateAttempt(input); const document = this.read();
+    const current = Object.hasOwn(document.attempts, record.operation.id) ? document.attempts[record.operation.id] : undefined;
+    checkAttemptRevision(record, current, expectedRevision);
+    Object.defineProperty(document.attempts, record.operation.id, { value: record, enumerable: true, writable: true, configurable: true });
+    this.write(document);
+  }
+  private write(document: JournalDocument): void {
+    try { this.storage.setItem(this.key, canonicalJson(document)); }
     catch (error) { throw storageError(error); }
   }
   async runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T> {
     // The document contains several accounts, so its read/merge/write needs one store-wide lock.
     const name = this.lockKey ?? `${this.key}:journal`;
+    return this.lock(name, action);
+  }
+  runOperationExclusive<T>(operationId: string, action: () => Promise<T>): Promise<T> {
+    assertOperationId(operationId);
+    return this.lock(`${this.lockKey ?? `${this.key}:journal`}:${this.key}:operation:${operationId}`, action);
+  }
+  private async lock<T>(name: string, action: () => Promise<T>): Promise<T> {
     if (this.locks) return this.locks.runExclusive(name, action);
     const locks = globalThis.navigator?.locks;
     if (!locks) throw new WalletOperationError('This browser cannot safely coordinate wallet operations across tabs.', { kind: 'not_sent', code: 'unsupported' });

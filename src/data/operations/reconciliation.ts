@@ -1,14 +1,14 @@
 import { canonicalJson, hashCanonical } from '../../domain/canonical';
 import type { OperationIntent, OperationStep } from '../types';
-import type { StoredOperationStep } from './types';
+import type { StoredOperationAttempt, StoredOperationStep } from './types';
 
 export interface ReconciliationJournal {
   complete: boolean;
-  notSentEvidence?: 'native-journal';
+  notSentEvidence?: 'native-journal' | 'preflight-journal';
   reason?: 'missing' | 'inconsistent';
 }
 
-const binding = (operation: OperationIntent) => canonicalJson({
+export const operationBinding = (operation: OperationIntent) => canonicalJson({
   id: operation.id, kind: operation.kind, authority: operation.authority, createdAt: operation.createdAt,
   input: operation.input, inputHash: operation.inputHash, expectedHeads: operation.expectedHeads,
 });
@@ -37,17 +37,32 @@ function neverSent(record: StoredOperationStep): boolean {
 
 /** An echoed caller intent is not evidence that an admitted transaction never happened. */
 export function inspectReconciliationJournal(input: OperationIntent, saved: OperationIntent | undefined,
-  getStep: (operationId: string, stepId: string) => StoredOperationStep | undefined): ReconciliationJournal {
-  if (!saved) return { complete: false, reason: 'missing' };
+  getStep: (operationId: string, stepId: string) => StoredOperationStep | undefined,
+  attempt?: StoredOperationAttempt): ReconciliationJournal {
   const inconsistent: ReconciliationJournal = { complete: false, reason: 'inconsistent' };
   try {
-    if (binding(input) !== binding(saved) || saved.inputHash !== hashCanonical(saved.input)
+    if (attempt) {
+      if (operationBinding(input) !== operationBinding(attempt.operation)
+        || attempt.operation.inputHash !== hashCanonical(attempt.operation.input)) return inconsistent;
+      if (attempt.state === 'rejected-before-native') {
+        const pristine = (operation: OperationIntent) => operation.phase === 'prepared' && operation.steps.length === 0
+          && !operation.transactionHash && operation.confirmedKeys.length === 0;
+        return !saved && attempt.nativeStepIds.length === 0 && attempt.settledAt !== null
+          && pristine(input) && pristine(attempt.operation)
+          ? { complete: true, notSentEvidence: 'preflight-journal' } : inconsistent;
+      }
+      if (attempt.state === 'preflight') return { complete: false, reason: 'missing' };
+      if (!saved || attempt.nativeStepIds.length === 0
+        || attempt.nativeStepIds.some(id => !saved.steps.some(step => step.id === id) || !getStep(input.id, id))) return inconsistent;
+    }
+    if (!saved) return { complete: false, reason: 'missing' };
+    if (operationBinding(input) !== operationBinding(saved) || saved.inputHash !== hashCanonical(saved.input)
       || saved.steps.length === 0 || new Set(saved.steps.map(step => step.id)).size !== saved.steps.length
       || new Set(input.steps.map(step => step.id)).size !== input.steps.length) return inconsistent;
     const records = new Map<string, StoredOperationStep>();
     for (const step of saved.steps) {
       const record = getStep(saved.id, step.id);
-      if (!record || binding(record.operation) !== binding(saved) || canonicalJson(record.step) !== canonicalJson(step)
+      if (!record || operationBinding(record.operation) !== operationBinding(saved) || canonicalJson(record.step) !== canonicalJson(step)
         || record.step.inputHash !== hashCanonical(record.batch)) return inconsistent;
       records.set(step.id, record);
     }
@@ -57,7 +72,7 @@ export function inspectReconciliationJournal(input: OperationIntent, saved: Oper
       if (record.operation.steps.some(step => !records.has(step.id)
         || stepBinding(step) !== stepBinding(records.get(step.id)!.step))) return inconsistent;
     }
-    for (const observed of input.steps) {
+    for (const observed of [...input.steps, ...(attempt?.operation.steps ?? [])]) {
       const record = records.get(observed.id);
       if (!record || stepBinding(observed) !== stepBinding(record.step)
         || (observed.transactionHash && !subset([observed.transactionHash], hashes(record)))
@@ -68,7 +83,7 @@ export function inspectReconciliationJournal(input: OperationIntent, saved: Oper
     const retained = [...records.values()];
     const retainedHashes = retained.flatMap(hashes);
     const confirmedKeys = retained.filter(record => record.step.status === 'confirmed').flatMap(record => record.step.confirmedKeys);
-    for (const operation of [input, saved, ...retained.map(record => record.operation)]) {
+    for (const operation of [input, saved, ...(attempt ? [attempt.operation] : []), ...retained.map(record => record.operation)]) {
       if ((operation.transactionHash && !subset([operation.transactionHash], retainedHashes))
         || !subset(operation.confirmedKeys, confirmedKeys)
         || (progressedPhase(operation) && !retained.some(record => record.step.status === 'confirmed'))) return inconsistent;

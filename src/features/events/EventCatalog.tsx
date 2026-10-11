@@ -39,7 +39,8 @@ export function EventCatalog({ repository }: EventCatalogProps) {
   }, [repository, filters]);
   useEffect(() => { setResult(null); void refresh(); return () => { ++sequence.current; abort.current?.abort(); }; }, [refresh]);
   const filtered = Boolean(filters.search || filters.from !== undefined || filters.to !== undefined);
-  const incomplete = result && (result.snapshot.completeness !== 'complete' || result.snapshot.freshness !== 'fresh' || result.diagnostics.length > 0 || result.snapshot.reasons.length > 0);
+  const incomplete = result && (result.snapshot.completeness !== 'complete' || result.snapshot.freshness !== 'fresh' || result.snapshot.reasons.length > 0);
+  const warnings = Boolean(result?.diagnostics.length);
   const stale = result && now - result.snapshot.fetchedAt > 60_000;
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -64,12 +65,13 @@ export function EventCatalog({ repository }: EventCatalogProps) {
     {error && <ErrorState title="Events could not be refreshed" description={eventError(error)} actions={<Button variant="secondary" onClick={() => void refresh()} disabled={pending}>Try again</Button>} />}
     {pending && <LoadingState title="Reading published events" description="Checking the current details and preparation status from Arkiv." />}
     {!pending && !error && incomplete && <Notice tone="warning" title="This list is incomplete" actions={<Button variant="secondary" onClick={() => void refresh()}>Refresh events</Button>}>Some public data could not be verified. The events below are the readable part of this snapshot; other events may be missing.</Notice>}
+    {!pending && !error && warnings && !incomplete && <Notice tone="warning" title="Some published records could not be verified" actions={<Button variant="secondary" onClick={() => void refresh()}>Refresh events</Button>}>Unavailable or unauthenticated records are excluded from this list. Each event below shows the status verified for that event.</Notice>}
     {!pending && !error && stale && !incomplete && <Notice tone="warning" actions={<Button variant="secondary" onClick={() => void refresh()}>Refresh events</Button>}>This list needs a fresh check. Open an event to read its current registration status.</Notice>}
     {result && result.items.length > 0 && <div className="pf-events-results" aria-live="polite" aria-busy={pending}>
       <p className="pf-events-result-label">{result.items.length} {result.items.length === 1 ? 'event' : 'events'} in this {incomplete ? 'partial ' : ''}result</p>
       <div className="pf-event-list">{result.items.map(event => <EventSummary key={event.projectRoot} event={event} now={now} unverified={Boolean(error || incomplete || pending)} />)}</div>
     </div>}
-    {result && !result.items.length && !pending && !error && !incomplete && <EmptyState
+    {result && !result.items.length && !pending && !error && !incomplete && !warnings && <EmptyState
       title={filtered ? 'No events match these filters' : 'No published events yet'}
       description={filtered ? 'Try another title or a wider date range. If an organizer shared an event link, you can open it directly.' : 'Events appear here when an organizer publishes their visitor page after the team has agreed on the preparations. You can also open an event link shared with you.'}
       actions={filtered ? <Button variant="secondary" onClick={clearFilters}>Show all events</Button> : <Link href={routeHref({ name: 'new-project' })}>Organize an event</Link>} />}

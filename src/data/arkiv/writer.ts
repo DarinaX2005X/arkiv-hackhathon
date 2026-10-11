@@ -138,6 +138,7 @@ export class ArkivWriter {
     const batch = build(step.id);
     step.inputHash = hashCanonical(batch);
     operation.phase = phase;
+    await controller.beforeNativeAttempt(operation.id, step);
     record = await controller.prepareStep({ operation, step, batch });
     // Wallet preparation can involve asynchronous provider work. Re-read the complete scoped heads before admission.
     await preflight();
@@ -152,6 +153,9 @@ export class ArkivWriter {
   }
 
   async createProject(input: CreateProjectCommand): Promise<MutationResult<ProjectAggregate>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.createProjectAttempt(input));
+  }
+  private async createProjectAttempt(input: CreateProjectCommand): Promise<MutationResult<ProjectAggregate>> {
     const command = this.begin(input, ['create_project']); const operation = command.operation;
     valid(validateRecipe(command.recipe).reasons, 'The project recipe is invalid.');
     validatePayloadForNetwork({ ...this.base(operation), entityType: 'project_state', projectRoot: `0x${'00'.repeat(32)}`,
@@ -177,6 +181,9 @@ export class ArkivWriter {
   }
 
   async registerPublisher(input: RegisterPublisherCommand): Promise<MutationResult<PublisherAggregate>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.registerPublisherAttempt(input));
+  }
+  private async registerPublisherAttempt(input: RegisterPublisherCommand): Promise<MutationResult<PublisherAggregate>> {
     const command = this.begin(input, ['register_publisher']); const operation = command.operation;
     // Validate initial book fields before charging for a root that could not be initialized.
     validatePayloadForNetwork({ ...this.base(operation), entityType: 'book_state', publisherRoot: `0x${'00'.repeat(32)}`,
@@ -240,6 +247,9 @@ export class ArkivWriter {
     await this.finish(context);
   }
   async replaceProject(input: ReplaceProjectCommand): Promise<MutationResult<EntityRecord<ProjectState>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.replaceProjectAttempt(input));
+  }
+  private async replaceProjectAttempt(input: ReplaceProjectCommand): Promise<MutationResult<EntityRecord<ProjectState>>> {
     const command = this.begin(input, ['replace_project', 'close_project']);
     assertArkiv(command.operation.kind !== 'close_project' || command.state.lifecycle === 'closed', 'invalid_input', 'closed_project', 'A close operation must produce a terminal project state.');
     const deletes = [...command.expectedHeads, ...(command.state.lifecycle === 'closed' ? command.expectedActivationHeads ?? [] : [])].map(publicKey);
@@ -348,6 +358,9 @@ export class ArkivWriter {
       () => this.bookPreflight(command), command.expectedHeads, command.publisherRoot);
   }
   async replaceBook(input: ReplaceBookCommand): Promise<MutationResult<EntityRecord<BookState>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.replaceBookAttempt(input));
+  }
+  private async replaceBookAttempt(input: ReplaceBookCommand): Promise<MutationResult<EntityRecord<BookState>>> {
     const command = this.begin(input, ['replace_book']); const verified = await this.replaceBookStep(command);
     await this.progress(command.operation, 'complete'); return this.result(createdRecord<BookState>(verified, 'book_state'), verified, command.operation);
   }
@@ -373,6 +386,9 @@ export class ArkivWriter {
       () => this.proposalPreflight(command.operation, command.projectRoot, command.proposal));
   }
   async publishProposal(input: PublishProposalCommand): Promise<MutationResult<EntityRecord<Proposal>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.publishProposalAttempt(input));
+  }
+  private async publishProposalAttempt(input: PublishProposalCommand): Promise<MutationResult<EntityRecord<Proposal>>> {
     const command = this.begin(input, ['publish_proposal']); const verified = await this.proposalStep(command);
     await this.progress(command.operation, 'complete'); return this.result(createdRecord<Proposal>(verified, 'proposal'), verified, command.operation);
   }
@@ -395,6 +411,9 @@ export class ArkivWriter {
     }, command.expectedActivationHeads);
   }
   async activateProposal(input: ActivateProposalCommand): Promise<MutationResult<EntityRecord<PlanActivation>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.activateProposalAttempt(input));
+  }
+  private async activateProposalAttempt(input: ActivateProposalCommand): Promise<MutationResult<EntityRecord<PlanActivation>>> {
     const command = this.begin(input, ['activate_proposal']); const verified = await this.activationStep(command);
     await this.progress(command.operation, 'complete'); return this.result(createdRecord<PlanActivation>(verified, 'plan_activation'), verified, command.operation);
   }
@@ -420,10 +439,16 @@ export class ArkivWriter {
     }, [], link.publisherRoot);
   }
   async publishProjectLink(input: PublishProjectLinkCommand): Promise<MutationResult<EntityRecord<ProjectLink>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.publishProjectLinkAttempt(input));
+  }
+  private async publishProjectLinkAttempt(input: PublishProjectLinkCommand): Promise<MutationResult<EntityRecord<ProjectLink>>> {
     const command = this.begin(input, ['publish_project_link']); const verified = await this.linkStep(command);
     await this.progress(command.operation, 'complete'); return this.result(createdRecord<ProjectLink>(verified, 'project_link'), verified, command.operation);
   }
   async publishPlan(input: PublishPlanCommand): Promise<PublicationProgress> {
+    return this.connected().withOperationAttempt(input.operation, () => this.publishPlanAttempt(input));
+  }
+  private async publishPlanAttempt(input: PublishPlanCommand): Promise<PublicationProgress> {
     const command = this.begin(input, ['publish_plan']); const operation = command.operation;
     assertArkiv(set(command.requestPublisherRoots) === set(command.proposal.plan.requiredApprovers), 'invalid_input', 'missing_root', 'Request fan-out must include every exact required approver.');
     const proposalResult = await this.proposalStep(command); const proposal = createdRecord<Proposal>(proposalResult, 'proposal');
@@ -444,6 +469,9 @@ export class ArkivWriter {
     return { operation, proposalKey: proposal.key, activationKey: activation.key, publishedRequestKeys, pendingPublisherRoots: [] };
   }
   async shareOffer(input: ShareOfferCommand): Promise<MutationResult<EntityRecord<ProjectLink>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.shareOfferAttempt(input));
+  }
+  private async shareOfferAttempt(input: ShareOfferCommand): Promise<MutationResult<EntityRecord<ProjectLink>>> {
     const command = this.begin(input, ['share_offer']); const operation = command.operation;
     await this.replaceBookStep({ operation, lifetimeSeconds: command.lifetimeSeconds, publisherRoot: command.publisherRoot,
       expectedHeads: command.expectedBookHeads, book: command.book });
@@ -455,6 +483,9 @@ export class ArkivWriter {
   }
 
   async renewEntity(input: RenewEntityCommand): Promise<MutationResult<EntityRecord>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.renewEntityAttempt(input));
+  }
+  private async renewEntityAttempt(input: RenewEntityCommand): Promise<MutationResult<EntityRecord>> {
     const command = this.begin(input, ['renew_entity']);
     assertArkiv(Number.isSafeInteger(command.extendBySeconds) && command.extendBySeconds > 0 && command.extendBySeconds <= 10 * 366 * DAY_SECONDS,
       'invalid_input', 'invalid_input', 'The extension must be a positive bounded whole number of seconds.');
@@ -480,7 +511,7 @@ export class ArkivWriter {
   async reconcile(input: OperationIntent): Promise<ReconciliationResult> {
     const controller = this.connected(); const saved = controller.getOperation(input.id); const operation = saved ?? clone(input);
     assertArkiv(operation.inputHash === input.inputHash && equal(operation.authority, input.authority), 'conflict', 'hash_mismatch', 'The reconciliation intent does not match its saved operation.');
-    const journal = inspectReconciliationJournal(input, saved, controller.getStep);
+    const journal = inspectReconciliationJournal(input, saved, controller.getStep, controller.getAttempt(input.id));
     if (!journal.complete) {
       return { status: 'unverified', operation, error: { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false,
         diagnostic: 'The original verification journal is missing or incomplete. Its absence cannot establish that nothing was sent.' } };

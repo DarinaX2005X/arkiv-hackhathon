@@ -68,7 +68,7 @@ export type ReconciliationResult =
   | { status: 'reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
   | { status: 'partial_reverted'; operation: OperationIntent; receipt: OperationReceipt; error: RepositoryError }
   | { status: 'pending'; operation: OperationIntent }
-  | { status: 'not_sent'; operation: OperationIntent; evidence?: 'native-journal' }
+  | { status: 'not_sent'; operation: OperationIntent; evidence?: 'native-journal' | 'preflight-journal' }
   | { status: 'unverified'; operation: OperationIntent; error: RepositoryError };
 export interface CommandBase { operation: OperationIntent; lifetimeSeconds: number }
 export interface CreateProjectCommand extends CommandBase { recipe: ProjectRecipe; rootKey?: EntityKey }

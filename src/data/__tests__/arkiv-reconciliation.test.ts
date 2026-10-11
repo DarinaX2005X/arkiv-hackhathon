@@ -16,9 +16,10 @@ import { NOW, PUBLISHER, entityKey, readyFixture } from './arkiv-fixture';
 function fixture() {
   const source = readyFixture();
   const store = new MemoryOperationStore();
-  const control = { sends: 0, estimates: 0, reject: true, failEstimate: false, rpcMethods: [] as string[] };
+  const control = { sends: 0, estimates: 0, reject: true, failEstimate: false, failRead: false, rpcMethods: [] as string[] };
   const request: RpcRequest = async args => {
     control.rpcMethods.push(args.method);
+    if (control.failRead) throw new Error('The current scoped snapshot is unavailable.');
     if (args.method === 'eth_estimateGas') {
       control.estimates++;
       if (control.failEstimate) throw new Error('The unsigned estimate is unavailable.');
@@ -132,11 +133,38 @@ describe('public reconciliation requires retained journal evidence', () => {
     expect(f.control.sends).toBe(0);
   });
 
-  it('keeps a failure before any journal entry unverified instead of manufacturing no-send evidence', async () => {
+  it('proves a writer validation failure through the separate attempt journal without inventing a native step', async () => {
     const f = fixture(); const invalid = structuredClone(f.command); invalid.book.name = 'Changed after review';
     expect(await f.repository.replaceBook(invalid)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(f.store.list()).toEqual([]);
-    expect(await f.repository.reconcile(f.command.operation)).toMatchObject({ ok: true, value: { status: 'unverified' } });
+    expect(f.controller.getAttempt(f.command.operation.id)).toMatchObject({ state: 'rejected-before-native', nativeStepIds: [] });
+    expect(await f.repository.reconcile(f.command.operation)).toMatchObject({ ok: true, value: { status: 'not_sent', evidence: 'preflight-journal' } });
+    expect(await f.withRecords([]).reconcile(f.command.operation)).toMatchObject({ ok: true, value: { status: 'unverified' } });
+    expect(f.control.sends).toBe(0);
+  });
+
+  it('can deliberately retry the same unchanged operation after a retained RPC preflight rejection', async () => {
+    const f = fixture(); f.control.failRead = true;
+    expect(await f.repository.replaceBook(f.command)).toMatchObject({ ok: false, error: { code: 'network' } });
+    const first = f.controller.getAttempt(f.command.operation.id)!;
+    expect(await f.repository.reconcile(f.command.operation)).toMatchObject({ ok: true, value: { status: 'not_sent', evidence: 'preflight-journal' } });
+    f.control.failRead = false;
+    expect(await f.repository.replaceBook(f.command)).toMatchObject({ ok: false, error: { code: 'rejected' } });
+    expect(f.controller.getAttempt(f.command.operation.id)).toMatchObject({ state: 'native-started' });
+    expect(f.controller.getAttempt(f.command.operation.id)!.attemptId).not.toBe(first.attemptId);
+    expect(await f.repository.reconcile(f.command.operation)).toMatchObject({ ok: true, value: { status: 'not_sent', evidence: 'native-journal' } });
+    expect(f.control.sends).toBe(1);
+  });
+
+  it('cannot replace a rejected preflight intent with changed input under the same ID', async () => {
+    const f = fixture(); f.control.failRead = true;
+    await f.repository.replaceBook(f.command);
+    const { operation, ...fields } = f.command;
+    const changed = { ...fields, book: { ...fields.book, name: 'A changed request' } };
+    const replacement = { ...changed, operation: createOperationIntent('replace_book', operation.authority, changed,
+      { id: operation.id, now: operation.createdAt }) };
+    f.control.failRead = false;
+    expect(await f.repository.replaceBook(replacement)).toMatchObject({ ok: false, error: { code: 'conflict' } });
     expect(f.control.sends).toBe(0);
   });
 });

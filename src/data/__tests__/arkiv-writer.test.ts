@@ -276,7 +276,7 @@ describe('writer preflight and facade error boundaries', () => {
     const f = harness(); const command = f.replacement(); const { operation: _operation, ...fields } = command;
     const stale = f.command('replace_book', { ...fields, expectedHeads: [entityKey(999)], book: { ...fields.book, predecessorKeys: [entityKey(999)] } });
     expect(await f.repository.replaceBook(stale)).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
-    const unlinked = f.command('replace_book', { ...fields, book: { ...fields.book, predecessorKeys: [] } });
+    const unlinked = f.command('replace_book', { ...fields, book: { ...fields.book, predecessorKeys: [] } }, 'unlinked-book');
     expect(await f.repository.replaceBook(unlinked)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(f.control.sends).toBe(0);
   });
@@ -301,7 +301,7 @@ describe('writer preflight and facade error boundaries', () => {
     const missing = { ...fields, expectedHeads: [], book: { ...fields.book, predecessorKeys: [] } };
     expect(await f.repository.replaceBook(f.command('replace_book', missing))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     const copied = { ...missing, recovery: { acknowledgedMissingState: true as const, redeclaredAvailability: true as const } };
-    expect(await f.repository.replaceBook(f.command('replace_book', copied))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await f.repository.replaceBook(f.command('replace_book', copied, 'copied-book'))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(f.control.sends).toBe(0);
   });
   it('rejects proposals and activations that do not descend from the current exact agreement', async () => {
@@ -309,7 +309,7 @@ describe('writer preflight and facade error boundaries', () => {
     const proposal = f.command('publish_proposal', { projectRoot: KEYS.project, proposal: f.proposal, lifetimeSeconds: LIFETIME });
     expect(await f.repository.publishProposal(proposal)).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
     const activation = f.command('activate_proposal', { projectRoot: KEYS.project, proposalKey: KEYS.proposal,
-      proposalHash: f.proposal.proposalHash, expectedActivationHeads: [KEYS.activation], lifetimeSeconds: LIFETIME });
+      proposalHash: f.proposal.proposalHash, expectedActivationHeads: [KEYS.activation], lifetimeSeconds: LIFETIME }, 'unlinked-activation');
     expect(await f.repository.activateProposal(activation)).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
     expect(f.control.sends).toBe(0);
   });
@@ -412,7 +412,7 @@ describe('writer confirmation and resumable operations', () => {
     expect(await f.repository.registerPublisher(f.command('register_publisher', { kind: 'individual' as const,
       name: '', description: '', lifetimeSeconds: LIFETIME }))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(f.control.sends).toBe(0);
-    const command = f.command('register_publisher', { kind: 'individual' as const, name: 'A synthetic contributor', description: '', lifetimeSeconds: LIFETIME });
+    const command = f.command('register_publisher', { kind: 'individual' as const, name: 'A synthetic contributor', description: '', lifetimeSeconds: LIFETIME }, 'valid-publisher');
     expect(await f.repository.registerPublisher(command)).toMatchObject({ ok: true, value: { value: { book: { status: 'unique', entity: { payload: { resources: [], grants: [] } } } } } });
     expect(await f.repository.registerPublisher(command)).toMatchObject({ ok: true });
     expect(f.control.sentTypes).toEqual([['publisher_root'], ['book_state']]);

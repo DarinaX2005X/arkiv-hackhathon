@@ -5,12 +5,12 @@ import { createDraftStore, type StoragePort } from '../../app/storage';
 import { createArkivRepository } from '../../data/arkiv';
 import { createOperationIntent } from '../../data/operations';
 import { COORDINATOR, KEYS, NOW, STRANGER, entityKey, readyFixture } from '../../data/__tests__/arkiv-fixture';
-import type { EventRepositoryContract } from '../../data/events/types';
+import type { EventReadOptions, EventRepositoryContract } from '../../data/events/types';
 import type { OperationIntent } from '../../data/types';
-import { audienceHash, deriveEventAvailability, EVENTS_PROTOCOL, type AttendanceState, type EventAggregate, type EventRelease, type EventRecord } from '../../domain/events';
+import { attendanceStatus, audienceHash, deriveEventAvailability, EVENTS_PROTOCOL, type AttendanceState, type EventAggregate, type EventRelease, type EventRecord } from '../../domain/events';
 import type { Actor, EntityProvenance } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
-import { readEventForActor, type EventRead } from '../events/hooks';
+import { readEventForActor, readEventForWithdrawal, type EventRead } from '../events/hooks';
 import { catalogueFilters } from '../events/presentation';
 import { joinTargetStore, prepareRegistration, prepareWithdrawal, registrationLifetime, targetForEvent, targetForWithdrawal } from './intent';
 import { matchesMyEventFilter, myEventStatus } from './MyEvents';
@@ -195,6 +195,33 @@ describe('returning attendee decisions', () => {
     expect(prepared.command.audienceHash).toBe(registration.payload.audienceHash);
     expect(prepared.command.expectedHeads).toEqual([registration.key]);
   });
+  it('reads and confirms an own withdrawal without contributor availability while new registration stays blocked', async () => {
+    const { read, target } = await fixture(); const registration = register(read);
+    const withdrawal = targetForWithdrawal(read, session, NOW)!;
+    read.event.sourceProject = null;
+    const ownReads: EventReadOptions[] = [];
+    const repository = {
+      loadEvent: async (_root: unknown, options?: EventReadOptions) => options?.includeSource === false
+        ? { ok: true, value: read.event }
+        : { ok: false, error: { code: 'network', reasons: [], retryable: true } },
+      listMyEvents: async (_actor: Actor, options?: EventReadOptions) => {
+        ownReads.push(options ?? {});
+        if (options?.includeSource !== false) throw new Error('Contributor RPC is unavailable');
+        return { ok: true, value: { items: [read.myEvent], snapshot: read.event.snapshot, diagnostics: [] } };
+      },
+    } as unknown as EventRepositoryContract;
+    expect((await readEventForActor(repository, KEYS.project, account)).ok).toBe(false);
+    const fresh = await readEventForWithdrawal(repository, KEYS.project, account);
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) return;
+    expect(ownReads[0]).toEqual({ snapshot: read.event.snapshot, signal: undefined, includeSource: false });
+    expect(prepareWithdrawal(fresh.value, withdrawal, session, NOW).ok).toBe(true);
+    expect(prepareRegistration(fresh.value, target, session, NOW).ok).toBe(false);
+    expect(deriveEventAvailability(fresh.value.event, NOW)).toBe('unverified');
+    registration.payload.decision = 'withdrawn';
+    const verified = await readEventForWithdrawal(repository, KEYS.project, account);
+    expect(verified.ok && attendanceStatus(verified.value.attendance!, verified.value.event, NOW)).toBe('withdrawn');
+  });
   it('blocks a withdrawal after the wallet, current predecessor or registration evidence changes', async () => {
     const { read } = await fixture(); const registration = register(read); const target = targetForWithdrawal(read, session, NOW)!;
     expect(prepareWithdrawal(read, target, { ...session, actor: { kind: 'wallet', address: COORDINATOR } }, NOW).ok).toBe(false);
@@ -224,5 +251,14 @@ describe('returning attendee decisions', () => {
     } }) } as unknown as EventRepositoryContract;
     const refreshed = await readEventForActor(repository, KEYS.project, account);
     expect(refreshed.ok && refreshed.value.attendance?.status).toBe('unique');
+  });
+  it('does not confuse isolated rejected discovery records with an incomplete chosen-event read', async () => {
+    const { read, event } = await fixture(); register(read);
+    const repository = { loadEvent: async () => ({ ok: true, value: event }), listMyEvents: async () => ({ ok: true, value: {
+      items: [read.myEvent], snapshot: event.snapshot, diagnostics: [{ code: 'projection_mismatch' }],
+    } }) } as unknown as EventRepositoryContract;
+    const refreshed = await readEventForActor(repository, KEYS.project, account);
+    expect(refreshed.ok && refreshed.value.attendance?.status).toBe('unique');
+    expect(refreshed.ok && myEventStatus(refreshed.value.myEvent!, NOW)).toBe('going');
   });
 });

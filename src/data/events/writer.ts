@@ -130,6 +130,7 @@ export class EventWriter {
     await preflight();
     if (!step) { step = allocateOperationStep(operation, phase, { inputHash: operation.inputHash, phase }, expectedHeads); operation.steps.push(step); }
     const batch = build(step.id); step.inputHash = hashCanonical(batch); operation.phase = phase;
+    await controller.beforeNativeAttempt(operation.id, step);
     await controller.prepareStep({ operation, step, batch });
     await preflight(); // Provider preparation can take time: gate every actual submission again.
     record = await controller.submitStep(operation.id, step.id); return this.verify(record, true);
@@ -142,6 +143,9 @@ export class EventWriter {
     return { value, receipt: verified.receipt, operation: this.connected().getOperation(operation.id) ?? operation };
   }
   async publishEvent(input: PublishEventCommand): Promise<MutationResult<EventAggregate>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.publishEventAttempt(input));
+  }
+  private async publishEventAttempt(input: PublishEventCommand): Promise<MutationResult<EventAggregate>> {
     const command = this.begin(input, 'publish_event'); const { operation } = command;
     let predecessorReleaseKey: EntityKey | null = null;
     // Validate all material fields before wallet preparation, including a provisional release envelope.
@@ -198,10 +202,16 @@ export class EventWriter {
     }, command.expectedHeads);
   }
   async replaceEvent(input: ReplaceEventCommand): Promise<MutationResult<EventRecord<EventState>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.replaceEventAttempt(input));
+  }
+  private async replaceEventAttempt(input: ReplaceEventCommand): Promise<MutationResult<EventRecord<EventState>>> {
     const command = this.begin(input, 'replace_event'); const verified = await this.replaceStateStep(command, false);
     await this.progress(command.operation, 'complete'); return this.result(this.created<EventState>(verified, 'event_state'), verified, command.operation);
   }
   async replaceAttendance(input: ReplaceAttendanceCommand): Promise<MutationResult<EventRecord<AttendanceState>>> {
+    return this.connected().withOperationAttempt(input.operation, () => this.replaceAttendanceAttempt(input));
+  }
+  private async replaceAttendanceAttempt(input: ReplaceAttendanceCommand): Promise<MutationResult<EventRecord<AttendanceState>>> {
     const command = this.begin(input, 'replace_attendance'); const account = this.account(command.operation);
     const verified = await this.step(command.operation, 'initial_state_pending', id => ({ creates: [nativeEventCreate({ ...this.base(command.operation, id),
       entityType: 'attendance_state', projectRoot: command.projectRoot, attendee: account, releaseKey: command.releaseKey,
@@ -228,7 +238,7 @@ export class EventWriter {
     const controller = this.connected(); const saved = controller.getOperation(input.id); const operation = saved ?? clone(input);
     assertArkiv(['publish_event', 'replace_event', 'replace_attendance'].includes(input.kind) && equal(operation.authority, input.authority)
       && operation.inputHash === input.inputHash, 'conflict', 'hash_mismatch', 'The original event operation does not match this recovery request.');
-    const journal = inspectReconciliationJournal(input, saved, controller.getStep);
+    const journal = inspectReconciliationJournal(input, saved, controller.getStep, controller.getAttempt(input.id));
     if (!journal.complete) return { status: 'unverified', operation, error: { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false,
       diagnostic: 'The original native operation journal is missing or incomplete. Retain the action and recover its evidence before another send.' } };
     let lastReceipt: Verified['receipt'] | null = null;

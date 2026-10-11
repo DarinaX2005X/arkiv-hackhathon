@@ -19,13 +19,30 @@ export interface StoredOperationStep {
   } | null;
 }
 
+/** A writer attempt exists before validation and never stands in for a native step. */
+export interface StoredOperationAttempt {
+  version: 1;
+  revision: number;
+  operation: OperationIntent;
+  attemptId: string;
+  state: 'preflight' | 'native-started' | 'rejected-before-native';
+  nativeStepIds: string[];
+  startedAt: number;
+  settledAt: number | null;
+}
+
 export interface OperationStore {
   get(operationId: string, stepId: string): StoredOperationStep | undefined;
   list(): StoredOperationStep[];
   put(record: StoredOperationStep): void;
   putMany(records: StoredOperationStep[]): void;
+  getAttempt(operationId: string): StoredOperationAttempt | undefined;
+  /** Compare and swap under the short journal lock; null requires an absent record. */
+  putAttemptCAS(record: StoredOperationAttempt, expectedRevision: number | null): void;
   /** Non-queuing account lock. Browser implementation uses same-origin Web Locks. */
   runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T>;
+  /** Holds one operation across validation without blocking nested journal writes. */
+  runOperationExclusive<T>(operationId: string, action: () => Promise<T>): Promise<T>;
 }
 
 export interface OperationLockProvider {

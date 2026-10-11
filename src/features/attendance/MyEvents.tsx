@@ -53,7 +53,8 @@ export function MyEvents({ repository, session }: MyEventsProps) {
     finally { if (serial === sequence.current) setPending(false); }
   }, [repository, account]);
   useEffect(() => { setResult(null); void refresh(); return () => { ++sequence.current; abort.current?.abort(); }; }, [refresh]);
-  const incomplete = result && (result.snapshot.completeness !== 'complete' || result.snapshot.freshness !== 'fresh' || result.snapshot.reasons.length > 0 || result.diagnostics.length > 0);
+  const incomplete = result && (result.snapshot.completeness !== 'complete' || result.snapshot.freshness !== 'fresh' || result.snapshot.reasons.length > 0);
+  const warnings = Boolean(result?.diagnostics.length);
   const unverified = Boolean(error || pending || incomplete);
   const rows = result?.items.map(item => ({ item, status: unverified ? 'unverified' as const : myEventStatus(item, now) })) ?? [];
   const shown = rows.filter(row => matchesMyEventFilter(row.status, filter));
@@ -68,7 +69,8 @@ export function MyEvents({ repository, session }: MyEventsProps) {
       {pending && <LoadingState title="Reading your registrations" description="Checking your own public decisions and the current event versions." />}
       {error && <ErrorState title="Your registrations could not be refreshed" description={eventError(error)} />}
       {incomplete && !pending && <Notice tone="warning" title="Some registrations could not be verified">This is a partial view. Missing records do not mean you withdrew or an event was cancelled.</Notice>}
-      {!pending && !error && result && !result.items.length && !incomplete && <EmptyState title="No current registrations found" description="Browse events and choose one to join. This list contains current public records; older registrations may have expired."
+      {warnings && !incomplete && !pending && <Notice tone="warning" title="Some public records could not be read">Some records could not be linked to a verified event. The registrations below retain their individually checked status.</Notice>}
+      {!pending && !error && result && !result.items.length && !incomplete && !warnings && <EmptyState title="No current registrations found" description="Browse events and choose one to join. This list contains current public records; older registrations may have expired."
         actions={<Link className="pf-button pf-button--primary" href={routeHref({ name: 'events' })}>Find an event</Link>} />}
       {!pending && rows.length > 0 && !shown.length && <EmptyState title="No registrations in this view" actions={<Button variant="secondary" onClick={() => setFilter('all')}>Show all registrations</Button>} />}
       <div className="pf-my-events-list">{shown.map(({ item, status }) => {

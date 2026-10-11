@@ -79,6 +79,9 @@ export function createRepositoryActionController<R extends ActionRepository = Re
   const loaded = store.load();
   if (loaded.status === 'ready') {
     record = loaded.value;
+    // A prior UI-only "not sent" classification is not a retained native proof.
+    // Recheck public rejections on return, including envelopes from older clients.
+    if (record.status === 'rejected' && record.operation?.authority.mode === 'public') record = { ...record, status: 'needs-verification' };
     state = { status: record.status, operation: record.operation,
       message: record.status === 'needs-verification' ? 'A previous request needs verification before another can be sent.' : '' };
   } else if (loaded.status === 'recovery') {
@@ -169,8 +172,10 @@ export function createRepositoryActionController<R extends ActionRepository = Re
         const observedSend = record.operation.transactionHash || record.operation.confirmedKeys.length > 0
           || record.operation.steps.some(step => step.transactionHash || step.confirmedKeys.length > 0
             || ['submitted', 'unverified', 'confirmed', 'reverted'].includes(step.status));
+        const noSendProof = value.status === 'not_sent' && (value.evidence === 'native-journal'
+          || value.evidence === 'preflight-journal' && record.operation.phase === 'prepared' && record.operation.steps.length === 0);
         if (value.status === 'not_sent' && record.operation.authority.mode === 'public'
-          && (value.evidence !== 'native-journal' || observedSend)) {
+          && (!noSendProof || observedSend)) {
           const error: RepositoryError = { code: 'unverified', reasons: [{ code: 'evidence_unavailable' }], retryable: false };
           finish('needs-verification', record.operation,
             'The original transaction journal is unavailable. Keep this saved request and restore its journal before trying again.', error);
