@@ -1,13 +1,18 @@
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hashCanonical } from '../../src/domain/canonical';
+import { canonicalJson, hashCanonical } from '../../src/domain/canonical';
+import { allocateOperationStep, MemoryOperationStore } from '../../src/data/operations';
+import type { OperationStore } from '../../src/data/operations';
+import type { StoredOperationStep } from '../../src/data/operations/types';
 import { activeSource, deriveReadiness } from '../../src/domain/readiness';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
-import type { AccountAddress, SourcePlanRef } from '../../src/domain/types';
+import type { AccountAddress, PublicEntityKey, SourcePlanRef } from '../../src/domain/types';
 import type { ExportPacket, WriteAuthority } from '../../src/data/types';
 import { ArkivReader } from '../../src/data/arkiv/reader';
 import { KEYS, NOW, entityKey, threeProposalFixture } from '../../src/data/__tests__/arkiv-fixture';
 import { verifyInFreshProcess } from './cli';
+import { confirmedActionResult } from './confirmed-action';
+import type { BudgetRecord } from './safety';
 import type { RunCli } from './cli';
 import { ACTOR_IDS } from './scenario';
 import { ROOT_ACCOUNT, freezeAction, parseOptions, validateState } from './state';
@@ -154,6 +159,96 @@ describe('frozen action and persisted state integrity', () => {
     const before = structuredClone(state);
     expect(() => validateState(state)).toThrow();
     expect(state).toEqual(before);
+  });
+});
+
+function confirmedFixture(method: 'createProject' | 'registerPublisher' | 'replaceBook' = 'replaceBook') {
+  const state = stateFixture();
+  const kind = method === 'createProject' ? 'create_project' : method === 'registerPublisher' ? 'register_publisher' : 'replace_book';
+  const action = freezeAction(state, 'confirmed-resume', 'coordinator', method, kind, authority(),
+    { lifetimeSeconds: 3600, expectedHeads: method === 'replaceBook' ? [entityKey(400)] : [] }, COMMIT, NOW);
+  const operation = structuredClone(action.command.operation);
+  const root = method !== 'replaceBook';
+  const phases = root ? ['root_pending', 'initial_state_pending'] as const : ['book_pending'] as const;
+  const budget: BudgetRecord[] = [];
+  const records = phases.map((phase, index): StoredOperationStep => {
+    const type = phase === 'root_pending' ? method === 'createProject' ? 'project_root' : 'publisher_root' : 'book_state';
+    const batch = { creates: [{ payloadJson: canonicalJson({ entityType: type }), attributes: {}, lifetimeSeconds: 3600, salt: '1' as const }],
+      deletes: method === 'replaceBook' ? [entityKey(400)] : [] };
+    const step = allocateOperationStep(operation, phase, {}, batch.deletes);
+    const transactionHash = entityKey(800 + index), key = entityKey(900 + index), blockNumber = `${100 + index}` as `${bigint}`;
+    step.inputHash = hashCanonical(batch); step.status = 'confirmed'; step.confirmedKeys = [key]; step.transactionHash = transactionHash;
+    operation.steps.push(step); operation.confirmedKeys.push(key); operation.transactionHash = transactionHash;
+    const request = { from: ROOT_ACCOUNT, to: '0x4400000000000000000000000000000000000044' as const,
+      data: '0x1234' as const, value: '0x0' as const, chainId: '0x7614d1' as const,
+      gas: '0x186a0' as const, maxFeePerGas: '0x77359400' as const, maxPriorityFeePerGas: '0x1' as const };
+    // Synthetic already-authenticated ledger outcomes; this fixture performs no signing or RPC.
+    budget.push({ id: `${operation.id}:${step.id}`, kind: 'native', status: 'confirmed', maximumCostWei: '200000000000000',
+      signedTransaction: '0x1234', transactionHash,
+      plan: { chainId: 7738577, from: ROOT_ACCOUNT.toLowerCase(), to: request.to, data: request.data, value: '0', nonce: index,
+        gas: '100000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' },
+      receipt: { transactionHash, blockHash: entityKey(700 + index), blockNumber, transactionIndex: '0', status: 'success',
+        gasUsed: '21000', effectiveGasPrice: '1000000000', actualCostWei: '21000000000000' } });
+    return { version: 1, revision: 5, operation, step, batch, prepared: { batch, account: ROOT_ACCOUNT, chainId: 7738577, request,
+      transactionOptions: { gas: '100000', maxFeePerGas: '2000000000', maxPriorityFeePerGas: '1' },
+      estimatedGas: '100000', preparedAtBlock: '99', estimatedCostWei: null, estimatedMaximumCostWei: null, estimatePolicy: 'estimate-only' },
+      admission: { request, at: NOW }, submissionHash: transactionHash,
+      receipt: { operationId: operation.id, transactionHash, entityKeys: [key], consumedKeys: batch.deletes, blockNumber, confirmedAt: NOW }, error: null };
+  });
+  operation.phase = 'complete'; action.confirmed = true; action.confirmedKeys = operation.confirmedKeys.map(key => key as PublicEntityKey);
+  const store = new MemoryOperationStore(); store.putMany(records);
+  store.putAttemptCAS({ version: 1, revision: 1, operation: action.command.operation, attemptId: 'confirmed-resume-attempt',
+    state: 'native-started', nativeStepIds: operation.steps.map(step => step.id), startedAt: NOW, settledAt: null }, null);
+  return { action, store, budget, records, operation };
+}
+
+describe('confirmed original action resume', () => {
+  it('reuses only ordered confirmed keys for completed material/decision actions', () => {
+    const f = confirmedFixture(); const before = structuredClone(f.action);
+    const result = confirmedActionResult(f.action, f.store, f.budget);
+    expect(result).toEqual({ operation: { confirmedKeys: f.action.confirmedKeys } });
+    result!.operation.confirmedKeys.push(entityKey(999));
+    expect(f.action).toEqual(before);
+  });
+  it.each(['createProject', 'registerPublisher'] as const)('reconstructs only the authenticated root key for %s', method => {
+    const f = confirmedFixture(method);
+    expect(confirmedActionResult(f.action, f.store, f.budget)).toEqual({ operation: { confirmedKeys: f.action.confirmedKeys },
+      value: { root: { key: f.action.confirmedKeys[0] } } });
+  });
+  it('leaves unconfirmed preflight failures, publication and unknown methods on their normal path', () => {
+    const f = confirmedFixture(); f.action.confirmed = false;
+    expect(confirmedActionResult(f.action, new MemoryOperationStore(), [])).toBeUndefined();
+    f.action.confirmed = true; f.action.method = 'publishPlan';
+    expect(confirmedActionResult(f.action, f.store, f.budget)).toBeUndefined();
+    (f.action as { method: string }).method = 'unknown';
+    expect(confirmedActionResult(f.action, f.store, f.budget)).toBeUndefined();
+  });
+  it('stops a resumed multi-step action when an original step or attempt is missing', () => {
+    const f = confirmedFixture('registerPublisher');
+    const incomplete = new MemoryOperationStore(); incomplete.put(f.records[1]!);
+    expect(() => confirmedActionResult(f.action, incomplete, f.budget)).toThrow('CONFIRMED_ACTION_JOURNAL_MISMATCH');
+    const missingStep: OperationStore = { ...f.store,
+      list: () => f.store.list().slice(1), get: (operationId, stepId) => stepId === f.records[0]!.step.id ? undefined : f.store.get(operationId, stepId),
+      getAttempt: operationId => f.store.getAttempt(operationId),
+    } as OperationStore;
+    expect(() => confirmedActionResult(f.action, missingStep, f.budget)).toThrow('CONFIRMED_ACTION_JOURNAL_MISMATCH');
+  });
+  it.each<[string, (f: ReturnType<typeof confirmedFixture>) => void]>([
+    ['frozen input', f => { f.action.command.lifetimeSeconds++; }],
+    ['frozen authority', f => { f.action.command.operation.authority = { ...authority(), actor: { kind: 'wallet', address: address(999) } }; }],
+    ['ordered keys', f => { f.action.confirmedKeys.reverse(); }],
+    ['canonical status', f => { f.budget[0]!.status = 'admitted'; f.budget[0]!.receipt = null; }],
+    ['receipt block', f => { f.budget[0]!.receipt!.blockNumber = '999'; }],
+    ['receipt hash', f => { f.budget[0]!.receipt!.transactionHash = entityKey(999); }],
+    ['frozen calldata', f => { f.budget[0]!.plan.data = '0xabcd'; }],
+    ['fee cap', f => { f.budget[0]!.plan.maxFeePerGas = '1'; }],
+    ['missing budget record', f => { f.budget.splice(0, 1); }],
+    ['submission hash', f => { f.records[0]!.submissionHash = entityKey(999); f.store.put(f.records[0]!); }],
+    ['receipt keys', f => { f.records[0]!.receipt!.entityKeys = [entityKey(999)]; f.store.put(f.records[0]!); }],
+    ['consumed keys', f => { f.records[0]!.receipt!.consumedKeys = [entityKey(999)]; f.store.put(f.records[0]!); }],
+  ])('refuses to skip when the %s binding is lost', (_name, mutate) => {
+    const f = confirmedFixture('registerPublisher'); mutate(f);
+    expect(() => confirmedActionResult(f.action, f.store, f.budget)).toThrow('CONFIRMED_ACTION_JOURNAL_MISMATCH');
   });
 });
 

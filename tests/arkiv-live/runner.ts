@@ -27,6 +27,7 @@ import { ACTOR_IDS, BASE_ACTORS, CHILD_FUNDING_WEI, LIFETIME_SECONDS, REVISION_N
   buildProofProposal, materialBook, proofConsentDeadline, publicRecipe, publisherTemplate } from './scenario';
 import type { ProofActor, RevisionName } from './scenario';
 import { verifyInFreshProcess } from './cli';
+import { confirmedActionResult } from './confirmed-action';
 import { BudgetLedger, LIVE_CHAIN_ID, LIVE_LIMIT_WEI, MAX_FEE_PER_GAS, MAX_GAS, PRIOR_SPEND_WEI,
   LiveSafetyError, atomicWriteJson, createBudgetDocument, createFileStorage, createGuardedAccountProvider,
   readJson, submitFunding, withRunLock } from './safety';
@@ -153,6 +154,7 @@ class ProofRun {
   private gateways: NativeWalletGateway[] = [];
   private forwarded = 0;
   private boundary = false;
+  private reconciled = false;
   private estimates: { account: string; gas: string; maximumCostWei: string | null }[] = [];
   constructor(readonly state: ProofState, readonly options: RunnerOptions, readonly commit: string, readonly read: ReadRpc,
     private readonly rawRpc: ReadRpc, private readonly accessKeyFile?: string) {
@@ -213,9 +215,11 @@ class ProofRun {
     this.repositories.set(actor, repo); return repo;
   }
   async reconcile() {
+    this.reconciled = false;
     assertJournalContinuity(this.state.actions, this.store, this.ledger.snapshot().records);
     await this.ledger.reconcileAll(this.read);
     hydrateOriginalHashes(this.store, this.ledger.snapshot().records);
+    this.reconciled = true;
   }
   private async action(id: string, actor: SignerName, method: MutationMethod, kind: OperationKind,
     build: () => Promise<Record<string, unknown>>): Promise<unknown> {
@@ -225,7 +229,13 @@ class ProofRun {
       frozen = freezeAction(this.state, id, actor, method, kind, this.authority(actor), await build(), this.commit, Date.now());
       this.save();
     }
-    ensure(frozen.actor === actor && frozen.method === method, 'The original action binding differs.');
+    ensure(frozen.actor === actor && frozen.method === method && frozen.command.operation.kind === kind
+      && canonicalJson(frozen.command.operation.authority) === canonicalJson(this.authority(actor)), 'The original action binding differs.');
+    if (frozen.confirmed) {
+      ensure(this.reconciled, 'The cumulative ledger must be reconciled before resuming a completed action.');
+      const completed = confirmedActionResult(frozen, this.store, this.ledger.snapshot().records);
+      if (completed) return completed;
+    }
     const call = this.repo(actor)[method] as unknown as (command: FrozenAction['command']) => Promise<Result<unknown>>;
     const result = await call.call(this.repo(actor), structuredClone(frozen.command));
     await this.reconcile();
