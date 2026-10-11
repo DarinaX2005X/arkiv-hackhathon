@@ -1,0 +1,17 @@
+# Guarded admission recovery
+
+The application saves send admission before the proof provider starts its guarded nonce/balance reads. A read failure there can leave an application admission without a budget reservation, signed bytes, or transaction hash. Absence of a budget record alone does not prove the transaction was unsent.
+
+`guarded-preflight.ts` now records positive evidence for new attempts in the private `guarded-preflight.json` journal. The provider persists entry before its guard, counts every key-load and raw-forward attempt, and records `not_sent` only after a failure with zero of each and a healthy ledger containing no matching reservation. Any persistence ambiguity retains the unresolved admission. Only the exact durable witness plus the provider's runtime error changes the controller result to `not_sent`. Restart repair changes only the failed controller checkpoint; the normal controller then repeats current preflight with the original operation, step, batch and fee caps. This does not enable retry for a legacy gap without a witness.
+
+`recover-admission.ts` is a narrow operator command for the reviewed legacy guard at commit `1f7fd49e95453bf33bbf1f379d48efbd55d37547`. It requires the unchanged original action commit, exact reviewed source digests, preserved journals, dedicated actor, original operation/step/admission binding, clean current source, explicit broadcast flag and a one-forward limit. The provenance relied upon is reservation persistence before key access, poisoned-ledger handling of persistence failures, signed-byte persistence before forwarding, exclusive actor access, and no deletion of reservations. Do not use this recovery if storage rollback, journal replacement, external actor sends, or unknown execution provenance is suspected.
+
+```powershell
+npx tsx tests/arkiv-live/recover-admission.ts --recover-admission --action <original-action-id> --step-id <original-step-id> --expected-nonce <original-frontier> --original-commit 1f7fd49e95453bf33bbf1f379d48efbd55d37547 --reviewed-commit <clean-reviewed-HEAD> --broadcast --max-transactions 1
+```
+
+Under all run/account locks, recovery revalidates canonical ledger receipts, contiguous prior actor nonces, the prepared block and its historical nonce, latest and pending nonce, remaining global budget, balance and an unsigned estimate of the exact admission. It reserves the one explicit nonce under the original step, persists that reservation before loading the actor key, then persists the exact signed candidate/hash before any candidate lookup or forwarding. A canonical mined candidate or authenticated pending candidate is reconciled without a send. An absent candidate must pass a second set of frontier, block, balance and estimate checks before the sole possible raw forward. Gas, fees, calldata, identity and nonce are never changed.
+
+An unsigned recovery reservation can resume only from its same frozen plan and provenance. A signed or submitted candidate is reconciliation-only on a later invocation. Preserve all journals after every failure; never choose a new nonce or clear admission. Resume the original proof phase normally after recovery so its existing hydration, domain readback and canonical receipt checks complete the application journal. The recovery command does not rewrite the application operation or mark the action complete itself.
+
+All automated checks use synthetic in-memory RPC and ephemeral test accounts. The operator alone runs this command against the live proof; UI verification remains user-owned.

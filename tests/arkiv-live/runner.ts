@@ -28,6 +28,8 @@ import { ACTOR_IDS, BASE_ACTORS, CHILD_FUNDING_WEI, LIFETIME_SECONDS, REVISION_N
 import type { ProofActor, RevisionName } from './scenario';
 import { verifyInFreshProcess } from './cli';
 import { confirmedActionResult } from './confirmed-action';
+import { applyGuardedPreflightEvidence, createPreflightWitnessDocument, GuardedPreflightWitnesses, withGuardedPreflightEvidence } from './guarded-preflight';
+import type { PreflightWitnessDocument } from './guarded-preflight';
 import { BudgetLedger, LIVE_CHAIN_ID, LIVE_LIMIT_WEI, MAX_FEE_PER_GAS, MAX_GAS, PRIOR_SPEND_WEI,
   LiveSafetyError, atomicWriteJson, createBudgetDocument, createFileStorage, createGuardedAccountProvider,
   readJson, submitFunding, withRunLock } from './safety';
@@ -62,14 +64,15 @@ export function expectedProofLineage(state: Pick<ProofState, 'projectRoot' | 'pr
 }
 
 /** Missing application journals are never interpreted as an unsent operation. */
-export function assertJournalContinuity(actions: ProofState['actions'], store: OperationStore, records: BudgetRecord[]): void {
+export function assertJournalContinuity(actions: ProofState['actions'], store: OperationStore, records: BudgetRecord[], witnesses?: GuardedPreflightWitnesses): void {
   const steps = store.list();
   for (const record of records.filter(item => item.kind === 'native')) {
     ensure(steps.some(step => `${step.operation.id}:${step.step.id}` === record.id && step.admission),
       'A reserved or signed transaction is missing its original application journal. Preserve all files for recovery.');
   }
   for (const step of steps.filter(item => item.admission)) {
-    ensure(records.some(record => record.kind === 'native' && record.id === `${step.operation.id}:${step.step.id}`),
+    ensure(records.some(record => record.kind === 'native' && record.id === `${step.operation.id}:${step.step.id}`)
+      || step.step.status === 'failed-before-send' && step.error?.kind === 'not_sent' && witnesses?.matches(step),
       'An admitted application operation is missing its cumulative budget record. Preserve all files for recovery.');
   }
   for (const action of Object.values(actions).filter(item => item.confirmed || item.confirmedKeys.length)) {
@@ -150,6 +153,7 @@ class PhaseBoundary extends Error {}
 class ProofRun {
   readonly ledger: BudgetLedger;
   readonly store: BrowserOperationStore;
+  readonly preflightWitnesses: GuardedPreflightWitnesses;
   private repositories = new Map<SignerName, ArkivRepository>();
   private gateways: NativeWalletGateway[] = [];
   private forwarded = 0;
@@ -165,6 +169,10 @@ class ProofRun {
     this.ledger = new BudgetLedger(document, next => atomicWriteJson(BUDGET, next));
     this.store = new BrowserOperationStore(createFileStorage(resolve(LOCAL, 'operations.json')),
       { key: 'partfolk-product-proof-v1', locks: new MemoryOperationStore() });
+    const witnessPath = resolve(LOCAL, 'guarded-preflight.json');
+    const witnesses = readJson<PreflightWitnessDocument>(witnessPath) ?? createPreflightWitnessDocument(state.runId);
+    ensure(witnesses.runId === state.runId, 'The provider preflight witnesses belong to another run.');
+    this.preflightWitnesses = new GuardedPreflightWitnesses(witnesses, next => atomicWriteJson(witnessPath, next));
   }
   save() { atomicWriteJson(STATE, validateState(this.state)); }
   private address(actor: SignerName): AccountAddress { return actor === 'coordinator' ? ROOT_ACCOUNT : this.state.actors[actor]; }
@@ -187,13 +195,14 @@ class ProofRun {
     const existing = this.repositories.get(actor); if (existing) return existing;
     const provider = createGuardedAccountProvider({ address: this.address(actor), read: this.read, sendRaw: this.sendRaw,
       loadAccount: this.loadAccount(actor), ledger: this.ledger, broadcast: this.options.broadcast,
+      preflight: this.preflightWitnesses.hooks(this.store, this.commit),
       resolveAdmission: request => {
         const matches = this.store.list().filter(item => item.admission && !['confirmed', 'reverted'].includes(item.step.status)
           && canonicalJson(item.admission.request) === canonicalJson(request));
         ensure(matches.length === 1, 'Exactly one durable application admission must authorize this transaction.');
         return { operationId: matches[0]!.operation.id, stepId: matches[0]!.step.id, request };
       } });
-    const base = createWalletGateway({ provider, publicRpc: { request: this.read } });
+    const base = withGuardedPreflightEvidence(createWalletGateway({ provider, publicRpc: { request: this.read } }), this.store, this.preflightWitnesses);
     const gateway: NativeWalletGateway = {
       prepare: async (batch, account, options) => {
         const prepared = await base.prepare(batch, account, options);
@@ -216,14 +225,15 @@ class ProofRun {
   }
   async reconcile() {
     this.reconciled = false;
-    assertJournalContinuity(this.state.actions, this.store, this.ledger.snapshot().records);
+    applyGuardedPreflightEvidence(this.store, this.ledger.snapshot().records, this.preflightWitnesses);
+    assertJournalContinuity(this.state.actions, this.store, this.ledger.snapshot().records, this.preflightWitnesses);
     await this.ledger.reconcileAll(this.read);
     hydrateOriginalHashes(this.store, this.ledger.snapshot().records);
     this.reconciled = true;
   }
   private async action(id: string, actor: SignerName, method: MutationMethod, kind: OperationKind,
     build: () => Promise<Record<string, unknown>>): Promise<unknown> {
-    assertJournalContinuity(this.state.actions, this.store, this.ledger.snapshot().records);
+    assertJournalContinuity(this.state.actions, this.store, this.ledger.snapshot().records, this.preflightWitnesses);
     let frozen = this.state.actions[id];
     if (!frozen) {
       frozen = freezeAction(this.state, id, actor, method, kind, this.authority(actor), await build(), this.commit, Date.now());

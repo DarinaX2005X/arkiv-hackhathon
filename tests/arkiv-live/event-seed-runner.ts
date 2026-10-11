@@ -32,6 +32,8 @@ import { atomicWriteJson, BudgetLedger, createFileStorage, createGuardedAccountP
   LiveSafetyError, PRIOR_SPEND_WEI, readJson, withRunLock } from './safety';
 import type { BudgetDocument, ReadRpc } from './safety';
 import type { BudgetRecord } from './safety';
+import { applyGuardedPreflightEvidence, createPreflightWitnessDocument, GuardedPreflightWitnesses, withGuardedPreflightEvidence } from './guarded-preflight';
+import type { PreflightWitnessDocument } from './guarded-preflight';
 import { ROOT_ACCOUNT, validateState } from './state';
 import type { ProofState, SignerName } from './state';
 import { ACTOR_IDS } from './scenario';
@@ -325,15 +327,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       && latestBudget.priorSpendWei === PRIOR_SPEND_WEI, 'The approved cumulative budget changed while acquiring locks.');
     const ledger = new BudgetLedger(latestBudget, next => atomicWriteJson(resolve(LOCAL, 'budget.json'), next));
     const store = new BrowserOperationStore(createFileStorage(resolve(LOCAL, 'operations.json')), { key: 'partfolk-product-proof-v1', locks: new MemoryOperationStore() });
+    const witnessPath = resolve(LOCAL, 'guarded-preflight.json');
+    const witnessDocument = readJson<PreflightWitnessDocument>(witnessPath) ?? createPreflightWitnessDocument(proof.runId);
+    ensure(witnessDocument.runId === proof.runId, 'The provider preflight witnesses belong to another proof.');
+    const witnesses = new GuardedPreflightWitnesses(witnessDocument, next => atomicWriteJson(witnessPath, next));
     let forwarded = 0, boundary = false; const clients = new Map<SignerName, SeedClient>(), gateways: NativeWalletGateway[] = [];
     const runtime: SeedRuntime = {
       now: Date.now, save: next => atomicWriteJson(SEED_STATE, next),
       confirmed: action => seedActionConfirmed(action, store, ledger.snapshot().records),
-      async reconcile() { assertJournalContinuity(proof.actions, store, ledger.snapshot().records); await ledger.reconcileAll(read); hydrateOriginalHashes(store, ledger.snapshot().records); },
+      async reconcile() {
+        applyGuardedPreflightEvidence(store, ledger.snapshot().records, witnesses);
+        assertJournalContinuity(proof.actions, store, ledger.snapshot().records, witnesses);
+        await ledger.reconcileAll(read); hydrateOriginalHashes(store, ledger.snapshot().records);
+      },
       client(actor) {
         const existing = clients.get(actor); if (existing) return existing;
         const address = accountFor(state!, actor);
         const provider = createGuardedAccountProvider({ address, read, ledger, broadcast: options.broadcast,
+          preflight: witnesses.hooks(store, commit),
           sendRaw: async transaction => { ensure(options.broadcast && forwarded < options.maxTransactions, 'The explicit invocation ceiling was reached.'); forwarded++; return raw({ method: 'eth_sendRawTransaction', params: [transaction] }); },
           loadAccount: async () => {
             ensure(options.broadcast, 'Signer access requires explicit broadcast.');
@@ -348,7 +359,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
             const matches = store.list().filter(item => item.admission && !['confirmed', 'reverted'].includes(item.step.status) && canonicalJson(item.admission.request) === canonicalJson(request));
             ensure(matches.length === 1, 'Exactly one saved admission must authorize the seed send.'); return { operationId: matches[0]!.operation.id, stepId: matches[0]!.step.id, request };
           } });
-        const base = createWalletGateway({ provider, publicRpc: { request: read } });
+        const base = withGuardedPreflightEvidence(createWalletGateway({ provider, publicRpc: { request: read } }), store, witnesses);
         const gateway = boundSeedGateway(base, { broadcast: options.broadcast, maxTransactions: options.maxTransactions, forwarded: () => forwarded,
           seedRecords: () => ledger.snapshot().records.filter(item => item.id.startsWith(`pfe:${SEED_RUN_ID}:`)).length, onBoundary: () => { boundary = true; } });
         gateways.push(gateway); const controller = withCappedPreparation(createOperationController({ store, gateway }), store, base);

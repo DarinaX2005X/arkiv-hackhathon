@@ -36,6 +36,7 @@ const bytes = (value: unknown): Hex => typeof value === 'string' && /^0x(?:[\da-
 const hash = (value: unknown): Hex => typeof value === 'string' && /^0x[\da-fA-F]{64}$/.test(value)
   ? value.toLowerCase() as Hex : fail('INVALID_TRANSACTION_HASH');
 const hex = (value: bigint): Hex => `0x${value.toString(16)}`;
+export const nativeRequestHash = (request: NativeTransactionRequest): Hex => `0x${createHash('sha256').update(canonicalJson(request)).digest('hex')}`;
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, unknown> : fail('INVALID_RPC_OBJECT');
 
@@ -126,6 +127,7 @@ export interface BudgetRecord {
   id: string; kind: 'native' | 'funding'; plan: FrozenPlan; maximumCostWei: string;
   status: 'reserved' | 'admitted' | 'submitted' | 'confirmed' | 'reverted';
   signedTransaction: Hex | null; transactionHash: Hex | null; receipt: BudgetReceipt | null;
+  admissionRecovery?: { version: 1; preparedAtBlock: string; preparedBlockHash: Hex; originalCommit: string; requestHash: Hex };
 }
 export interface BudgetDocument {
   version: 1; chainId: number; rootAccount: string; limitWei: string; priorSpendWei: string; records: BudgetRecord[];
@@ -154,6 +156,11 @@ function validateDocument(document: BudgetDocument): void {
     if (typeof record.id !== 'string' || !record.id || ids.has(record.id) || !['native', 'funding'].includes(record.kind)
       || !['reserved', 'admitted', 'submitted', 'confirmed', 'reverted'].includes(record.status)) fail('INVALID_BUDGET_RECORD');
     ids.add(record.id); validatePlan(record.plan);
+    if (record.admissionRecovery) {
+      const recovery = record.admissionRecovery;
+      if (record.kind !== 'native' || recovery.version !== 1 || !/^[\da-f]{40}$/.test(recovery.originalCommit)) fail('INVALID_ADMISSION_RECOVERY');
+      decimal(recovery.preparedAtBlock); hash(recovery.preparedBlockHash); hash(recovery.requestHash);
+    }
     if (maximumCost(record.plan) !== decimal(record.maximumCostWei)) fail('INVALID_RESERVATION');
     if (record.kind === 'native' && (address(record.plan.to) !== address(ARKIV_NATIVE_ADDRESS) || decimal(record.plan.value) !== 0n || bytes(record.plan.data) === '0x')) fail('INVALID_NATIVE_PLAN');
     if (record.kind === 'funding' && (address(record.plan.from) !== address(document.rootAccount) || bytes(record.plan.data) !== '0x' || decimal(record.plan.value) <= 0n)) fail('INVALID_FUNDING_PLAN');
@@ -227,6 +234,10 @@ export interface RecoverReservedOptions {
 }
 export interface RecoveryResult {
   transactionHash: Hex; status: 'confirmed' | 'reverted' | 'pending' | 'submitted' | 'unresolved'; forwarded: boolean;
+}
+export interface RecoverAdmissionOptions {
+  id: string; expectedNonce: number; preparedAtBlock: string; originalCommit: string; address: string; request: NativeTransactionRequest;
+  read: ReadRpc; sendRaw: SendRaw; loadAccount: LoadAccount; broadcast?: boolean;
 }
 
 /** Private signed bytes stay in this local ledger; publicSummary intentionally excludes them and calldata. */
@@ -431,12 +442,105 @@ export class BudgetLedger {
       return terminal() ? { ...terminal()!, forwarded: true } : result('submitted', true);
     });
   }
+  /** Explicit legacy gap recovery; the operator pins one candidate nonce, never a replacement. */
+  async recoverAdmission(options: RecoverAdmissionOptions): Promise<RecoveryResult> {
+    return this.exclusive(async () => {
+      if (options.broadcast !== true) fail('BROADCAST_NOT_ENABLED');
+      if (!options.id || !Number.isSafeInteger(options.expectedNonce) || options.expectedNonce < 1
+        || !/^[\da-f]{40}$/.test(options.originalCommit)) fail('INVALID_ADMISSION_RECOVERY');
+      const preparedBlock = decimal(options.preparedAtBlock);
+      const partial = frozenRequest(clone(options.request), options.address, 'native', this.document.chainId);
+      if (partial.from === address(this.document.rootAccount)) fail('DEDICATED_ACTOR_REQUIRED');
+      const plan: FrozenPlan = { ...partial, nonce: options.expectedNonce }, requestHash = nativeRequestHash(options.request);
+      let record = this.document.records.find(item => item.id === options.id);
+      if (record && (!record.admissionRecovery || !same(record.plan, plan)
+        || record.admissionRecovery.preparedAtBlock !== options.preparedAtBlock
+        || record.admissionRecovery.originalCommit !== options.originalCommit
+        || record.admissionRecovery.requestHash !== requestHash)) fail('ADMISSION_RECOVERY_BINDING_MISMATCH');
+      await this.reconcile(options.read);
+      if (this.document.records.some(item => item.id !== options.id && !['confirmed', 'reverted'].includes(item.status))) fail('UNRESOLVED_TRANSACTION');
+      const result = (status: RecoveryResult['status'], forwarded = false): RecoveryResult => ({ transactionHash: record!.transactionHash!, status, forwarded });
+      const known = async (): Promise<boolean> => {
+        const [receipt, transaction] = await Promise.all([
+          options.read({ method: 'eth_getTransactionReceipt', params: [record!.transactionHash] }),
+          options.read({ method: 'eth_getTransactionByHash', params: [record!.transactionHash] }),
+        ]);
+        if (receipt !== null && transaction === null) fail('RECOVERY_INCOMPLETE_RPC_EVIDENCE');
+        if (transaction !== null) authenticateRpcTransaction(transaction, record!, receipt === null ? undefined : object(receipt));
+        return transaction !== null;
+      };
+      // Any durable signature may already have been forwarded. Never re-sign or resend it.
+      if (record?.transactionHash) {
+        if (record.status === 'confirmed' || record.status === 'reverted') return result(record.status);
+        return result(await known() ? 'pending' : 'unresolved');
+      }
+      const history = this.document.records.filter(item => item.plan.from === plan.from && item.id !== options.id)
+        .sort((left, right) => left.plan.nonce - right.plan.nonce);
+      if (history.length !== options.expectedNonce || history.some((item, index) => item.plan.nonce !== index || !item.receipt
+        || !['confirmed', 'reverted'].includes(item.status) || decimal(item.receipt.blockNumber) > preparedBlock)) fail('RECOVERY_NONCE_HISTORY_MISMATCH');
+      const historicalBlock = async () => {
+        const block = object(await options.read({ method: 'eth_getBlockByNumber', params: [hex(preparedBlock), false] }));
+        if (quantity(block.number) !== preparedBlock) fail('RECOVERY_PREPARED_BLOCK_MISMATCH');
+        return hash(block.hash);
+      };
+      const preparedBlockHash = await historicalBlock();
+      if (record && record.admissionRecovery!.preparedBlockHash !== preparedBlockHash) fail('RECOVERY_PREPARED_BLOCK_MISMATCH');
+      if (quantity(await options.read({ method: 'eth_getTransactionCount', params: [plan.from, hex(preparedBlock)] })) !== BigInt(plan.nonce)) fail('RECOVERY_HISTORICAL_NONCE_MISMATCH');
+      const maximum = maximumCost(plan);
+      const checkCurrent = async () => {
+        const [latest, pending, balance] = await Promise.all([
+          options.read({ method: 'eth_getTransactionCount', params: [plan.from, 'latest'] }),
+          options.read({ method: 'eth_getTransactionCount', params: [plan.from, 'pending'] }),
+          options.read({ method: 'eth_getBalance', params: [plan.from, 'pending'] }),
+        ]);
+        if (quantity(latest) !== BigInt(plan.nonce) || quantity(pending) !== BigInt(plan.nonce)) fail('RECOVERY_NONCE_MISMATCH');
+        if (quantity(balance) < maximum) fail('INSUFFICIENT_TEST_GLM');
+        const { chainId: _chainId, ...request } = options.request;
+        const estimate = quantity(await options.read({ method: 'eth_estimateGas', params: [clone(request)] }));
+        if (estimate <= 0n || estimate > decimal(plan.gas)) fail('RECOVERY_ESTIMATE_EXCEEDS_FROZEN_GAS');
+        if (await historicalBlock() !== preparedBlockHash) fail('RECOVERY_PREPARED_BLOCK_MISMATCH');
+      };
+      await checkCurrent();
+      if (!record) {
+        if (charged(this.document) + maximum > decimal(this.document.limitWei)) fail('APPROVED_BUDGET_EXCEEDED');
+        record = { id: options.id, kind: 'native', plan, maximumCostWei: maximum.toString(), status: 'reserved',
+          signedTransaction: null, transactionHash: null, receipt: null,
+          admissionRecovery: { version: 1, preparedAtBlock: options.preparedAtBlock, preparedBlockHash, originalCommit: options.originalCommit, requestHash } };
+        this.document.records.push(record); await this.save();
+      }
+      const account = await options.loadAccount();
+      if (address(account.address) !== plan.from) fail('SIGNER_ADDRESS_MISMATCH');
+      const raw = bytes(await account.signTransaction({ chainId: plan.chainId, to: plan.to as Hex, data: plan.data,
+        value: decimal(plan.value), nonce: plan.nonce, gas: decimal(plan.gas), maxFeePerGas: decimal(plan.maxFeePerGas),
+        maxPriorityFeePerGas: decimal(plan.maxPriorityFeePerGas), type: 'eip1559' }));
+      await authenticateRaw(raw, plan);
+      record.signedTransaction = raw; record.transactionHash = keccak256(raw); record.status = 'admitted'; await this.save();
+      if (await known()) {
+        await this.reconcile(options.read);
+        const status = record.status as BudgetRecord['status'];
+        return result(status === 'confirmed' || status === 'reverted' ? status : 'pending');
+      }
+      await checkCurrent();
+      const returned = await options.sendRaw(raw);
+      if (hash(returned) !== record.transactionHash) fail('RPC_RETURNED_DIFFERENT_HASH');
+      record.status = 'submitted'; await this.save(); await this.reconcile(options.read);
+      const status = record.status as BudgetRecord['status'];
+      return result(status === 'confirmed' || status === 'reverted' ? status : 'submitted', true);
+    });
+  }
 }
 
 export interface Admission { operationId: string; stepId: string; request: NativeTransactionRequest }
+export interface GuardedPreflightHooks {
+  begin(admission: Admission): string | Promise<string>;
+  notSent(attemptId: string, admission: Admission, reasonCode: string): void | Promise<void>;
+}
+export class GuardedPreflightNotSent extends LiveSafetyError {
+  constructor(readonly attemptId: string) { super('GUARDED_PREFLIGHT_NOT_SENT'); }
+}
 export function createGuardedAccountProvider(options: {
   address: string; read: ReadRpc; sendRaw: SendRaw; loadAccount: LoadAccount; ledger: BudgetLedger;
-  resolveAdmission(request: NativeTransactionRequest): Admission | Promise<Admission>; broadcast?: boolean;
+  resolveAdmission(request: NativeTransactionRequest): Admission | Promise<Admission>; broadcast?: boolean; preflight?: GuardedPreflightHooks;
 }): InjectedWalletProvider {
   const expectedAddress = address(options.address);
   return {
@@ -450,8 +554,24 @@ export function createGuardedAccountProvider(options: {
       frozenRequest(request, expectedAddress, 'native', LIVE_CHAIN_ID);
       const admitted = await options.resolveAdmission(clone(request));
       if (!admitted.operationId || !admitted.stepId || !same(admitted.request, request)) return fail('ADMISSION_REQUEST_MISMATCH');
-      return options.ledger.submit({ id: `${admitted.operationId}:${admitted.stepId}`, kind: 'native', address: expectedAddress,
-        request, read: options.read, sendRaw: options.sendRaw, loadAccount: options.loadAccount, broadcast: true });
+      const id = `${admitted.operationId}:${admitted.stepId}`;
+      const attemptId = await options.preflight?.begin(admitted);
+      let keyLoads = 0, forwards = 0;
+      try {
+        return await options.ledger.submit({ id, kind: 'native', address: expectedAddress, request, read: options.read,
+          sendRaw: async raw => { forwards++; return options.sendRaw(raw); },
+          loadAccount: async () => { keyLoads++; return options.loadAccount(); }, broadcast: true });
+      } catch (error) {
+        let noRecord = false;
+        // A poisoned/busy ledger cannot establish a pre-reservation failure.
+        try { noRecord = !options.ledger.snapshot().records.some(record => record.id === id); } catch { /* Ambiguous: retain admission. */ }
+        if (attemptId && keyLoads === 0 && forwards === 0 && noRecord) {
+          const reason = error instanceof LiveSafetyError ? error.code : 'GUARDED_PREFLIGHT_READ_FAILED';
+          await options.preflight!.notSent(attemptId, admitted, reason);
+          throw new GuardedPreflightNotSent(attemptId);
+        }
+        throw error;
+      }
     },
   };
 }
