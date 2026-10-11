@@ -9,6 +9,7 @@ import { TIRAMISU_CHAIN_ID } from '../domain/types';
 import { ArkivReader } from '../data/arkiv/reader';
 import { publicKey, sameIdentity } from '../data/arkiv/envelope';
 import { repositoryError, assertArkiv } from '../data/arkiv/errors';
+import { ACCESS_KEY_FILE_ENV, createOperatorRpc } from './arkiv-rpc';
 
 const json = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => typeof item === 'bigint' ? item.toString() : item, 2);
 const CAPABILITIES = {
@@ -48,9 +49,12 @@ export async function inspectCapability(reader: ArkivReader, name: string): Prom
 
 export async function runCli(args: string[], output: (text: string) => void = console.log): Promise<number> {
   const usage = 'Usage: node node_modules/tsx/dist/cli.mjs src/cli/verify.ts <project-root> [--json] [--block <number>] [--export <file>]\n       node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability bootstrap|atomic [--json]\n--block verifies a dated historical snapshot, not current readiness.';
-  if (!args.length || args.includes('--help')) { output(usage); return args.length ? 0 : 2; }
-  const reader = new ArkivReader();
+  if (!args.length || args.includes('--help')) {
+    output(`${usage}\nOptional: ARKIV_ACCESS_KEY_FILE names a local access-key file; never put the key value in arguments or environment variables.`);
+    return args.length ? 0 : 2;
+  }
   try {
+    const reader = new ArkivReader({ request: createOperatorRpc({ accessKeyFile: process.env[ACCESS_KEY_FILE_ENV] }).request });
     if (args[0] === '--inspect-capability') {
       assertArkiv(args.length >= 2 && args.slice(2).every(arg => arg === '--json'), 'invalid_input', 'invalid_input', usage);
       output(json(await inspectCapability(reader, args[1]!))); return 0;

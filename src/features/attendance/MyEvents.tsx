@@ -5,7 +5,7 @@ import type { AppSession } from '../../app/session';
 import type { StoragePort } from '../../app/storage';
 import type { EventRepositoryContract, MyEvent } from '../../data/events/types';
 import type { ListResult, RepositoryError } from '../../data/types';
-import { attendanceStatus, deriveEventAvailability, type AttendanceStatus } from '../../domain/events';
+import { attendanceStatus, deriveEventAvailability, isTestEventTerms, type AttendanceStatus } from '../../domain/events';
 import { Button, EmptyState, ErrorState, Link, LoadingState, Notice, Select, StatusLabel, type Tone } from '../../ui';
 import { EventStatus } from '../events/EventSummary';
 import { useEventClock } from '../events/hooks';
@@ -80,6 +80,7 @@ export function MyEvents({ repository, session }: MyEventsProps) {
         const availability = item.event && !unverified ? deriveEventAvailability(item.event, now) : 'unverified';
         return <article key={item.projectRoot} className="pf-my-event pf-surface-light">
           <div className="pf-my-event-heading"><div><h2>{terms?.title ?? 'Event details unavailable'}</h2>
+            {isTestEventTerms(terms) && <StatusLabel tone="neutral">TEST EVENT</StatusLabel>}
             {terms && <><p className="pf-event-meta">{eventDate(terms)} ({terms.timeZone})</p><p>{eventFormatLabel(terms)}: {eventPlace(terms)}</p></>}</div>
             <StatusLabel tone={statusCopy[status].tone}>{statusCopy[status].label}</StatusLabel></div>
           {status === 'going' && availability !== 'open' && <div className="pf-stack pf-stack--compact"><EventStatus status={availability} />

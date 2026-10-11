@@ -21,7 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="#try-partfolk">Try Partfolk</a>&nbsp;&nbsp; / &nbsp;&nbsp;
+  <a href="https://partfolk.vercel.app/">Open Partfolk</a>&nbsp;&nbsp; / &nbsp;&nbsp;
+  <a href="#try-partfolk">Run locally</a>&nbsp;&nbsp; / &nbsp;&nbsp;
   <a href="#see-the-mechanism-in-four-steps">Explore the example</a>&nbsp;&nbsp; / &nbsp;&nbsp;
   <a href="#why-arkiv">Why Arkiv</a>&nbsp;&nbsp; / &nbsp;&nbsp;
   <a href="docs/protocol.md">Protocol</a>
@@ -31,7 +32,7 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
 
-The application runs locally today. Public Arkiv integration is implemented; a hosted release and a complete live product demonstration are still pending.
+**[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A complete live product proof and demonstration video are still pending.
 
 ## One event, three ways to take part
 
@@ -47,7 +48,7 @@ One wallet can do all three. A welcome tour introduces the workspace after sign-
 
 ## Try Partfolk
 
-Use **Node.js 22.12.0 or newer** and npm. From the repository directory:
+Use the [hosted application](https://partfolk.vercel.app/) without installing anything. To run your own copy, use **Node.js 22.12.0 or newer** and npm. From the repository directory:
 
 ```sh
 npm ci
@@ -64,7 +65,9 @@ Open [Partfolk at localhost:5173](http://127.0.0.1:5173/). No environment file, 
 
 These links work while the development server is running. Port 5173 is strict; an occupied port produces an error. Stop with Ctrl+C and restart with the same command.
 
-The example initializes when opened. Public browsing needs no wallet; an empty catalogue is not filled with fictional events. Publishing and registration require an injected Ethereum-compatible EOA wallet on **Arkiv Tiramisu**, testnet gas, browser storage and Web Locks support.
+The local example initializes when opened. The public catalogue reads authored Arkiv records and needs no wallet for browsing. Synthetic demonstration events, when published, will be labeled **TEST EVENT**, with `[PARTFOLK TEST EVENT]` on the first line of the current release's conditions. These are public test records, not invitations to real gatherings; their publication is not yet confirmed.
+
+Publishing and registration require an injected Ethereum-compatible EOA wallet on **Arkiv Tiramisu**, testnet gas, browser storage and Web Locks support.
 
 ## See the mechanism in four steps
 
@@ -141,6 +144,8 @@ Public records are readable by others. Keep private contact details and meeting 
 
 **Partner Desk** is a technical client within Partfolk for contributors and agreement inspection. Its separate build, runtime and wallet connection read Arkiv directly, without the organizer's Studio process.
 
+Open the [hosted Partner Desk](https://partfolk.vercel.app/desk.html), or start it locally:
+
 ```sh
 npm run dev:desk
 ```
@@ -181,7 +186,7 @@ This runs TypeScript checks, unit and integration suites, offline probe/helper t
 
 Build before previewing. Deploy the generated static files over HTTPS, keeping HTML and assets together. Both builds use relative assets and hash routing. No application server, database migration or signing secret is required.
 
-There are no application environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). Historical signer/probe scripts are not installation prerequisites. See [operations](docs/operations.md) for deployment details and troubleshooting.
+The browser application requires no environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). Node-only verification/proof tooling can optionally use a private RPC access-key file; it never goes into the browser bundle. Historical signer/probe scripts are not installation prerequisites. See [operations](docs/operations.md) for access-key setup, deployment details and troubleshooting.
 
 The implementation is organized around `src/domain/` for constraints and consent, `src/data/` for repositories and transaction recovery, and `src/features/` for product flows. `src/domain/events/` and `src/data/events/` implement visitor participation; `src/desk/` and `src/cli/` provide independent clients.
 
@@ -195,7 +200,7 @@ The verified source baseline passed TypeScript, unit/integration checks and both
 
 ## Current boundaries
 
-- **Release status:** hosting and a complete live product demonstration remain pending. Final visual, mobile and real-wallet acceptance is still outstanding.
+- **Release status:** the hosted application is available. A complete live product proof and demonstration video remain pending; end-to-end real-wallet acceptance is not yet complete.
 - **Readiness is dated:** owners can withdraw, delete records or let them expire. Agreement is neither future availability nor proof of physical completion.
 - **Audience details are organizer-authored:** public schedule and location are entered separately from contributor duties. The current validator does not establish their semantic correspondence.
 - **Admission is bounded:** limited capacity and invitation lists support up to 512 entries. Waiters are not automatically promoted. Read and payload limits are defined in the [schema](arkiv/schema.md).

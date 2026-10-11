@@ -4,13 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { http } from 'viem';
 import type { Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { tiramisu } from '@arkiv-network/sdk/chains';
 import { createArkivRepository } from '../../src/data/arkiv';
 import type { ArkivRepository } from '../../src/data/arkiv/repository';
-import { createArkivReadClient, OFFICIAL_RPC } from '../../src/data/arkiv/client';
+import { createArkivReadClient } from '../../src/data/arkiv/client';
+import { createOperatorRpc } from '../../src/cli/arkiv-rpc';
 import type { RpcRequest as ArkivRpcRequest } from '../../src/data/arkiv/client';
 import { publicKey } from '../../src/data/arkiv/envelope';
 import { BrowserOperationStore, MemoryOperationStore, createOperationController } from '../../src/data/operations';
@@ -156,7 +155,7 @@ class ProofRun {
   private boundary = false;
   private estimates: { account: string; gas: string; maximumCostWei: string | null }[] = [];
   constructor(readonly state: ProofState, readonly options: RunnerOptions, readonly commit: string, readonly read: ReadRpc,
-    private readonly rawRpc: ReadRpc) {
+    private readonly rawRpc: ReadRpc, private readonly accessKeyFile?: string) {
     const document = readJson<BudgetDocument>(BUDGET);
     ensure(document, 'The cumulative budget ledger is missing. Preserve the run for review.');
     ensure(document.rootAccount.toLowerCase() === ROOT_ACCOUNT.toLowerCase() && document.priorSpendWei === PRIOR_SPEND_WEI
@@ -323,7 +322,7 @@ class ProofRun {
     const packet = take(await this.repo().exportPacket(publicKey(this.state.projectRoot)));
     const lineage = expectedProofLineage(this.state, CHECKPOINT_REVISIONS[id]);
     const summary = assertProofState(packet.project, status, accepted, Date.now(), lineage);
-    const independentPacket = await verifyInFreshProcess(packet, ROOT, lineage);
+    const independentPacket = await verifyInFreshProcess(packet, ROOT, lineage, undefined, { accessKeyFile: this.accessKeyFile });
     const observation: PublicObservation = { id, observedAt: new Date().toISOString(), codeCommit: this.commit,
       studioStoppedDeclaredByOperator: this.options.studioStopped, packet, independentPacket, summary };
     atomicWriteJson(resolve(LOCAL, `observation-${id}.json`), observation);
@@ -373,7 +372,7 @@ class ProofRun {
     const packet = take(await this.repo().exportPacket(publicKey(this.state.projectRoot)));
     const revision = [...REVISION_NAMES].reverse().find(name => this.state.proposals[name]);
     ensure(revision, 'A completed proof publication is required before verifying its saved lineage.');
-    const independent = await verifyInFreshProcess(packet, ROOT, expectedProofLineage(this.state, revision));
+    const independent = await verifyInFreshProcess(packet, ROOT, expectedProofLineage(this.state, revision), undefined, { accessKeyFile: this.accessKeyFile });
     emit({ verified: true, snapshot: independent.snapshot, readiness: independent.readiness, projectRoot: packet.project.root.key,
       studioStoppedDeclaredByOperator: this.options.studioStopped });
   }
@@ -411,7 +410,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     ensure(!execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: ROOT, encoding: 'utf8' }).trim(), 'Commit and review source changes before broadcast.');
   }
   checkPriorEvidence();
-  const rawRpc = http(OFFICIAL_RPC, { timeout: 10_000, retryCount: 0, fetchOptions: { cache: 'no-store', redirect: 'error' } })({ chain: tiramisu }).request as ReadRpc;
+  const operatorRpc = createOperatorRpc({ autoDetectDirectory: ROOT });
+  const rawRpc: ReadRpc = operatorRpc.request;
   const { request } = createArkivReadClient(rawRpc as ArkivRpcRequest);
   const read: ReadRpc = request;
   ensure(BigInt(await read({ method: 'eth_chainId' }) as string) === BigInt(LIVE_CHAIN_ID), 'The official endpoint is on another chain.');
@@ -437,7 +437,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     const current = validateState(readJson(STATE));
     ensure(current.runId === state!.runId && canonicalJson(current.actors) === canonicalJson(state!.actors) && current.genesisHash === genesis.hash,
       'The run identity changed while acquiring its signer locks.');
-    const run = new ProofRun(current, options, commit, read, rawRpc);
+    const run = new ProofRun(current, options, commit, read, rawRpc, operatorRpc.accessKeyFile ?? undefined);
     try {
       await run.reconcile();
       if (options.phase === 'verify') await run.verify();

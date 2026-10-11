@@ -162,7 +162,7 @@ describe('independent CLI verifier with an injected executor', () => {
     const expected = await packetFixture();
     const repositoryRoot = resolve('synthetic repo with spaces');
     vi.stubEnv('PATH', 'synthetic-tool-path'); vi.stubEnv('TEMP', 'synthetic-temp');
-    for (const variable of ['ARKIV_RPC_URL', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'PARTFOLK_WALLET', 'CODEX_HOME']) {
+    for (const variable of ['ARKIV_RPC_URL', 'ARKIV_ACCESS_KEY_FILE', 'ARKIV_API_KEY', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'PARTFOLK_WALLET', 'CODEX_HOME']) {
       vi.stubEnv(variable, 'do-not-forward');
     }
     const execute = vi.fn<RunCli>(async () => JSON.stringify(expected));
@@ -177,6 +177,19 @@ describe('independent CLI verifier with an injected executor', () => {
       env: { PATH: 'synthetic-tool-path', TEMP: 'synthetic-temp' } });
     expect(Object.keys(options.env).every(name => ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE'].includes(name))).toBe(true);
     expect(Object.values(options.env)).not.toContain('do-not-forward');
+  });
+
+  it('passes only an explicitly selected absolute key filename to the fresh verifier', async () => {
+    const expected = await packetFixture(); const execute = vi.fn<RunCli>(async () => JSON.stringify(expected));
+    vi.stubEnv('ARKIV_ACCESS_KEY_FILE', 'unselected-file'); vi.stubEnv('ARKIV_API_KEY', 'synthetic-secret-not-forwarded');
+    const accessKeyFile = resolve('synthetic directory with spaces', 'access-key.txt');
+    await verifyInFreshProcess(expected, '.', savedLineage(expected), execute, { accessKeyFile });
+    const [, args, options] = execute.mock.calls[0]!;
+    expect(options.env.ARKIV_ACCESS_KEY_FILE).toBe(accessKeyFile);
+    expect(options.env.ARKIV_API_KEY).toBeUndefined();
+    expect(args).not.toContain(accessKeyFile);
+    expect(JSON.stringify(options)).not.toContain('synthetic-secret-not-forwarded');
+    expect(JSON.stringify(options)).not.toContain('unselected-file');
   });
 
   it('allows independent fetch/export times when the exact canonical snapshot and agreement match', async () => {

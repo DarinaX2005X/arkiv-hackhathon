@@ -1,7 +1,7 @@
 import { routeHref } from '../../app/routes';
 import { formatDateTime } from '../../app/time';
 import { isPublicEntityKey } from '../../app/ids';
-import { deriveEventAvailability, type EventAggregate, type EventAvailability } from '../../domain/events';
+import { deriveEventAvailability, isTestEventTerms, type EventAggregate, type EventAvailability } from '../../domain/events';
 import { Link, StatusLabel } from '../../ui';
 import { availabilityCopy, eventDate, shortAddress, eventPlace, eventFormatLabel, eventRegistrationLabel } from './presentation';
 
@@ -22,7 +22,7 @@ export function EventSummary({ event, now, unverified = false }: { event: EventA
         : terms?.title ?? 'Event details unavailable'}</h2>
       {terms ? <><p className="pf-event-meta">{eventDate(terms)} <span>({terms.timeZone})</span></p><p>{eventFormatLabel(terms)}: {eventPlace(terms)}</p><p className="pf-event-meta">{eventRegistrationLabel(terms)}</p>{terms.registration?.deadline != null && <p className="pf-event-meta">Register by {formatDateTime(terms.registration.deadline, terms.timeZone)}</p>}
         {terms.description && <p className="pf-event-description">{terms.description}</p>}</> : <p>The original page may have expired or become unavailable. Open the record to check its status.</p>}
-      <EventStatus status={status} />
+      <div className="pf-event-title-status"><EventStatus status={status} />{isTestEventTerms(terms) && <StatusLabel tone="neutral">TEST EVENT</StatusLabel>}</div>
     </div>
     {isPublicEntityKey(event.projectRoot) && <Link className="pf-event-open" href={routeHref({ name: 'event', projectRoot: event.projectRoot })} aria-label={`View ${terms?.title ?? 'event details'}`}>View event</Link>}
   </article>;

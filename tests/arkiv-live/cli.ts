@@ -6,6 +6,7 @@ import type { SourcePlanRef } from '../../src/domain/types';
 import { canonicalJson } from '../../src/domain/canonical';
 import { activeSource } from '../../src/domain/readiness';
 import { assertProofLineage } from './scenario';
+import { ACCESS_KEY_FILE_ENV } from '../../src/cli/arkiv-rpc';
 
 export type RunCli = (executable: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number }) => Promise<string>;
 const runCli: RunCli = (executable, args, options) => new Promise((accept, reject) => {
@@ -13,10 +14,11 @@ const runCli: RunCli = (executable, args, options) => new Promise((accept, rejec
 });
 
 export async function verifyInFreshProcess(expected: ExportPacket, repositoryRoot: string, expectedLineage: readonly SourcePlanRef[],
-  execute: RunCli = runCli): Promise<ExportPacket> {
+  execute: RunCli = runCli, options: { accessKeyFile?: string } = {}): Promise<ExportPacket> {
   assertProofLineage(expected.project, expectedLineage);
   const env: NodeJS.ProcessEnv = {};
   for (const name of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE']) if (process.env[name]) env[name] = process.env[name];
+  if (options.accessKeyFile !== undefined) env[ACCESS_KEY_FILE_ENV] = resolve(options.accessKeyFile);
   const output = await execute(process.execPath, [resolve(repositoryRoot, 'node_modules/tsx/dist/cli.mjs'),
     resolve(repositoryRoot, 'src/cli/verify.ts'), expected.project.root.key, '--json', '--block', expected.snapshot.blockNumber!],
   { cwd: repositoryRoot, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });

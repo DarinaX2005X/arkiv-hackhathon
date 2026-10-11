@@ -2,9 +2,9 @@ import type { AppSession } from '../../app/session';
 import { routeHref } from '../../app/routes';
 import type { StoragePort } from '../../app/storage';
 import type { EventRepositoryContract } from '../../data/events/types';
-import { attendanceStatus, deriveEventAvailability } from '../../domain/events';
+import { attendanceStatus, deriveEventAvailability, isTestEventTerms } from '../../domain/events';
 import type { PublicEntityKey } from '../../domain/types';
-import { Button, ErrorState, Link, LoadingState, Notice } from '../../ui';
+import { Button, ErrorState, Link, LoadingState, Notice, StatusLabel } from '../../ui';
 import { RegistrationPanel } from '../attendance/RegistrationPanel';
 import { AudienceChanges } from '../attendance/AudienceChanges';
 import { EventEvidence, EventStatus } from './EventSummary';
@@ -23,7 +23,7 @@ export function EventDetail({ projectRoot, repository, session, storage }: Event
   const needsReview = value?.attendance && attendanceStatus(value.attendance, value.event, now, value.myEvent?.registeredRelease ?? null) === 'needs_review';
   return <section className="pf-events-page" aria-labelledby="event-title">
     <header className="pf-events-heading"><div><Link href={routeHref({ name: 'events' })}>All events</Link><h1 id="event-title">{terms?.title ?? 'Event details'}</h1>
-      {event && <div className="pf-event-title-status"><EventStatus status={status} /><Button variant="quiet" size="compact" onClick={() => void refresh()} disabled={pending}>Refresh event</Button></div>}</div>
+      {event && <div className="pf-event-title-status"><EventStatus status={status} />{isTestEventTerms(terms) && <StatusLabel tone="neutral">TEST EVENT</StatusLabel>}<Button variant="quiet" size="compact" onClick={() => void refresh()} disabled={pending}>Refresh event</Button></div>}</div>
       <Link href={routeHref({ name: 'my-events' })}>My events</Link></header>
     {pending && <LoadingState title="Checking the current event" description="Reading the published details, agreements and your registration when signed in." />}
     {error && <ErrorState title="This event could not be refreshed" description={eventError(error)} actions={<Button variant="secondary" onClick={() => void refresh()} disabled={pending}>Try again</Button>} />}
