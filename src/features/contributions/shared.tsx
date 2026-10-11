@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { formatDateTime, useApp, useAppSession } from '../../app';
 import type { DomainReason, Interval } from '../../domain/types';
 import { Button, Notice } from '../../ui';
-import { actorScope, conditionText, isContributionDraft, type ContributionDraft } from './model';
+import { actorScope, conditionText, type ContributionDraft } from './model';
 import { contributionReasons } from './catalog';
+import { contributionDrafts } from './drafts';
 
 export function useCurrentTime() {
   const { now } = useApp(); const [current, setCurrent] = useState(now);
@@ -39,16 +40,15 @@ export function downloadText(name: string, text: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 export function useContributionDraft(id: string, initial: ContributionDraft) {
-  const { drafts } = useApp(); const { actor } = useAppSession();
-  const store = useMemo(() => drafts(`contribution:${actorScope(actor)}:${id.slice(-50).replace(/[^a-zA-Z0-9._:-]/g, '_')}`, 'contribution', isContributionDraft), [drafts, id, actorScope(actor)]);
-  const [loaded] = useState(() => store.load());
-  const [draft, setDraft] = useState(() => loaded.status === 'ready' ? loaded.value : structuredClone(initial));
-  const [saved, setSaved] = useState(false);
-  const [recovery, setRecovery] = useState(() => loaded.status === 'recovery');
-  useEffect(() => { setSaved(store.save(draft).persisted); }, [draft, store]);
-  return { draft, setDraft, saved, recovery, exportDraft: () => downloadText('partfolk-contribution-draft.json', store.export(draft)),
+  const runtime = useApp(); const { actor } = useAppSession();
+  const registry = contributionDrafts(runtime);
+  const store = useMemo(() => registry.session(actor, id, initial), [registry, id, actorScope(actor)]);
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const visitor = useSyncExternalStore(registry.subscribeVisitor, registry.getVisitorSnapshot, registry.getVisitorSnapshot);
+  return { ...state, locked: actor === null && id === 'new' && visitor.value?.phase === 'reserved', setDraft: (value: ContributionDraft) => { store.update(value); },
+    exportDraft: () => downloadText('partfolk-contribution-draft.json', store.exportDraft()),
     exportRecovery: () => { const raw = store.exportRecovery(); if (raw !== null) downloadText('partfolk-original-draft-recovery.json', raw); },
-    replaceRecovery: () => { const result = store.save(draft, { replaceRecovery: true }); setSaved(result.persisted); if (result.persisted) setRecovery(false); } };
+    replaceRecovery: () => { store.update(state.draft, true); } };
 }
 export function DraftStatus({ saved, onExport, recovery, onExportRecovery, onReplaceRecovery }: { saved: boolean; onExport: () => void; recovery?: boolean; onExportRecovery?: () => void; onReplaceRecovery?: () => void }) {
   return recovery ? <Notice tone="warning" title="The previous saved draft needs recovery"><p>The original data was kept intact. Export it before replacing it with the current draft.</p><div className="pf-actions"><Button variant="secondary" onClick={onExportRecovery}>Export original saved data</Button><Button variant="secondary" onClick={onExport}>Export current draft</Button><Button variant="quiet" onClick={onReplaceRecovery}>Use current draft on this device</Button></div></Notice>

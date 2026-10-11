@@ -10,3 +10,4 @@
 .pf-contribution-reasons li + li { margin-top: var(--space-2); }
 .pf-agreement summary, .pf-contribution-editor summary { min-height: 44px; padding-block: var(--space-3); cursor: pointer; }
 @media (max-width: 599px) { .pf-contribution-editor { padding: var(--space-4); } .pf-contribution-details dl { grid-template-columns: minmax(0, 1fr); } }
+.pf-contribution-handoff-fields { border: 0; margin: 0; padding: 0; min-width: 0; }

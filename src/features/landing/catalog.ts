@@ -39,7 +39,7 @@ export const landingCopy = defineCatalog({
   setResult: 'A clear invitation for the help you need.',
   offerTitle: 'Offer your part',
   offerAction: 'People offer their own time, a place or equipment, with the availability and conditions they choose.',
-  offerResult: 'A workable arrangement, without double-booking the same person.',
+  offerResult: 'An arrangement that fits each resource’s declared availability and commitments.',
   agreeTitle: 'Agree the exact plan',
   agreeAction: 'Choose an arrangement and ask each owner to review the complete plan before accepting their part.',
   agreeResult: 'An agreed run sheet, ready to carry out together.',
