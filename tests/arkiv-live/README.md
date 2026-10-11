@@ -77,3 +77,15 @@ node node_modules/tsx/dist/cli.mjs src/cli/verify.ts <public-project-root> --jso
 ```
 
 `--block` proves a dated historical snapshot; it never asserts present readiness. User visual/browser review remains unperformed by these tools.
+
+### Exact original reservation recovery
+
+If a persistence failure left the budget record `reserved` while the original application journal retained its transaction hash, preserve every file. The separate recovery command requires an explicit operator decision, the journal's exact original hash, a clean reviewed commit, and a bound of one transaction:
+
+```powershell
+node --import tsx tests/arkiv-live/recover-reserved.ts --recover-reserved --expected-hash <original-transaction-hash> --reviewed-commit <reviewed-HEAD> --broadcast --max-transactions 1
+```
+
+The command acquires the original run/account locks, checks action, step, admission and budget continuity, and reconstructs only the frozen transaction. Its signed hash must equal the supplied original hash, and the signed bytes must persist before forwarding. Known mined transactions are canonically reconciled; known pending transactions are never forwarded. Only two absent hash lookups and latest/pending nonces equal to the original nonce can permit forwarding. It does not create an operation or change the reserved nonce, fees, calldata or cumulative ceiling. The application journal and frozen commands remain unchanged; resume the original phase through the normal runner afterward.
+
+A failed ledger save invalidates that in-memory instance and requires a fresh disk load. Already admitted/submitted records are reconcile-only: if their original hash remains absent, recovery reports `unresolved` and does not forward again. Preserve files for review rather than removing reservations or regenerating an action.

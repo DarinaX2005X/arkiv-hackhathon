@@ -12,11 +12,11 @@ Application namespace: `partfolk`, protocol `partfolk/1`, schema version 1. All 
 
 | Entity | Authority / filters | Purpose / lifetime |
 | --- | --- | --- |
-| `project_root` | Immutable creator; entity key is project identity | Stable protocol identity; 180 days for demo |
+| `project_root` | Immutable creator; entity key is project identity | Stable protocol identity; Studio defaults to a nominal 180-day lifetime |
 | `project_state` | Root creator; `project_key` typed key | Editable recipe, admitted publisher roots, lifecycle, completed work, completion; explicit lifetime |
-| `publisher_root` | Immutable creator; entity key is publisher identity | Stable authority/kind; 180 days |
+| `publisher_root` | Immutable creator; entity key is publisher identity | Stable authority/kind; Studio defaults to a nominal 180-day lifetime |
 | `book_state` | Publisher-root creator; `book_key` typed key | Resources, offers, separate decisions/grants, append-only recent attestations, independent custody holds; nominal lifetime at least the larger of the grant horizon plus 60 seconds and the declared retention period (minimum 90 days) |
-| `proposal` | Project-root creator; `project_key`, `proposal_hash`, `requirements_hash` | Exact immutable agreed package, 180 days |
+| `proposal` | Project-root creator; `project_key`, `proposal_hash`, `requirements_hash` | Exact immutable agreed package; Studio defaults to a nominal 180-day lifetime |
 | `plan_activation` | Project-root creator; `project_key`, `proposal_key` | One exact active proposal and hash, predecessor activation keys; every material promotion consumes all reviewed heads |
 | `project_link` | Publisher creator for offer links; project creator for request links; `project_key`, `publisher_key`, `link_kind`, request-only `activation_key` | Untrusted discovery hint; never admission, agreement, or resource authority |
 
@@ -27,6 +27,8 @@ Common indexed attributes on every entity, including roots: `project` str, `enti
 For a missing publisher book under a still-live owned root, recovery must explicitly acknowledge missing state and start with empty resources, offers, decisions, grants, attestations, and custody holds. Availability is declared again afterward. Cached approvals are never replayed. External evidence of unresolved custody remains evidence of that physical obligation. Competing initializations/recoveries can produce conflicts because absence has no native compare-and-swap token.
 
 ## Reproducible application reads
+
+Lifetimes are explicit writer inputs. The reproducible public proof and synthetic event scenario request 90 nominal days for their entities; Studio defaults are not protocol requirements. Actual creation and expiration blocks must be read from the receipts and entity metadata.
 
 Pin one canonical block `B` before reading. All pages, exact key references, heads, and publisher books use `atBlock(B)`. Recheck the block hash after the read. Application time is the canonical block timestamp; `expiresAt` is separately checked as a block height. A nominal lifetime conversion does not guarantee a future UTC date.
 
@@ -111,6 +113,8 @@ Every write uses the existing operation journal, explicit wallet authority, curr
 The action envelope and durable journals are separate evidence. Each event mutation records an attempt before validation or reads; a matching settled rejection before native preparation can prove `not_sent` with `evidence: preflight-journal`. Missing or interrupted attempts remain unresolved. Entry into native preparation is recorded before preparation wrappers and remains permanent for that attempt; missing native records then prevent direct retry. After native preparation, `not_sent` carries `evidence: native-journal` only when the retained journal proves an unadmitted step or a definitive wallet rejection. An absent, truncated or regressed native journal leaves uncertain actions `unverified`.
 
 Local tests cover independent readers, complete pagination, hidden forks, schema/author/receipt spoofing, fresh-plan admission, changed public terms, atomic withdrawal and reconciliation without duplicate sends. They do not establish a live funded event workflow or visual acceptance.
+
+Synthetic event releases identify themselves with the exact first line `[PARTFOLK TEST EVENT]` in their existing `conditions` field. This is an organizer-authored disclosure included in the audience hash, not a separate trusted attribute. The catalog, event detail and My events display `TEST EVENT` for that marker; removing it changes the audience terms and requires the normal new-release consent flow.
 
 ## Capability bootstrap entity
 

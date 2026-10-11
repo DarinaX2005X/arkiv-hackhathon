@@ -186,7 +186,7 @@ This runs TypeScript checks, unit and integration suites, offline probe/helper t
 
 Build before previewing. Deploy the generated static files over HTTPS, keeping HTML and assets together. Both builds use relative assets and hash routing. No application server, database migration or signing secret is required.
 
-The browser application requires no environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). Node-only verification/proof tooling can optionally use a private RPC access-key file; it never goes into the browser bundle. Historical signer/probe scripts are not installation prerequisites. See [operations](docs/operations.md) for access-key setup, deployment details and troubleshooting.
+The browser application requires no environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). See [operations](docs/operations.md) for deployment details and troubleshooting.
 
 The implementation is organized around `src/domain/` for constraints and consent, `src/data/` for repositories and transaction recovery, and `src/features/` for product flows. `src/domain/events/` and `src/data/events/` implement visitor participation; `src/desk/` and `src/cli/` provide independent clients.
 

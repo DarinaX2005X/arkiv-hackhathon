@@ -206,29 +206,42 @@ async function authenticateRaw(raw: Hex, plan: FrozenPlan): Promise<void> {
     || (parsed.yParity !== 0 && parsed.yParity !== 1) || serializeTransaction(parsed).toLowerCase() !== raw
     || address(await recoverTransactionAddress({ serializedTransaction: raw as `0x02${string}` })) !== plan.from) fail('SIGNED_TRANSACTION_MISMATCH');
 }
-function authenticateRpcTransaction(value: unknown, record: BudgetRecord, receipt: Record<string, unknown>): void {
+function authenticateRpcTransaction(value: unknown, record: BudgetRecord, receipt?: Record<string, unknown>): void {
   const tx = object(value), plan = record.plan;
   if (hash(tx.hash) !== record.transactionHash || address(tx.from) !== plan.from || address(tx.to) !== plan.to
     || bytes(tx.input) !== plan.data || quantity(tx.value) !== decimal(plan.value) || quantity(tx.nonce) !== BigInt(plan.nonce)
     || quantity(tx.gas) !== decimal(plan.gas) || quantity(tx.type) !== 2n
     || quantity(tx.maxFeePerGas) !== decimal(plan.maxFeePerGas) || quantity(tx.maxPriorityFeePerGas) !== decimal(plan.maxPriorityFeePerGas)
     || (tx.chainId !== undefined && quantity(tx.chainId) !== BigInt(plan.chainId))
-    || hash(tx.blockHash) !== hash(receipt.blockHash) || quantity(tx.blockNumber) !== quantity(receipt.blockNumber)
-    || quantity(tx.transactionIndex) !== quantity(receipt.transactionIndex)
+    || (receipt && (hash(tx.blockHash) !== hash(receipt.blockHash) || quantity(tx.blockNumber) !== quantity(receipt.blockNumber)
+      || quantity(tx.transactionIndex) !== quantity(receipt.transactionIndex)))
     || (tx.accessList !== undefined && (!Array.isArray(tx.accessList) || tx.accessList.length !== 0))) fail('RECEIPT_TRANSACTION_MISMATCH');
 }
 interface SubmitOptions {
   id: string; kind: 'native' | 'funding'; address: string; request: unknown; read: ReadRpc; sendRaw: SendRaw;
   loadAccount: LoadAccount; broadcast?: boolean; fundingAllowlist?: Readonly<Record<string, string>>;
 }
+export interface RecoverReservedOptions {
+  id: string; expectedHash: Hex; address: string; request: NativeTransactionRequest;
+  read: ReadRpc; sendRaw: SendRaw; loadAccount: LoadAccount; broadcast?: boolean;
+}
+export interface RecoveryResult {
+  transactionHash: Hex; status: 'confirmed' | 'reverted' | 'pending' | 'submitted' | 'unresolved'; forwarded: boolean;
+}
 
 /** Private signed bytes stay in this local ledger; publicSummary intentionally excludes them and calldata. */
 export class BudgetLedger {
   private document: BudgetDocument;
   private active = false;
+  private persistenceFailed = false;
   constructor(document: BudgetDocument, private readonly persist: Persist) { validateDocument(document); this.document = clone(document); }
-  snapshot(): BudgetDocument { return clone(this.document); }
+  private assertUsable(): void {
+    if (this.persistenceFailed) fail('LEDGER_RELOAD_REQUIRED');
+    if (this.active) fail('LEDGER_BUSY');
+  }
+  snapshot(): BudgetDocument { this.assertUsable(); return clone(this.document); }
   publicSummary() {
+    this.assertUsable();
     return {
       version: 1, chainId: this.document.chainId, rootAccount: this.document.rootAccount, limitWei: this.document.limitWei,
       priorSpendWei: this.document.priorSpendWei, chargedWei: charged(this.document).toString(),
@@ -239,21 +252,59 @@ export class BudgetLedger {
     };
   }
   private async exclusive<T>(action: () => Promise<T>): Promise<T> {
-    if (this.active) fail('LEDGER_BUSY'); this.active = true;
+    this.assertUsable(); this.active = true;
     try { return await action(); } finally { this.active = false; }
   }
-  private async save(): Promise<void> { validateDocument(this.document); await this.persist(clone(this.document)); }
+  private async save(): Promise<void> {
+    try { validateDocument(this.document); await this.persist(clone(this.document)); }
+    catch {
+      // A failure can occur before or after rename. Neither the old nor the new
+      // document is safe to assume durable; require a fresh disk load, and never
+      // let this instance publish an in-memory hash to the operation journal.
+      this.persistenceFailed = true;
+      fail('LEDGER_PERSISTENCE_FAILED');
+    }
+  }
   async reconcileAll(read: ReadRpc): Promise<void> { return this.exclusive(() => this.reconcile(read)); }
   private async reconcile(read: ReadRpc): Promise<void> {
     if (quantity(await read({ method: 'eth_chainId' })) !== BigInt(this.document.chainId)) fail('WRONG_CHAIN');
-    for (const record of this.document.records) {
-      if (!record.transactionHash || !record.signedTransaction) continue;
-      await authenticateRaw(record.signedTransaction, record.plan);
-      const receiptValue = await read({ method: 'eth_getTransactionReceipt', params: [record.transactionHash] });
-      if (receiptValue === null) {
-        if (record.receipt) { record.receipt = null; record.status = 'admitted'; await this.save(); }
-        continue;
+    const records = this.document.records.filter(record => record.transactionHash && record.signedTransaction);
+    const outcomes = new Map<BudgetRecord, BudgetReceipt | null>();
+    let cursor = 0, activeReads = 0, failed = false, failure: unknown;
+    const waiting: (() => void)[] = [];
+    const reject = (error: unknown) => { if (!failed) { failed = true; failure = error; } };
+    // Four record workers share four RPC slots, including each transaction/block pair.
+    const boundedRead: ReadRpc = async request => {
+      if (failed) throw failure;
+      if (activeReads < 4) activeReads++; else await new Promise<void>(resolve => waiting.push(resolve));
+      try {
+        if (failed) throw failure;
+        return await read(request);
+      } catch (error) { reject(error); throw error; }
+      finally { const next = waiting.shift(); if (next) next(); else activeReads--; }
+    };
+    const worker = async () => {
+      while (!failed && cursor < records.length) {
+        const record = records[cursor++]!;
+        try { outcomes.set(record, await this.verifyReceipt(record, boundedRead)); }
+        catch (error) { reject(error); }
       }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, records.length) }, worker));
+    if (failed) throw failure;
+    // No document mutation or write occurs until every read/authentication passed.
+    for (const record of records) {
+      const verified = outcomes.get(record)!;
+      if (!same(record.receipt, verified)) {
+        record.receipt = verified; record.status = verified ? verified.status === 'success' ? 'confirmed' : 'reverted' : 'admitted';
+        await this.save();
+      }
+    }
+  }
+  private async verifyReceipt(record: BudgetRecord, read: ReadRpc): Promise<BudgetReceipt | null> {
+      await authenticateRaw(record.signedTransaction!, record.plan);
+      const receiptValue = await read({ method: 'eth_getTransactionReceipt', params: [record.transactionHash] });
+      if (receiptValue === null) return null;
       const receipt = object(receiptValue);
       if (hash(receipt.transactionHash) !== record.transactionHash || address(receipt.from) !== record.plan.from
         || address(receipt.to) !== record.plan.to || quantity(receipt.type) !== 2n) fail('RECEIPT_IDENTITY_MISMATCH');
@@ -261,22 +312,21 @@ export class BudgetLedger {
       const status = quantity(receipt.status), gasUsed = quantity(receipt.gasUsed), effectiveGasPrice = quantity(receipt.effectiveGasPrice);
       if ((status !== 0n && status !== 1n) || gasUsed <= 0n || gasUsed > decimal(record.plan.gas)
         || effectiveGasPrice > decimal(record.plan.maxFeePerGas)) fail('INVALID_RECEIPT_COST');
-      const [transaction, blockValue] = await Promise.all([
+      const pair = await Promise.allSettled([
         read({ method: 'eth_getTransactionByHash', params: [record.transactionHash] }),
         read({ method: 'eth_getBlockByNumber', params: [hex(blockNumber), false] }),
       ]);
+      // Drain both reads before releasing this worker, including on RPC failure.
+      const transaction = pair[0].status === 'fulfilled' ? pair[0].value : (() => { throw pair[0].reason; })();
+      const blockValue = pair[1].status === 'fulfilled' ? pair[1].value : (() => { throw pair[1].reason; })();
       authenticateRpcTransaction(transaction, record, receipt);
       const block = object(blockValue);
       if (hash(block.hash) !== blockHash || quantity(block.number) !== blockNumber || !Array.isArray(block.transactions)
         || index > BigInt(Number.MAX_SAFE_INTEGER) || hash(block.transactions[Number(index)]) !== record.transactionHash) fail('NONCANONICAL_RECEIPT');
       const actualCost = gasUsed * effectiveGasPrice + (status === 1n ? decimal(record.plan.value) : 0n);
-      const verified: BudgetReceipt = { transactionHash: record.transactionHash, blockHash, blockNumber: blockNumber.toString(),
+      return { transactionHash: record.transactionHash!, blockHash, blockNumber: blockNumber.toString(),
         transactionIndex: index.toString(), status: status === 1n ? 'success' : 'reverted', gasUsed: gasUsed.toString(),
         effectiveGasPrice: effectiveGasPrice.toString(), actualCostWei: actualCost.toString() };
-      if (!same(record.receipt, verified)) {
-        record.receipt = verified; record.status = status === 1n ? 'confirmed' : 'reverted'; await this.save();
-      }
-    }
   }
   async submit(options: SubmitOptions): Promise<Hex> {
     return this.exclusive(async () => {
@@ -318,6 +368,67 @@ export class BudgetLedger {
       if (hash(returned) !== record.transactionHash) fail('RPC_RETURNED_DIFFERENT_HASH');
       record.status = 'submitted'; await this.save();
       return record.transactionHash;
+    });
+  }
+  /** Explicit repair of the original reservation only; no new ID, nonce, fee or calldata is accepted. */
+  async recoverReserved(options: RecoverReservedOptions): Promise<RecoveryResult> {
+    return this.exclusive(async () => {
+      if (options.broadcast !== true) fail('BROADCAST_NOT_ENABLED');
+      const expectedHash = hash(options.expectedHash);
+      const record = this.document.records.find(item => item.id === options.id) ?? fail('ORIGINAL_RESERVATION_REQUIRED');
+      if (record.kind !== 'native') fail('ORIGINAL_RESERVATION_REQUIRED');
+      if (this.document.records.some(item => item.id !== record.id && item.plan.from === record.plan.from
+        && item.plan.nonce === record.plan.nonce)) fail('NONCE_ALREADY_USED');
+      const partial = frozenRequest(clone(options.request), options.address, 'native', this.document.chainId);
+      if (!same({ ...partial, nonce: record.plan.nonce }, record.plan)) fail('RECOVERY_ADMISSION_MISMATCH');
+      if (record.transactionHash && record.transactionHash !== expectedHash) fail('RECOVERY_HASH_MISMATCH');
+      await this.reconcile(options.read);
+      if (this.document.records.some(item => item.id !== record.id && !['confirmed', 'reverted'].includes(item.status))) fail('UNRESOLVED_TRANSACTION');
+      const result = (status: RecoveryResult['status'], forwarded = false): RecoveryResult => ({ transactionHash: expectedHash, status, forwarded });
+      const terminal = () => record.status === 'confirmed' || record.status === 'reverted' ? result(record.status) : null;
+      const completed = terminal(); if (completed) return completed;
+      const known = async (): Promise<boolean> => {
+        const [receipt, transaction] = await Promise.all([
+          options.read({ method: 'eth_getTransactionReceipt', params: [expectedHash] }),
+          options.read({ method: 'eth_getTransactionByHash', params: [expectedHash] }),
+        ]);
+        if (receipt !== null && transaction === null) fail('RECOVERY_INCOMPLETE_RPC_EVIDENCE');
+        if (transaction !== null) authenticateRpcTransaction(transaction, { ...record, transactionHash: expectedHash }, receipt === null ? undefined : object(receipt));
+        return transaction !== null;
+      };
+      const checkUnspentNonce = async () => {
+        const [pending, latest, balance] = await Promise.all([
+          options.read({ method: 'eth_getTransactionCount', params: [record.plan.from, 'pending'] }),
+          options.read({ method: 'eth_getTransactionCount', params: [record.plan.from, 'latest'] }),
+          options.read({ method: 'eth_getBalance', params: [record.plan.from, 'pending'] }),
+        ]);
+        if (quantity(pending) !== BigInt(record.plan.nonce) || quantity(latest) !== BigInt(record.plan.nonce)) fail('RECOVERY_NONCE_MISMATCH');
+        if (quantity(balance) < decimal(record.maximumCostWei)) fail('INSUFFICIENT_TEST_GLM');
+      };
+      let wasKnown = await known();
+      // A prior recovery might already have forwarded. A freshly loaded admitted
+      // record is reconcile-only even when the endpoint currently cannot find it.
+      if (record.status !== 'reserved') return result(wasKnown ? 'pending' : 'unresolved');
+      if (!wasKnown) await checkUnspentNonce();
+      const plan = record.plan, account = await options.loadAccount();
+      if (address(account.address) !== plan.from) fail('SIGNER_ADDRESS_MISMATCH');
+      const raw = bytes(await account.signTransaction({ chainId: plan.chainId, to: plan.to as Hex, data: plan.data,
+        value: decimal(plan.value), nonce: plan.nonce, gas: decimal(plan.gas), maxFeePerGas: decimal(plan.maxFeePerGas),
+        maxPriorityFeePerGas: decimal(plan.maxPriorityFeePerGas), type: 'eip1559' }));
+      await authenticateRaw(raw, plan);
+      if (keccak256(raw) !== expectedHash) fail('RECOVERY_HASH_MISMATCH');
+      record.signedTransaction = raw; record.transactionHash = expectedHash; record.status = 'admitted';
+      await this.save();
+      // Recheck after signing/persistence, so a transaction observed in either
+      // lookup is never forwarded by recovery, including an intervening mine.
+      wasKnown = await known() || wasKnown;
+      if (wasKnown) { await this.reconcile(options.read); return terminal() ?? result('pending'); }
+      await checkUnspentNonce();
+      const returned = await options.sendRaw(raw);
+      if (hash(returned) !== expectedHash) fail('RPC_RETURNED_DIFFERENT_HASH');
+      record.status = 'submitted'; await this.save();
+      await this.reconcile(options.read);
+      return terminal() ? { ...terminal()!, forwarded: true } : result('submitted', true);
     });
   }
 }

@@ -96,19 +96,181 @@ test('reservation is durable before key load and exact signed bytes/hash before 
   assert.equal(f.counters().sends, 1);
 });
 
-test('reservation persistence failure does not load keys or forward and blocks reuse in memory', async () => {
-  const f = fixture({ persist: () => { throw Error('synthetic fsync failure'); } });
-  await assert.rejects(f.submit(), /synthetic fsync failure/);
-  assert.deepEqual(f.counters(), { reads: 4, keyLoads: 0, sends: 0 });
-  await assert.rejects(f.submit(), matches('ORIGINAL_TRANSACTION_RECONCILE_ONLY'));
+async function assertReloadRequired(f: ReturnType<typeof fixture>): Promise<void> {
+  const before = f.counters();
+  assert.throws(() => f.ledger.snapshot(), matches('LEDGER_RELOAD_REQUIRED'));
+  assert.throws(() => f.ledger.publicSummary(), matches('LEDGER_RELOAD_REQUIRED'));
+  await assert.rejects(f.ledger.reconcileAll(f.read), matches('LEDGER_RELOAD_REQUIRED'));
+  await assert.rejects(f.submit(), matches('LEDGER_RELOAD_REQUIRED'));
+  await assert.rejects(f.submit('different'), matches('LEDGER_RELOAD_REQUIRED'));
+  assert.deepEqual(f.counters(), before);
+}
+
+async function recoveryFixture(persist: (document: BudgetDocument) => void = () => undefined) {
+  const f = fixture(); const expectedHash = await f.submit();
+  const original = f.saved[1]!.records[0]!;
+  const saved: BudgetDocument[] = [];
+  const ledger = new BudgetLedger(f.saved[0]!, document => { persist(document); saved.push(copy(document)); });
+  let sends = 0, keyLoads = 0;
+  const recover = (extra = {}) => ledger.recoverReserved({ id: original.id, expectedHash, address: f.account.address,
+    request: f.request, read: f.read, broadcast: true, loadAccount: async () => { keyLoads++; return f.account; },
+    sendRaw: async raw => { sends++; assert.equal(raw, original.signedTransaction); return keccak256(raw); }, ...extra });
+  return { ...f, ledger, expectedHash, original, saved, recover, recoveryCounters: () => ({ sends, keyLoads }) };
+}
+
+test('exact original recovery requires broadcast opt-in before reads or key access', async () => {
+  const f = await recoveryFixture(); const before = f.counters();
+  await assert.rejects(f.recover({ broadcast: false }), matches('BROADCAST_NOT_ENABLED'));
+  assert.deepEqual(f.counters(), before);
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 0 });
 });
 
-test('signed-byte persistence failure never forwards and leaves the original hash for reconciliation', async () => {
+test('exact original recovery forwards one identical transaction and never creates another reservation', async () => {
+  const f = await recoveryFixture(); const before = f.ledger.snapshot(); const maximum = f.ledger.publicSummary().chargedWei;
+  assert.deepEqual(await f.recover(), { transactionHash: f.expectedHash, status: 'submitted', forwarded: true });
+  const after = f.ledger.snapshot();
+  assert.equal(after.records.length, before.records.length);
+  assert.deepEqual(after.records[0]!.plan, before.records[0]!.plan);
+  assert.equal(after.records[0]!.id, before.records[0]!.id);
+  assert.equal(f.ledger.publicSummary().chargedWei, maximum);
+  assert.equal(f.saved[0]?.records[0]?.status, 'admitted');
+  assert.equal(f.saved[0]?.records[0]?.signedTransaction, f.original.signedTransaction);
+  assert.deepEqual(await f.recover(), { transactionHash: f.expectedHash, status: 'unresolved', forwarded: false });
+  assert.deepEqual(f.recoveryCounters(), { sends: 1, keyLoads: 1 });
+});
+
+test('recovery rejects a different hash without replacing the reservation', async () => {
+  const f = await recoveryFixture(); const before = f.ledger.snapshot();
+  await assert.rejects(f.recover({ expectedHash: `0x${'11'.repeat(32)}` }), matches('RECOVERY_HASH_MISMATCH'));
+  assert.deepEqual(f.ledger.snapshot(), before);
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 1 });
+  assert.equal(f.saved.length, 0);
+});
+
+test('recovery rejects admission fee or calldata changes before signing', async () => {
+  for (const change of [{ gas: '0x1' }, { data: '0xabcd' }, { maxFeePerGas: '0x1' }]) {
+    const f = await recoveryFixture();
+    await assert.rejects(f.recover({ request: { ...f.request, ...change } }), matches('RECOVERY_ADMISSION_MISMATCH'));
+    assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 0 });
+  }
+});
+
+test('recovery rejects spent and pending nonce mismatches before signing', async () => {
+  for (const pendingOnly of [false, true]) {
+    const f = await recoveryFixture(); const before = f.ledger.snapshot();
+    if (pendingOnly) f.setPending(1n); else f.setNonce(1n);
+    await assert.rejects(f.recover(), matches('RECOVERY_NONCE_MISMATCH'));
+    assert.deepEqual(f.ledger.snapshot(), before);
+    assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 0 });
+  }
+});
+
+test('recovery persistence failure cannot forward or expose reconstructed bytes', async () => {
+  const f = await recoveryFixture(() => { throw Error('synthetic fsync failure'); });
+  await assert.rejects(f.recover(), matches('LEDGER_PERSISTENCE_FAILED'));
+  assert.throws(() => f.ledger.snapshot(), matches('LEDGER_RELOAD_REQUIRED'));
+  assert.equal(f.saved.length, 0);
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 1 });
+});
+
+test('already mined original recovery restores signed bytes and authenticates receipt without forwarding', async () => {
+  const f = await recoveryFixture(); f.mine();
+  assert.deepEqual(await f.recover(), { transactionHash: f.expectedHash, status: 'confirmed', forwarded: false });
+  assert.equal(f.ledger.snapshot().records[0]?.signedTransaction, f.original.signedTransaction);
+  assert.equal(f.ledger.snapshot().records[0]?.receipt?.status, 'success');
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 1 });
+  // A subsequent invocation reconciles the same durable signed record without loading a signer.
+  assert.deepEqual(await f.recover(), { transactionHash: f.expectedHash, status: 'confirmed', forwarded: false });
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 1 });
+});
+
+test('known pending original recovery never forwards even with the original account nonce', async () => {
+  const f = await recoveryFixture(); const mined = f.mine(); f.setNonce(0n);
+  mined.transaction.blockHash = null; mined.transaction.blockNumber = null; mined.transaction.transactionIndex = null;
+  const read: ReadRpc = args => args.method === 'eth_getTransactionReceipt' ? Promise.resolve(null) : f.read(args);
+  assert.deepEqual(await f.recover({ read }), { transactionHash: f.expectedHash, status: 'pending', forwarded: false });
+  assert.equal(f.ledger.snapshot().records[0]?.status, 'admitted');
+  assert.deepEqual(f.recoveryCounters(), { sends: 0, keyLoads: 1 });
+});
+
+test('a transaction appearing while recovery signs is reconciled without forwarding', async () => {
+  const f = await recoveryFixture();
+  const result = await f.recover({ loadAccount: async () => { f.mine(); return f.account; } });
+  assert.deepEqual(result, { transactionHash: f.expectedHash, status: 'confirmed', forwarded: false });
+  assert.equal(f.recoveryCounters().sends, 0);
+});
+
+test('reservation persistence failure does not load keys or forward and requires a fresh ledger', async () => {
+  const f = fixture({ persist: () => { throw Error('synthetic fsync failure'); } });
+  await assert.rejects(f.submit(), matches('LEDGER_PERSISTENCE_FAILED'));
+  assert.deepEqual(f.counters(), { reads: 4, keyLoads: 0, sends: 0 });
+  await assertReloadRequired(f);
+});
+
+test('signed-byte persistence failure never forwards or exports a nondurable hash', async () => {
   const f = fixture({ persist: document => { if (document.records[0]?.status === 'admitted') throw Error('synthetic fsync failure'); } });
-  await assert.rejects(f.submit(), /synthetic fsync failure/);
+  await assert.rejects(f.submit(), matches('LEDGER_PERSISTENCE_FAILED'));
   assert.equal(f.counters().sends, 0);
-  assert.ok(f.ledger.snapshot().records[0]?.transactionHash);
-  await assert.rejects(f.submit('different'), matches('UNRESOLVED_TRANSACTION'));
+  assert.equal(f.saved.at(-1)?.records[0]?.status, 'reserved');
+  assert.equal(f.saved.at(-1)?.records[0]?.transactionHash, null);
+  await assertReloadRequired(f);
+});
+
+test('failure after persistence also requires reload and preserves the durable original hash', async () => {
+  let durable!: BudgetDocument;
+  const f = fixture({ persist: document => {
+    durable = copy(document);
+    if (document.records[0]?.status === 'admitted') throw Error('synthetic post-rename failure');
+  } });
+  await assert.rejects(f.submit(), matches('LEDGER_PERSISTENCE_FAILED'));
+  await assertReloadRequired(f);
+  const reloaded = new BudgetLedger(durable, () => undefined);
+  await reloaded.reconcileAll(f.read);
+  assert.equal(reloaded.snapshot().records[0]?.status, 'admitted');
+  assert.ok(reloaded.snapshot().records[0]?.transactionHash);
+  await assert.rejects(reloaded.submit({ id: 'operation:step', kind: 'native', address: f.account.address,
+    request: f.request, read: f.read, sendRaw: f.sendRaw, loadAccount: f.loadAccount, broadcast: true }), matches('ORIGINAL_TRANSACTION_RECONCILE_ONLY'));
+  assert.equal(f.counters().sends, 0);
+  assert.equal(f.counters().keyLoads, 1);
+});
+
+test('submitted persistence failure retains durable admission and never forwards again', async () => {
+  const f = fixture({ persist: document => { if (document.records[0]?.status === 'submitted') throw Error('synthetic fsync failure'); } });
+  await assert.rejects(f.submit(), matches('LEDGER_PERSISTENCE_FAILED'));
+  assert.equal(f.saved.at(-1)?.records[0]?.status, 'admitted');
+  assert.equal(f.counters().sends, 1);
+  await assertReloadRequired(f);
+  const reloaded = new BudgetLedger(f.saved.at(-1)!, () => undefined);
+  await reloaded.reconcileAll(f.read);
+  assert.equal(reloaded.snapshot().records[0]?.transactionHash, f.saved.at(-1)?.records[0]?.transactionHash);
+  assert.equal(f.counters().sends, 1);
+});
+
+test('receipt persistence failure cannot export a lower charge before reload', async () => {
+  const f = fixture({ persist: document => { if (document.records[0]?.status === 'confirmed') throw Error('synthetic fsync failure'); } });
+  await f.submit(); f.mine();
+  const maximum = f.ledger.publicSummary().chargedWei;
+  await assert.rejects(f.ledger.reconcileAll(f.read), matches('LEDGER_PERSISTENCE_FAILED'));
+  await assertReloadRequired(f);
+  const reloaded = new BudgetLedger(f.saved.at(-1)!, () => undefined);
+  assert.equal(reloaded.publicSummary().chargedWei, maximum);
+  await reloaded.reconcileAll(f.read);
+  assert.equal(reloaded.snapshot().records[0]?.status, 'confirmed');
+  assert.equal(f.counters().sends, 1);
+});
+
+test('reorg persistence failure requires reload before any other transaction', async () => {
+  let rejectSave = false;
+  const f = fixture({ persist: () => { if (rejectSave) throw Error('synthetic fsync failure'); } });
+  await f.submit(); const mined = f.mine(); await f.ledger.reconcileAll(f.read);
+  f.mined.delete(mined.txHash); rejectSave = true;
+  await assert.rejects(f.submit('after-reorg'), matches('LEDGER_PERSISTENCE_FAILED'));
+  await assertReloadRequired(f);
+  const reloaded = new BudgetLedger(f.saved.at(-1)!, () => undefined);
+  await reloaded.reconcileAll(f.read);
+  assert.equal(reloaded.snapshot().records[0]?.status, 'admitted');
+  assert.equal(reloaded.snapshot().records[0]?.receipt, null);
+  assert.equal(f.counters().sends, 1);
 });
 
 test('lost response never signs or forwards again; the original hash later authenticates', async () => {
@@ -256,6 +418,92 @@ test('stale nonce cannot be reused after a verified earlier transaction', async 
   await assert.rejects(f.submit('second'), matches('NONCE_ALREADY_USED')); assert.equal(f.counters().sends, 1);
 });
 
+async function pooledFixture(count = 9) {
+  const fixtures = await Promise.all(Array.from({ length: count }, async (_, index) => {
+    const f = fixture(); await f.submit(`pool:${index}`); const mined = f.mine();
+    const number = toHex(100 + index);
+    mined.receipt.blockNumber = number; mined.transaction.blockNumber = number; mined.block.number = number;
+    return { f, mined };
+  }));
+  const document = createBudgetDocument({ rootAccount: fixtures[0]!.f.account.address });
+  document.records = fixtures.map(({ f }) => f.ledger.snapshot().records[0]!);
+  const saved: BudgetDocument[] = [];
+  const ledger = new BudgetLedger(document, next => { saved.push(copy(next)); });
+  const read: ReadRpc = async args => {
+    if (args.method === 'eth_chainId') return toHex(LIVE_CHAIN_ID);
+    const found = fixtures.find(({ mined }) => args.method === 'eth_getBlockByNumber'
+      ? mined.block.number === args.params?.[0] : mined.txHash === args.params?.[0]);
+    if (!found) throw Error('Unexpected pooled fixture lookup');
+    if (args.method === 'eth_getTransactionReceipt') return found.mined.receipt;
+    if (args.method === 'eth_getTransactionByHash') return found.mined.transaction;
+    if (args.method === 'eth_getBlockByNumber') return found.mined.block;
+    throw Error('Unexpected pooled fixture method');
+  };
+  return { fixtures, ledger, saved, read };
+}
+
+test('reconciliation uses four record workers and at most four RPC calls including nested pairs', async () => {
+  const f = await pooledFixture(); let active = 0, peak = 0, receipts = 0;
+  const perRecord = new Map<string, number>(); const activeRecords = new Set<string>(); let peakRecords = 0;
+  const read: ReadRpc = async args => {
+    if (args.method === 'eth_chainId') return f.read(args);
+    const item = f.fixtures.find(({ mined }) => args.method === 'eth_getBlockByNumber'
+      ? mined.block.number === args.params?.[0] : mined.txHash === args.params?.[0])!;
+    if (args.method === 'eth_getTransactionReceipt') {
+      receipts++; activeRecords.add(item.mined.txHash); peakRecords = Math.max(peakRecords, activeRecords.size);
+    }
+    active++; peak = Math.max(peak, active);
+    try { await new Promise<void>(resolve => setImmediate(resolve)); return await f.read(args); }
+    finally {
+      active--;
+      if (args.method !== 'eth_getTransactionReceipt') {
+        const completed = (perRecord.get(item.mined.txHash) ?? 0) + 1; perRecord.set(item.mined.txHash, completed);
+        if (completed === 2) activeRecords.delete(item.mined.txHash);
+      }
+    }
+  };
+  await f.ledger.reconcileAll(read);
+  assert.equal(peak, 4); assert.equal(peakRecords, 4); assert.equal(active, 0); assert.equal(receipts, 9);
+  assert.ok(f.ledger.snapshot().records.every(record => record.status === 'confirmed'));
+  // Confirmed records still get all three reads on the next invocation.
+  await f.ledger.reconcileAll(read); assert.equal(receipts, 18);
+});
+
+test('pooled read failure drains in-flight reads and cannot partly mutate, persist, sign or send', async () => {
+  const f = await pooledFixture(); const before = f.ledger.snapshot();
+  let release!: () => void, reached!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { reached = resolve; });
+  let blocked = false, returned = false, loads = 0, sends = 0;
+  const read: ReadRpc = async args => {
+    if (args.method === 'eth_getBlockByNumber' && args.params?.[0] === '0x64') { blocked = true; reached(); await gate; }
+    if (args.method === 'eth_getTransactionByHash' && args.params?.[0] === f.fixtures[1]!.mined.txHash) {
+      // A different record's second lookup fails while the first block read remains in flight.
+      await entered; throw Error('synthetic pooled read failure');
+    }
+    return f.read(args);
+  };
+  const first = f.fixtures[0]!.f;
+  const pending = f.ledger.submit({ id: 'after-pool', kind: 'native', address: first.account.address, request: first.request,
+    read, loadAccount: async () => { loads++; return first.account; }, sendRaw: async raw => { sends++; return keccak256(raw); }, broadcast: true })
+    .finally(() => { returned = true; });
+  // Attach the assertion immediately so the deliberate rejection is always handled.
+  const rejected = assert.rejects(pending, /synthetic pooled read failure/);
+  await entered; await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(blocked, true); assert.equal(returned, false); assert.equal(f.saved.length, 0);
+  assert.throws(() => f.ledger.snapshot(), matches('LEDGER_BUSY'));
+  release(); await rejected;
+  assert.deepEqual(f.ledger.snapshot(), before); assert.equal(f.saved.length, 0);
+  assert.equal(loads, 0); assert.equal(sends, 0);
+});
+
+test('pooled authentication failure preserves every original receipt and reservation', async () => {
+  const f = await pooledFixture(5); const before = f.ledger.snapshot();
+  f.fixtures[4]!.mined.block.hash = `0x${'12'.repeat(32)}`;
+  await assert.rejects(f.ledger.reconcileAll(f.read), matches('NONCANONICAL_RECEIPT'));
+  assert.deepEqual(f.ledger.snapshot(), before); assert.equal(f.saved.length, 0);
+});
+
 test('funding needs explicit recipient and amount and charges successful principal plus gas', async () => {
   const f = fixture(), recipient = privateKeyToAccount(generatePrivateKey()).address, amount = '5000000000000000';
   const base = { id: 'fund', from: f.account.address, to: recipient, amountWei: amount, gas: '21000',
@@ -295,6 +543,8 @@ test('concurrent submissions on one ledger cannot race reservations', async () =
   const f = fixture({ persist: async document => { if (document.records[0]?.status === 'reserved') { reached(); await blocked; } } });
   const first = f.submit('first'); await entered;
   await assert.rejects(f.submit('second'), matches('LEDGER_BUSY'));
+  assert.throws(() => f.ledger.snapshot(), matches('LEDGER_BUSY'));
+  assert.throws(() => f.ledger.publicSummary(), matches('LEDGER_BUSY'));
   release(); await first; assert.equal(f.counters().sends, 1);
 });
 

@@ -108,14 +108,8 @@ Read behavior is conservative: one block for every page/reference; one bounded c
 
 Read-only CLI observation on 9 October 2026: direct invocation `node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability atomic --json` successfully read the historical B probe at block 353367 and explicitly returned `productProof:false`. On this Windows shell, the installed npm PowerShell wrapper dropped double-dash option arguments for an attempted `npm run verify -- --inspect-capability ...` invocation. The direct Node invocation avoids that wrapper. This CLI capability inspection is not a Partfolk project validation.
 
-## Anonymous query quota and private access-key reads
+## Query limits during aggregate verification
 
-Observed on **11 October 2026** against the official Tiramisu RPC. Five sequential read-only diagnostic calls distinguished basic RPC reachability from query availability: `eth_chainId` and block reads returned HTTP `200`, while an exact-key `arkiv_query` returned HTTP `429` with `ANON_COST_LIMITED`.
+Surface: SDK 0.8.1 and the public Tiramisu RPC. Minimal check: compare `eth_chainId` with an exact-key `arkiv_query` for a known entity. Expected: complete entity data or an actionable limit error. Observed: chain/block reads succeeded while the query returned HTTP `429` with `ANON_COST_LIMITED`.
 
-The response dated **13:51:59 UTC** reported a cost limit of **10,000**, **0 remaining**, a reset interval of **2,818 seconds**, and `Retry-After: 2818`. That indicated **14:38:57 UTC** as the retry time; it was not a guarantee that the next request would succeed. This was an observed anonymous query-budget limit, not evidence of a chain-wide outage or mutation failure.
-
-The interrupted product proof retained all **25 confirmed transactions** and their journals. Its next `material-willow` operation remained **unsent**. The failed query was not interpreted as an empty scope, and no replacement records were inferred or authored from it.
-
-A user-supplied access key was then tested through a private **Node-only** transport using the `X-API-KEY` header. Two read-only checks—chain identity and the existing project root—succeeded. The key was kept in a local file and never included in the browser bundle. The browser reader remains anonymous. Arkiv documents access keys, their network-specific quotas and the supported HTTP header in its [access-key guide](https://docs.arkiv.network/start-here/access-keys/); Partfolk's [operations guide](../docs/operations.md#runtime-and-network-configuration) describes the optional local setup.
-
-Developer experience observation: preserving the quota error code, remaining budget and retry guidance makes this condition actionable without treating missing data as success. Read-cost estimates or clearer budget diagnostics alongside scoped-query examples would help developers plan multi-record verification workloads. The successful authenticated reads establish that this recovery path worked for these checks; they do not establish unlimited capacity or a completed product proof.
+Aggregate readers must treat this as unavailable evidence, never an empty result. Respect `Retry-After`, then retry a bounded complete read. Preserving quota codes and retry guidance in SDK errors would make read-budget exhaustion easier to diagnose. This condition does not establish a chain-wide outage or mutation failure.
