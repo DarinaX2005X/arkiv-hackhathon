@@ -113,3 +113,11 @@ Read-only CLI observation on 9 October 2026: direct invocation `node node_module
 Surface: SDK 0.8.1 and the public Tiramisu RPC. Minimal check: compare `eth_chainId` with an exact-key `arkiv_query` for a known entity. Expected: complete entity data or an actionable limit error. Observed: chain/block reads succeeded while the query returned HTTP `429` with `ANON_COST_LIMITED`.
 
 Aggregate readers must treat this as unavailable evidence, never an empty result. Respect `Retry-After`, then retry a bounded complete read. Preserving quota codes and retry guidance in SDK errors would make read-budget exhaustion easier to diagnose. This condition does not establish a chain-wide outage or mutation failure.
+
+## Live agreement and repair verification
+
+The [completed public proof](evidence/product-proof.json) exercises SDK 0.8.1 on Tiramisu with synthetic owners and independently authored records. All 92 transactions are confirmed. Seven dated observations capture the agreement lifecycle and matching independent CLI reads.
+
+Expected: withdrawal invalidates readiness, and a changed or restored plan cannot inherit earlier consent. Observed: P1 was Ready with seven approvals at block 442076, then Changed with six after withdrawal at 442152. Repaired P2 and restored P3 each began with zero current approvals and became Ready only after seven fresh decisions. P3's final snapshot at block 444117 retains the complete P1 → P2 → P3 lineage. The independent verifier reproduced the recorded states at their exact blocks.
+
+This establishes a real public contributor-agreement workflow, beyond the earlier primitive probes. It is dated evidence of synthetic consent, not a claim about current readiness, physical work, visitor registration or browser interaction.

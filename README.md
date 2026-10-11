@@ -32,7 +32,7 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
 
-**[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A complete live product proof and demonstration video are still pending.
+**[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A completed [public proof](arkiv/evidence/product-proof.json) demonstrates contributor agreement, withdrawal and fresh consent on the network.
 
 ## One event, three ways to take part
 
@@ -192,15 +192,24 @@ The implementation is organized around `src/domain/` for constraints and consent
 
 ### What the evidence establishes
 
+Open the [public Small Works project](https://partfolk.vercel.app/#/projects/0xf4e900fa56b9989f196b53cee9a7ed2abb1bbc5acc9179e47e7b11e32c7887a7/needs) or inspect its [proof manifest](arkiv/evidence/product-proof.json). The completed synthetic run on **11 October 2026** records 92 confirmed transactions and seven dated snapshots: P1 became Ready, Oak's withdrawal made it Changed, and both the repaired P2 and restored P3 required seven fresh approvals. An independent CLI verified the same blocks, decisions and P1 → P2 → P3 lineage.
+
+Reproduce the recorded final state with this read-only command, which also works directly in PowerShell:
+
+```sh
+node node_modules/tsx/dist/cli.mjs src/cli/verify.ts 0xf4e900fa56b9989f196b53cee9a7ed2abb1bbc5acc9179e47e7b11e32c7887a7 --block 444117 --json
+```
+
+The recorded result at block **444117** is `ready` with **7/7 approvals** and all three proposal versions. This proves the dated public agreement with synthetic owners; it does not establish current readiness, real-world identities or physical execution.
+
 The verified source baseline passed TypeScript, unit/integration checks and both builds. Clean installation and static serving were also checked with Node.js 22.13.0 and npm 10.9.2.
 
 - [Integration scenarios](tests/integration/README.md) cover three-role participation, independent client processes, changed plans, interrupted operations and execution exports against a strict native-ledger fixture.
 - [Bootstrap](arkiv/evidence/bootstrap.json) and [atomic transition](arkiv/evidence/atomic-transition.json) artifacts record historical Tiramisu capabilities. The atomic probe replaced A with B and rejected a stale A-to-C estimate; it did not mine a stale rollback.
-- [Live product proof tooling](tests/arkiv-live/README.md) is separate. Its tests and the earlier capabilities are not a completed public product demonstration.
 
 ## Current boundaries
 
-- **Release status:** the hosted application is available. A complete live product proof and demonstration video remain pending; end-to-end real-wallet acceptance is not yet complete.
+- **Release status:** the hosted application and public contributor-workflow proof are available. Synthetic catalogue events have not yet been confirmed, and a public demonstration video is not available. Browser and wallet UI acceptance is separate from the protocol proof.
 - **Readiness is dated:** owners can withdraw, delete records or let them expire. Agreement is neither future availability nor proof of physical completion.
 - **Audience details are organizer-authored:** public schedule and location are entered separately from contributor duties. The current validator does not establish their semantic correspondence.
 - **Admission is bounded:** limited capacity and invitation lists support up to 512 entries. Waiters are not automatically promoted. Read and payload limits are defined in the [schema](arkiv/schema.md).
