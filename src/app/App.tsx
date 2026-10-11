@@ -66,7 +66,7 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
     </main>
     <footer className="pf-app-footer">
       <div className="pf-footer-intro">
-        <a className="pf-footer-brand" href={routeHref({ name: 'home' })}><BrandMark /><strong>{t('brand')}</strong></a>
+        <a className="pf-footer-brand pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><strong>{t('brand')}</strong></a>
         <p>Bring your event together. Keep everyone in control of their part.</p>
         <p className="pf-secondary">People publish their own offers and decisions on Arkiv.</p>
       </div>

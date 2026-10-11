@@ -36,3 +36,13 @@
 .pf-contribution-editor { background: var(--surface-inset); border: 0; }
 .pf-contribution-window { border: 0; }
 @media (max-width: 680px) { .pf-offer-grid { grid-template-columns: minmax(0, 1fr); } .pf-agreement-next .pf-button { width: 100%; } }
+
+/* Offer disclosures stay still while their material signals the available detail. */
+.pf-offer-card { transition: border-color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease); }
+.pf-offer-quantity { transition: background-color var(--motion-hover) var(--motion-ease); }
+.pf-offer-card:focus-within { border-color: var(--action-on-light); box-shadow: var(--shadow-surface-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .pf-offer-card:has(summary):hover { border-color: var(--action-on-light); box-shadow: var(--shadow-surface-hover); }
+  .pf-offer-card:has(summary):hover .pf-offer-quantity { background: var(--selected-surface); }
+}
+@media (prefers-reduced-motion: reduce) { .pf-offer-card, .pf-offer-quantity { transition: none; } }

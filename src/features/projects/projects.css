@@ -68,7 +68,7 @@
 .project-steps li > span { display: grid; place-items: center; border: 1px solid var(--border-control); border-radius: 50%; min-width: 28px; height: 28px; font-size: .85rem; }
 @media (hover: hover) and (pointer: fine) {
   .project-card { transition: border-color 180ms ease, box-shadow 180ms ease; }
-  .project-card:has(a:hover, button:hover) { border-color: var(--action-on-light, #1D5A43); }
+  .project-card:hover { border-color: var(--action-on-light); box-shadow: var(--shadow-surface-hover); }
   .project-tabs :is(a, button):hover { color: var(--on-action-on-dark); background: var(--action-on-dark, #D8EDB7); }
 }
 .project-card:focus-within { border-color: var(--action-on-light, #1D5A43); }
@@ -76,3 +76,16 @@
 @media (max-width: 720px) { .project-library, .project-start { grid-template-columns: minmax(0, 1fr); } .project-start .project-folio { max-width: 250px; } }
 @media (max-width: 479px) { .project-filters, .project-card-facts { grid-template-columns: minmax(0, 1fr); } .project-draft-delete { margin-left: 0; } .project-card-actions > :first-child { flex-basis: 100%; } .project-start { padding: var(--space-5, 20px); } }
 @media (prefers-reduced-motion: reduce) { .project-card { transition: none; } }
+
+.project-start { transition: border-color var(--motion-hover) var(--motion-ease); }
+.project-folio { pointer-events: none; transform-origin: 50% 75%; transition: transform var(--motion-hover) var(--motion-ease); }
+.project-card:focus-within { box-shadow: var(--shadow-surface-hover); }
+.project-start:focus-within { border-color: var(--action-on-light); }
+@media (hover: hover) and (pointer: fine) {
+  .project-start:hover { border-color: var(--action-on-light); }
+  .project-start:hover .project-folio { transform: translateY(-3px) rotate(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-start, .project-folio { transition: none; }
+  .project-start:hover .project-folio { transform: none; }
+}

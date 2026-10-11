@@ -138,3 +138,17 @@
   .pf-landing-text-link span { transition: none; }
   .pf-landing-text-link:hover span { transform: none; }
 }
+
+/* Role cards respond as a group; their links remain the only click targets. */
+.pf-landing-role { transition: box-shadow var(--motion-hover) var(--motion-ease); }
+.pf-landing-role-art .pf-process-art, .pf-landing-next-object { pointer-events: none; transform-origin: 50% 75%; transition: transform var(--motion-hover) var(--motion-ease); }
+.pf-landing-role:focus-within { box-shadow: inset 0 0 0 2px var(--action-on-light), var(--shadow-surface-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .pf-landing-role:hover { box-shadow: var(--shadow-surface-hover); }
+  .pf-landing-role:hover .pf-process-art { transform: translateY(-3px) rotate(-2deg); }
+  .pf-landing-next:hover .pf-landing-next-object { transform: translateY(-3px) rotate(2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-landing-role, .pf-landing-role-art .pf-process-art, .pf-landing-next-object { transition: none; }
+  .pf-landing-role:hover .pf-process-art, .pf-landing-next:hover .pf-landing-next-object { transform: none; }
+}

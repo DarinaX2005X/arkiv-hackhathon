@@ -54,6 +54,7 @@
   --motion-press: 120ms;
   --motion-reveal: 200ms;
   --shadow-surface: 0 1px 3px rgb(8 27 20 / 6%), 0 8px 20px rgb(8 27 20 / 7%);
+  --shadow-surface-hover: 0 2px 4px rgb(8 27 20 / 8%), 0 12px 24px rgb(8 27 20 / 12%);
   --shadow-control: inset 0 1px 0 rgb(255 255 255 / 12%), 0 1px 2px rgb(8 27 20 / 8%);
   --shadow-control-hover: inset 0 1px 0 rgb(255 255 255 / 20%), 0 3px 8px rgb(8 27 20 / 12%);
   --shadow-layer: 0 16px 42px rgb(0 15 10 / 22%);
@@ -141,7 +142,8 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-secondary { color: var(--text-secondary); }
 .pf-brand-mark { flex: 0 0 24px; width: 24px; height: 24px; }
 .pf-brand { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; color: var(--brand-ink); text-decoration: none; transition: color var(--motion-hover) var(--motion-ease); }
-.pf-brand-mark { transition: transform var(--motion-hover) var(--motion-ease); }
+.pf-brand-mark { transform-origin: 50% 60%; transition: transform var(--motion-hover) var(--motion-ease); }
+.pf-brand:focus-visible { color: var(--action); }
 .pf-wordmark { font-size: 25px; line-height: 28px; letter-spacing: -.02em; font-weight: 600; }
 
 .pf-button {
@@ -264,7 +266,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
   :where(a:link, a:visited):hover { color: var(--action-hover); text-decoration-thickness: 2px; }
   :where(nav a):hover { background-color: var(--surface-hover); }
   .pf-brand:hover { color: var(--action); }
-  .pf-brand:hover .pf-brand-mark { transform: translateY(-1px); }
+  .pf-brand:hover .pf-brand-mark { transform: translateY(-1px) rotate(-7deg); }
   .pf-button--primary:hover:not(:disabled):not([aria-disabled='true']) { background: linear-gradient(160deg, color-mix(in srgb, var(--action-hover), white 12%), var(--action-hover)); color: var(--on-action); box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%), 0 3px 6px rgb(20 61 49 / 14%), 0 10px 20px rgb(20 61 49 / 18%); }
   .pf-button--secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-control); box-shadow: var(--shadow-control-hover); }
   .pf-button--quiet:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); }

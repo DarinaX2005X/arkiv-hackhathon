@@ -60,7 +60,7 @@
 .pf-my-event-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); }
 .pf-my-event-heading > div { display: grid; gap: var(--space-2); min-width: 0; }
 @media (hover: hover) and (pointer: fine) {
-  .pf-event-row:has(a:hover) { transform: translateY(-2px); box-shadow: 0 8px 20px rgb(8 27 20 / .11); }
+  .pf-event-row:has(a[href]):hover { transform: translateY(-2px); box-shadow: var(--shadow-surface-hover); }
   .pf-event-row h2 a:hover { text-decoration-color: currentColor; }
 }
 @media (max-width: 960px) {
@@ -84,3 +84,12 @@
   .pf-event-registration .pf-button, .pf-event-filters .pf-button { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .pf-event-row { transition: none; transform: none !important; } }
+
+.pf-my-event { transition: box-shadow var(--motion-hover) var(--motion-ease); }
+.pf-event-date { transition: background-color var(--motion-hover) var(--motion-ease); }
+.pf-event-row:focus-within, .pf-my-event:focus-within { box-shadow: inset 0 0 0 2px var(--action-on-light), var(--shadow-surface-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .pf-event-row:has(a[href]):hover .pf-event-date { background: var(--selected-surface); }
+  .pf-my-event:has(a[href], button:enabled):hover { box-shadow: var(--shadow-surface-hover); }
+}
+@media (prefers-reduced-motion: reduce) { .pf-my-event, .pf-event-date { transition: none; } }
