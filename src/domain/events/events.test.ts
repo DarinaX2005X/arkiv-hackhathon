@@ -5,7 +5,8 @@ import { deriveRequiredApprovers } from '../validation';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from '../types';
 import type { Actor, EntityKey, EntityPayload, EntityProvenance, EntityRecord, PlanDocument, ProjectAggregate, PublisherAggregate, Snapshot, SourcePlanRef } from '../types';
 import { attendanceStatus, audienceChanges, audienceHash, deriveEventAvailability, EVENTS_PROTOCOL,
-  validateEventPayload, validateEventRecord, validateEventReleaseBinding } from './index';
+  canAdmitAttendance, eventPublicationDeadlineGuard, eventRosterVerified, registrationEligibility, validateEventPayload, validateEventRecord, validateEventReleaseBinding } from './index';
+import { MAX_EVENT_RESERVATIONS, MAX_EVENT_STATE_PAYLOAD_BYTES } from './types';
 import type { AttendanceState, AudienceTerms, EventAggregate, EventPayload, EventRecord, EventRelease, EventScope, EventState } from './index';
 
 const NOW = 1_900_000_000_000;
@@ -73,6 +74,205 @@ function fixture(): { event: EventAggregate; attendance: EventScope<AttendanceSt
     projectRoot: root, attendee: attendee.address, releaseKey: releaseRecord.key, audienceHash: release.audienceHash, decision: 'going', predecessorKeys: [] }, attendee) };
   return { event, attendance, state, release, project };
 }
+
+function structuredFixture() {
+  const result = fixture(); const { event, state, release, attendance } = result;
+  release.terms = { ...release.terms, termsVersion: 2, format: 'hybrid',
+    location: { countryCode: 'GB', country: 'United Kingdom', city: 'London', venue: release.terms.venue },
+    online: { url: 'https://meet.example.org/public-room', instructions: 'Public room; no password.' },
+    registration: { deadline: NOW + 50, capacity: { kind: 'limited', limit: 1 }, waitlist: true, admission: 'open', invitedAccounts: [] } };
+  release.audienceHash = audienceHash(release.terms); state.audienceHash = release.audienceHash; state.admissions = [];
+  if (attendance.status !== 'unique') throw new Error('fixture');
+  attendance.entity.payload.audienceHash = release.audienceHash;
+  event.roster = { snapshot: event.snapshot, diagnostics: [], entries: [{ attendee: attendee.address, attendance,
+    registeredRelease: event.release, inclusionTimestamp: NOW - 100 }] };
+  return { ...result, attendance, entry: event.roster.entries[0]! };
+}
+
+describe('structured conditions and explicit admission', () => {
+  it('fits the maximum full roster and predecessor set within the source-checked SDK payload ceiling', () => {
+    const { state } = structuredFixture();
+    state.operationId = '\\'.repeat(128); state.createdAt = 8_640_000_000_000_000;
+    state.startsAt = 8_639_999_999_999_999; state.endsAt = 8_640_000_000_000_000; state.status = 'cancelled';
+    state.predecessorKeys = Array.from({ length: 64 }, (_, index) => key(index + 1));
+    state.admissions = Array.from({ length: MAX_EVENT_RESERVATIONS }, (_, index) => ({
+      attendee: `0x${index.toString(16).padStart(40, '0')}` as `0x${string}`, attendanceKey: key(index + 1000), releaseKey: key(index + 2000),
+    }));
+    expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBe(120_700);
+    expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBeLessThan(MAX_EVENT_STATE_PAYLOAD_BYTES);
+    expect(MAX_EVENT_STATE_PAYLOAD_BYTES).toBeLessThan(128 * 1024);
+    expect(validateEventPayload(state).valid).toBe(true);
+    state.admissions.push({ attendee: wallet('9').address, attendanceKey: key(9999), releaseKey: key(8888) });
+    expect(validateEventPayload(state).valid).toBe(false);
+  });
+  it('preserves the exact legacy hash and hashes every structured material condition', () => {
+    const legacy = terms();
+    expect(audienceHash(legacy)).toBe('0x2b9d1c0e7f57cf601c5eda3965ddce11dcd7dd9844bb4a78187dadab4da54422');
+    const { release } = structuredFixture(); expect(validateEventPayload(release).valid).toBe(true);
+    const original = audienceHash(release.terms);
+    for (const change of [{ format: 'online', location: null }, { location: { ...release.terms.location!, city: 'Oxford' } },
+      { online: { ...release.terms.online!, instructions: 'Another public room' } },
+      { registration: { ...release.terms.registration!, deadline: null } },
+      { registration: { ...release.terms.registration!, capacity: { kind: 'limited', limit: 2 } } },
+      { registration: { ...release.terms.registration!, waitlist: false } },
+      { registration: { ...release.terms.registration!, admission: 'invite_only', invitedAccounts: [attendee.address] } }]) {
+      expect(audienceHash({ ...release.terms, ...change } as AudienceTerms)).not.toBe(original);
+    }
+    expect(audienceChanges(legacy, release.terms)).toEqual(['termsVersion', 'format', 'location', 'online', 'registration']);
+  });
+
+  it('rejects partial extensions, empty physical locations, credentials, bad limits and late deadlines', () => {
+    const { release } = structuredFixture();
+    const valid = (next: AudienceTerms) => validateEventPayload({ ...release, terms: next, audienceHash: audienceHash(next) }).valid;
+    expect(valid({ ...release.terms, termsVersion: undefined })).toBe(false);
+    expect(valid({ ...release.terms, location: null })).toBe(false);
+    expect(valid({ ...release.terms, registration: { ...release.terms.registration!, capacity: { kind: 'limited', limit: 0 } } })).toBe(false);
+    expect(valid({ ...release.terms, registration: { ...release.terms.registration!, deadline: release.terms.endsAt + 1 } })).toBe(false);
+    for (const url of ['http://meet.example.org', 'https://user:pass@meet.example.org', 'https://meet.example.org?pwd=secret', 'https://meet.example.org#token=secret']) {
+      expect(valid({ ...release.terms, online: { url, instructions: '' } })).toBe(false);
+    }
+    expect(valid({ ...release.terms, online: { url: '', instructions: 'Use the publicly listed room in the community directory.' } })).toBe(true);
+    expect(valid({ ...release.terms, online: { url: '', instructions: '' } })).toBe(false);
+    expect(valid({ ...release.terms, online: { url: 'https://www.youtube.com/watch?v=public-stream#program', instructions: '' } })).toBe(true);
+  });
+
+  it('distinguishes a pending request from a reserved place, including at capacity', () => {
+    const { event, attendance, state, entry } = structuredFixture();
+    expect(eventRosterVerified(event, NOW)).toBe(true);
+    expect(registrationEligibility(event, attendee, NOW)).toEqual({ status: 'request', requiresApproval: true, remaining: 1 });
+    expect(attendanceStatus(attendance, event, NOW)).toBe('pending'); expect(canAdmitAttendance(event, entry, NOW)).toBe(true);
+    state.admissions = [{ attendee: attendee.address, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }];
+    expect(attendanceStatus(attendance, event, NOW)).toBe('going');
+    expect(registrationEligibility(event, attendee, NOW)).toEqual({ status: 'request', requiresApproval: true, remaining: 0 });
+  });
+
+  it('uses chain inclusion for the deadline and retains timely admitted attendance after it', () => {
+    const { event, attendance, state, entry } = structuredFixture();
+    event.release!.payload.terms.registration!.deadline = NOW - 50;
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms);
+    state.audienceHash = event.release!.payload.audienceHash; attendance.entity.payload.audienceHash = state.audienceHash;
+    attendance.entity.payload.createdAt = NOW - 1_000_000;
+    entry.inclusionTimestamp = NOW;
+    expect(attendanceStatus(attendance, event, NOW)).toBe('registration_closed'); expect(canAdmitAttendance(event, entry, NOW)).toBe(false);
+    entry.inclusionTimestamp = NOW - 100;
+    state.admissions = [{ attendee: attendee.address, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }];
+    expect(attendanceStatus(attendance, event, NOW + 60)).toBe('going');
+    expect(registrationEligibility(event, attendee, NOW + 60).status).toBe('registration_closed');
+  });
+
+  it('permits changed-release reconfirmation after the deadline only for immutable-listed wallets with a still-held place', () => {
+    const { event, attendance, state, entry } = structuredFixture();
+    event.release!.payload.predecessorReleaseKey = key(501); event.release!.payload.reconfirmationAccounts = [attendee.address];
+    event.release!.payload.terms.registration!.deadline = NOW - 50;
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms); state.audienceHash = event.release!.payload.audienceHash;
+    attendance.entity.payload.audienceHash = state.audienceHash; entry.inclusionTimestamp = NOW;
+    state.admissions = [{ attendee: attendee.address, attendanceKey: key(502), releaseKey: key(501) }];
+    expect(registrationEligibility(event, attendee, NOW).status).toBe('request');
+    expect(registrationEligibility(event, contributor, NOW).status).toBe('registration_closed');
+    expect(attendanceStatus(attendance, event, NOW)).toBe('pending'); expect(canAdmitAttendance(event, entry, NOW)).toBe(true);
+    state.admissions = [];
+    expect(registrationEligibility(event, attendee, NOW).status).toBe('registration_closed');
+    expect(attendanceStatus(attendance, event, NOW)).toBe('registration_closed');
+  });
+
+  it('requires a deliberate future deadline for material edits affecting unreserved unlimited attendees', () => {
+    const { event, attendance, state } = structuredFixture();
+    event.release!.payload.terms.registration = { ...event.release!.payload.terms.registration!, capacity: { kind: 'unlimited' }, waitlist: false, deadline: NOW - 50 };
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms); state.audienceHash = event.release!.payload.audienceHash;
+    attendance.entity.payload.audienceHash = state.audienceHash;
+    const changed: AudienceTerms = { ...event.release!.payload.terms, description: 'Changed terms' };
+    expect(eventPublicationDeadlineGuard(event, changed, NOW)).toBe('reopen_required');
+    expect(eventPublicationDeadlineGuard(event, event.release!.payload.terms, NOW)).toBe('ready');
+    const reopened = { ...changed, registration: { ...changed.registration!, deadline: NOW + 10 } };
+    expect(eventPublicationDeadlineGuard(event, reopened, NOW)).toBe('ready');
+    event.roster!.snapshot = { ...event.snapshot, completeness: 'incomplete' };
+    expect(eventPublicationDeadlineGuard(event, changed, NOW)).toBe('unverified');
+  });
+
+  it('does not lose an active older-release attendee across repeated changes before a closed deadline', () => {
+    const { event, attendance, state, entry } = structuredFixture();
+    event.release!.payload.terms.registration = { ...event.release!.payload.terms.registration!, capacity: { kind: 'unlimited' }, waitlist: false, deadline: NOW - 50 };
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms); state.audienceHash = event.release!.payload.audienceHash;
+    attendance.entity.payload.audienceHash = state.audienceHash;
+    const prior = structuredClone(event.release!);
+    event.release!.key = key(510); event.release!.payload.predecessorReleaseKey = prior.key;
+    event.release!.payload.terms.description = 'Second release'; event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms);
+    state.releaseKey = event.release!.key; state.audienceHash = event.release!.payload.audienceHash; entry.registeredRelease = prior;
+    expect(attendanceStatus(attendance, event, NOW, prior)).toBe('needs_review');
+    const third = { ...event.release!.payload.terms, description: 'Third release' };
+    expect(eventPublicationDeadlineGuard(event, third, NOW)).toBe('reopen_required');
+    entry.registeredRelease = null;
+    expect(eventPublicationDeadlineGuard(event, third, NOW)).toBe('unverified');
+  });
+
+  it('requires the public invitation independently of an owner admission claim', () => {
+    const { event, attendance, state, release } = structuredFixture();
+    release.terms.registration!.admission = 'invite_only';
+    release.audienceHash = audienceHash(release.terms); state.audienceHash = release.audienceHash; attendance.entity.payload.audienceHash = release.audienceHash;
+    expect(registrationEligibility(event, attendee, NOW).status).toBe('invitation_required');
+    expect(attendanceStatus(attendance, event, NOW)).toBe('invitation_required');
+    state.admissions = [{ attendee: attendee.address, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }];
+    expect(eventRosterVerified(event, NOW)).toBe(false);
+  });
+
+  it('fails closed for missing, partial, forked, foreign, or over-capacity admission evidence', () => {
+    for (const mutate of [
+      (f: ReturnType<typeof structuredFixture>) => { f.event.roster = undefined; },
+      (f: ReturnType<typeof structuredFixture>) => { f.event.roster!.snapshot = { ...f.event.snapshot, completeness: 'incomplete' }; },
+      (f: ReturnType<typeof structuredFixture>) => { f.event.roster!.entries = []; },
+      (f: ReturnType<typeof structuredFixture>) => { f.entry.attendance = { status: 'conflict', entities: [f.attendance.entity, f.attendance.entity] }; },
+      (f: ReturnType<typeof structuredFixture>) => { f.attendance.entity.provenance.creator = contributor; },
+      (f: ReturnType<typeof structuredFixture>) => { f.state.admissions!.push({ attendee: contributor.address, attendanceKey: key(42), releaseKey: f.event.release!.key }); },
+    ]) {
+      const f = structuredFixture(); f.state.admissions = [{ attendee: attendee.address, attendanceKey: f.attendance.entity.key, releaseKey: f.event.release!.key }]; mutate(f);
+      expect(eventRosterVerified(f.event, NOW)).toBe(false); expect(attendanceStatus(f.attendance, f.event, NOW)).toBe('unverified');
+    }
+  });
+
+  it('retains the reserved count on withdrawal and requires owner confirmation of a replacement request', () => {
+    const { event, attendance, state, entry } = structuredFixture();
+    const originalKey = attendance.entity.key;
+    state.admissions = [{ attendee: attendee.address, attendanceKey: originalKey, releaseKey: event.release!.key }];
+    attendance.entity = { ...attendance.entity, key: key(90), payload: { ...attendance.entity.payload, predecessorKeys: [originalKey], decision: 'withdrawn' } };
+    entry.attendance = attendance;
+    expect(attendanceStatus(attendance, event, NOW)).toBe('withdrawn'); expect(registrationEligibility(event, attendee, NOW).remaining).toBe(0);
+    attendance.entity.payload.decision = 'going';
+    expect(attendanceStatus(attendance, event, NOW)).toBe('pending');
+    state.admissions = [{ attendee: attendee.address, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }];
+    expect(attendanceStatus(attendance, event, NOW)).toBe('going');
+  });
+
+  it('keeps unrelated admission valid across withdrawal and arbitrary rejoin successors without transferring confirmation', () => {
+    const f = structuredFixture(); const { event, state, attendance, entry } = f;
+    event.release!.payload.terms.registration!.capacity = { kind: 'limited', limit: 2 };
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms);
+    state.audienceHash = event.release!.payload.audienceHash; attendance.entity.payload.audienceHash = state.audienceHash;
+    const other = eventRecord(key(77), { ...attendance.entity.payload, attendee: contributor.address, operationId: 'other' }, contributor);
+    const otherScope: EventScope<AttendanceState> = { status: 'unique', entity: other };
+    event.roster!.entries.push({ attendee: contributor.address, attendance: otherScope, registeredRelease: event.release, inclusionTimestamp: NOW - 100 });
+    const original = attendance.entity.key;
+    state.admissions = [{ attendee: attendee.address, attendanceKey: original, releaseKey: event.release!.key },
+      { attendee: contributor.address, attendanceKey: other.key, releaseKey: event.release!.key }];
+    for (let index = 0; index < 6; index++) {
+      const previous = attendance.entity.key;
+      attendance.entity = { ...attendance.entity, key: key(200 + index), payload: { ...attendance.entity.payload,
+        decision: index % 2 === 0 ? 'withdrawn' : 'going', predecessorKeys: [previous] } };
+      entry.attendance = attendance;
+      expect(eventRosterVerified(event, NOW)).toBe(true);
+      expect(registrationEligibility(event, attendee, NOW).remaining).toBe(0);
+      expect(attendanceStatus(otherScope, event, NOW)).toBe('going');
+      expect(attendanceStatus(attendance, event, NOW)).toBe(index % 2 === 0 ? 'withdrawn' : 'pending');
+    }
+    expect(state.admissions[0]!.attendanceKey).toBe(original);
+  });
+
+  it('blocks admission when the source is paused and keeps owner withdrawal legible during an outage', () => {
+    const { event, attendance, entry } = structuredFixture(); event.sourceProject = null;
+    expect(canAdmitAttendance(event, entry, NOW)).toBe(false);
+    attendance.entity.payload.decision = 'withdrawn'; event.root = null; event.release = null;
+    expect(attendanceStatus(attendance, event, NOW)).toBe('withdrawn');
+  });
+});
 
 describe('event payload validation and audience consent', () => {
   it('validates all extension records independently of the original protocol', () => {

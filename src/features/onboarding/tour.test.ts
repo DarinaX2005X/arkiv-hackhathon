@@ -6,7 +6,7 @@ import type { Repository } from '../../data/types';
 import type { Actor } from '../../domain/types';
 import {
   createTourController, isTourProgress, resolveTourTarget, tourScope,
-  tourSteps, workspaceTour, TOUR_STEP_COUNT,
+  tourSteps, workspaceTour, TOUR_STEP_COUNT, canShowTour, tourContext, tourRole,
 } from './tour';
 
 const actorA = { kind: 'wallet', address: `0x${'ab'.repeat(20)}` } as const;
@@ -23,6 +23,32 @@ function memoryStorage() {
 const runtimeFor = (storage: StoragePort | null) => createAppRuntime({ storage, namespace: 'tour-test', now: () => 1791700000000 });
 
 describe('contextual tour progress without rendering', () => {
+  it('requires an actual public wallet session even when stored progress is active', () => {
+    const route: Route = { name: 'workspace' };
+    expect(canShowTour(route, 'public', actorA)).toBe(true);
+    expect(canShowTour(route, 'public', null)).toBe(false);
+    expect(canShowTour(route, 'public', { kind: 'local', id: 'local-actor:me' })).toBe(false);
+    expect(canShowTour(route, 'practice', actorA)).toBe(false);
+    expect(canShowTour({ name: 'onboarding' }, 'public', actorA)).toBe(false);
+    expect(canShowTour({ name: 'help' }, 'public', actorA)).toBe(true);
+  });
+
+  it('adapts to the current invitation before account preference and preserves Help context', () => {
+    const root = `0x${'ef'.repeat(32)}` as const;
+    const event: Route = { name: 'event', projectRoot: root };
+    const invitation: Route = { name: 'contributions', projectRoot: root, returnTo: `/projects/${root}/needs` };
+    expect(tourContext(event, 'workspace')).toBe(event);
+    expect(tourContext(invitation, 'my-events')).toBe(invitation);
+    expect(tourRole(event)).toBe('visitor');
+    expect(tourRole(invitation)).toBe('contributor');
+    expect(tourRole({ name: 'new-project' })).toBe('organizer');
+    expect(tourRole({ name: 'requests' })).toBe('contributor');
+    expect(tourContext({ name: 'help', returnTo: `/events/${root}` }, 'contributions')).toEqual(event);
+    expect(tourContext({ name: 'help' }, 'my-events')).toEqual({ name: 'my-events' });
+    expect(tourContext({ name: 'help', returnTo: 'https://example.org' }, 'contributions')).toEqual({ name: 'contributions' });
+    expect(tourSteps(event)[0]?.title).toBe('Start with this event');
+    expect(tourSteps(invitation)[1]?.body).toContain('Your invitation is still here');
+  });
   it('only stores guide progress and never navigates, changes authority, touches drafts or calls the repository', () => {
     const { storage, values } = memoryStorage();
     const repositoryAccesses: PropertyKey[] = [];

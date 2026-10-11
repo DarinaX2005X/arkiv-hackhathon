@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { stringToHex, toHex } from 'viem';
-import { audienceHash, deriveEventAvailability, attendanceStatus, EVENTS_PROTOCOL } from '../../domain/events';
+import { audienceHash, deriveEventAvailability, attendanceStatus, canAdmitAttendance, registrationEligibility, EVENTS_PROTOCOL } from '../../domain/events';
 import type { AttendanceState, AudienceTerms, EventPayload, EventRelease, EventState } from '../../domain/events';
 import type { AccountAddress, DomainReason, PublicEntityKey } from '../../domain/types';
 import type { RpcRequest } from '../arkiv/client';
 import type { ReaderPolicy } from '../arkiv/reader';
 import { repositoryError } from '../arkiv/errors';
-import { COORDINATOR, KEYS, NOW, STRANGER, entityKey, rawEntity, readyFixture } from '../__tests__/arkiv-fixture';
+import { COORDINATOR, KEYS, NOW, PUBLISHER, STRANGER, entityKey, rawEntity, readyFixture } from '../__tests__/arkiv-fixture';
 import type { RawAttribute, RawEntity, ReadRpcFixture } from '../__tests__/arkiv-fixture';
 import { EventReader } from './reader';
 import { EventRepository } from './repository';
@@ -53,6 +53,19 @@ function fixture() {
   return { ...base, release, state, attendance };
 }
 
+function structuredFixture() {
+  const result = fixture(); const { release, state, attendance, rpc } = result;
+  release.terms = { ...release.terms, termsVersion: 2, format: 'in_person',
+    location: { countryCode: 'GB', country: 'United Kingdom', city: 'Oxford', venue: release.terms.venue }, online: null,
+    registration: { deadline: NOW + 10_000, capacity: { kind: 'limited', limit: 1 }, waitlist: true, admission: 'open', invitedAccounts: [] } };
+  release.audienceHash = audienceHash(release.terms); state.audienceHash = release.audienceHash; attendance.audienceHash = release.audienceHash; state.admissions = [];
+  const save = () => {
+    rpc.put(rawEvent(RELEASE, release, COORDINATOR)); rpc.put(rawEvent(STATE, state, COORDINATOR));
+    rpc.put(rawEvent(ATTENDANCE, attendance, STRANGER, { createdAt: toHex(100) }));
+  };
+  save(); return { ...result, save };
+}
+
 function reader(rpc: ReadRpcFixture, policy: Partial<ReaderPolicy> = {}) {
   const queries: string[] = [];
   const request: RpcRequest = async args => {
@@ -78,6 +91,73 @@ async function rejects(task: Promise<unknown>, code: DomainReason['code']) {
   let caught: unknown; try { await task; } catch (error) { caught = error; }
   expect(caught).toBeDefined(); expect(codes(repositoryError(caught).reasons)).toContain(code);
 }
+
+describe('complete authenticated admission rosters', () => {
+  it('paginates all claims at one block, authenticates each creator, and sorts same-block keys deterministically', async () => {
+    const f = structuredFixture(); f.rpc.pageSize = 1;
+    f.rpc.put(rawEvent(entityKey(90), { ...f.attendance, attendee: PUBLISHER, operationId: 'earlier-key' }, PUBLISHER, { createdAt: toHex(100) }));
+    const event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(event.roster?.entries.map(entry => entry.attendee)).toEqual([PUBLISHER, STRANGER]);
+    expect(event.roster?.entries.map(entry => entry.inclusionTimestamp)).toEqual([NOW, NOW]);
+    expect(f.rpc.queries.every(query => query.options.atBlock === toHex(100))).toBe(true);
+    expect(attendanceStatus(event.roster!.entries[1]!.attendance, event, NOW)).toBe('pending');
+    expect(registrationEligibility(event, { kind: 'wallet', address: STRANGER }, NOW).remaining).toBe(1);
+  });
+
+  it('cannot backdate a late request or turn it into a place by adding it to the owner roster', async () => {
+    const f = structuredFixture(); f.release.terms.registration!.deadline = NOW;
+    f.release.audienceHash = audienceHash(f.release.terms); f.state.audienceHash = f.release.audienceHash;
+    f.attendance.audienceHash = f.release.audienceHash; f.attendance.createdAt = NOW - 1_000_000; f.save();
+    let event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(attendanceStatus(event.roster!.entries[0]!.attendance, event, NOW)).toBe('registration_closed');
+    f.state.admissions = [{ attendee: STRANGER, attendanceKey: ATTENDANCE, releaseKey: RELEASE }]; f.save();
+    event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(event.roster?.diagnostics).toContainEqual({ code: 'evidence_unavailable', path: 'admissions' });
+    expect(deriveEventAvailability(event, NOW)).toBe('unverified');
+  });
+
+  it('keeps expired or absent admitted evidence occupied and fails closed', async () => {
+    const f = structuredFixture(); f.state.admissions = [{ attendee: STRANGER, attendanceKey: ATTENDANCE, releaseKey: RELEASE }]; f.save();
+    f.rpc.row(ATTENDANCE).expiresAt = toHex(100);
+    const event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(event.roster?.entries).toEqual([]); expect(deriveEventAvailability(event, NOW)).toBe('unverified');
+    expect(registrationEligibility(event, undefined, NOW).remaining).toBeNull();
+    expect(event.state.status === 'unique' && event.state.entity.payload.admissions).toHaveLength(1);
+  });
+
+  it('does not let a spoofed attendee address poison another creator’s legitimate request', async () => {
+    const f = structuredFixture(); f.rpc.pageSize = 1;
+    f.rpc.put(rawEvent(entityKey(120), { ...f.attendance, operationId: 'spoofed-attendee' }, PUBLISHER, { createdAt: toHex(100) }));
+    const event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    const real = event.roster!.entries.find(entry => entry.attendee === STRANGER)!;
+    const spoofed = event.roster!.entries.find(entry => entry.attendee === PUBLISHER)!;
+    expect(spoofed.attendance.status).toBe('unverified'); expect(real.attendance.status).toBe('unique');
+    expect(attendanceStatus(real.attendance, event, NOW)).toBe('pending'); expect(canAdmitAttendance(event, real, NOW)).toBe(true);
+  });
+
+  it('fails a roster when a second authored head forks an admitted attendee', async () => {
+    const f = structuredFixture(); f.state.admissions = [{ attendee: STRANGER, attendanceKey: ATTENDANCE, releaseKey: RELEASE }]; f.save();
+    f.rpc.put(rawEvent(entityKey(120), { ...f.attendance, operationId: 'fork' }, STRANGER, { createdAt: toHex(100) }));
+    const event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(event.roster!.entries[0]!.attendance.status).toBe('conflict'); expect(deriveEventAvailability(event, NOW)).toBe('unverified');
+  });
+
+  it('requires every roster page and refuses a creation block that the provider cannot authenticate', async () => {
+    const f = structuredFixture(); f.rpc.pageSize = 1;
+    f.rpc.put(rawEvent(entityKey(120), { ...f.attendance, attendee: PUBLISHER, operationId: 'second' }, PUBLISHER, { createdAt: toHex(100) }));
+    await rejects(reader(f.rpc, { maxPages: 4 }).instance.loadEvent(KEYS.project), 'page_budget');
+    f.rpc.row(ATTENDANCE).createdAt = toHex(99); // The fixture only serves block 100, so this must not become a wall-clock fallback.
+    await rejects(reader(f.rpc).instance.loadEvent(KEYS.project), 'incomplete_snapshot');
+  });
+
+  it('filters structured metadata only after complete authenticated event discovery', async () => {
+    const f = structuredFixture();
+    expect((await reader(f.rpc).instance.listEvents({ format: 'in_person', countryCode: 'GB', city: 'oxford', deadlineBefore: NOW + 20_000 })).items).toHaveLength(1);
+    expect((await reader(f.rpc).instance.listEvents({ format: 'online' })).items).toHaveLength(0);
+    expect((await reader(f.rpc).instance.listEvents({ countryCode: 'DE' })).items).toHaveLength(0);
+    expect((await reader(f.rpc).instance.listEvents({ deadlineBefore: NOW })).items).toHaveLength(0);
+  });
+});
 
 describe('independent event reads through the SDK with a readonly RPC fixture', () => {
   it('loads the ready source before the organizer has published the first event state', async () => {

@@ -1,8 +1,8 @@
 import { i32, key, u64 } from '@arkiv-network/sdk/attr';
 import { eq, gte, lte } from '@arkiv-network/sdk/query';
 import type { Expression } from '@arkiv-network/sdk/query';
-import { validateEventReleaseBinding } from '../../domain/events';
-import type { AttendanceState, EventAggregate, EventPayload, EventRecord, EventRelease, EventScope, EventState } from '../../domain/events';
+import { deriveEventAvailability, validateEventReleaseBinding } from '../../domain/events';
+import type { AttendanceState, EventAggregate, EventPayload, EventRecord, EventRelease, EventRoster, EventScope, EventState } from '../../domain/events';
 import type { AccountAddress, Actor, DomainReason, EntityKey, ProjectRoot } from '../../domain/types';
 import type { ListResult, ReadOptions } from '../types';
 import { ArkivReader } from '../arkiv/reader';
@@ -80,7 +80,7 @@ export class EventReader {
   }
 
   async event(context: ReadContext, projectRoot: EntityKey,
-    sourcePolicy: 'automatic' | 'required' | 'skip' = 'automatic'): Promise<EventAggregate> {
+    sourcePolicy: 'automatic' | 'required' | 'skip' = 'automatic', includeRoster = true): Promise<EventAggregate> {
     const target = publicKey(projectRoot);
     const result: EventAggregate = { projectRoot: target, root: null, state: { status: 'missing', reason: 'not_found' },
       release: null, sourceProject: null, snapshot: context.snapshot, diagnostics: [] };
@@ -104,6 +104,7 @@ export class EventReader {
         }
       } catch (error) { result.diagnostics.push(...targetReasons(error)); }
     }
+    if (includeRoster && result.release?.payload.terms.termsVersion === 2) result.roster = await this.roster(context, result);
     // Terminal audience outcomes are authenticated by the event envelope itself. A missing
     // contributor must not erase a coordinator's cancellation or prevent publishing it.
     // Publication/opening explicitly requests the source; an ordinary live open page reads it too.
@@ -126,6 +127,83 @@ export class EventReader {
     return result;
   }
 
+  /** A complete pinned creator-authenticated request set; arbitrary namespaces are only discovery hints. */
+  async roster(context: ReadContext, event: EventAggregate): Promise<EventRoster> {
+    const result: EventRoster = { entries: [], snapshot: context.snapshot, diagnostics: [] };
+    const rows = await this.core.query(context, [eq('project', EVENTS_NAMESPACE), eq('entity_type', 'attendance_state'),
+      eq('project_key', key(publicKey(event.projectRoot)))]);
+    const groups = new Map<AccountAddress, typeof rows>();
+    for (const row of rows) {
+      const creator = publicAddress(row.creator);
+      groups.set(creator, [...(groups.get(creator) ?? []), row]);
+    }
+    const times = new Map<string, { timestamp: number; hash: string }>();
+    for (const [attendee, records] of groups) {
+      const valid: EventRecord<AttendanceState>[] = []; const reasons: DomainReason[] = [];
+      for (const row of records) {
+        try {
+          const record = decodeEventEntity<AttendanceState>(row, 'attendance_state', context.snapshot, attendee);
+          assertArkiv(record.payload.projectRoot === event.projectRoot, 'unverified', 'scope_mismatch', 'The attendance scope disagrees with its event.');
+          valid.push(record);
+        } catch (error) { reasons.push(...targetReasons(error)); }
+      }
+      const attendance: EventScope<AttendanceState> = reasons.length ? { status: 'unverified', reasons }
+        : valid.length !== 1 ? { status: 'conflict', entities: valid } : { status: 'unique', entity: valid[0]! };
+      let registeredRelease: EventRecord<EventRelease> | null = null; let inclusionTimestamp: number | null = null;
+      if (attendance.status === 'unique') {
+        const record = attendance.entity; const blockNumber = record.provenance.createdAtBlock!;
+        if (!times.has(blockNumber)) {
+          const block = await this.core.client.getBlock({ blockNumber: BigInt(blockNumber) });
+          const timestamp = Number(block.timestamp * 1_000n);
+          assertArkiv(block.number === BigInt(blockNumber) && block.hash !== null && Number.isSafeInteger(timestamp)
+            && timestamp >= 0 && timestamp <= context.snapshot.blockTimestamp
+            && (blockNumber !== context.snapshot.blockNumber || block.hash === context.snapshot.blockHash),
+          'unverified', 'incomplete_snapshot', 'The request inclusion block could not be authenticated.');
+          times.set(blockNumber, { timestamp, hash: block.hash });
+        }
+        inclusionTimestamp = times.get(blockNumber)!.timestamp;
+        try {
+          registeredRelease = await this.entity<EventRelease>(context, record.payload.releaseKey, 'event_release', creatorOf(event.root!));
+          if (registeredRelease && (registeredRelease.payload.projectRoot !== event.projectRoot
+            || registeredRelease.payload.audienceHash !== record.payload.audienceHash)) registeredRelease = null;
+        } catch (error) { targetReasons(error); }
+      }
+      result.entries.push({ attendee, attendance, registeredRelease, inclusionTimestamp });
+    }
+    for (const [blockNumber, expected] of times) {
+      const block = await this.core.client.getBlock({ blockNumber: BigInt(blockNumber) });
+      assertArkiv(block.number === BigInt(blockNumber) && block.hash === expected.hash && Number(block.timestamp * 1_000n) === expected.timestamp,
+        'unverified', 'incomplete_snapshot', 'A request inclusion block changed during roster verification.');
+    }
+    result.entries.sort((a, b) => {
+      if (a.attendance.status !== 'unique') return b.attendance.status === 'unique' ? 1 : a.attendee.localeCompare(b.attendee);
+      if (b.attendance.status !== 'unique') return -1;
+      const left = BigInt(a.attendance.entity.provenance.createdAtBlock!); const right = BigInt(b.attendance.entity.provenance.createdAtBlock!);
+      return left < right ? -1 : left > right ? 1 : a.attendance.entity.key.localeCompare(b.attendance.entity.key);
+    });
+    // Every explicit reservation still occupies a place; missing evidence never silently frees one.
+    if (event.state.status === 'unique') for (const admission of event.state.entity.payload.admissions ?? []) {
+      const entry = result.entries.find(candidate => candidate.attendee === admission.attendee);
+      if (!entry || entry.attendance.status !== 'unique') { result.diagnostics.push({ code: 'evidence_unavailable', path: 'admissions' }); continue; }
+      const request = entry.attendance.entity;
+      if (request.key !== admission.attendanceKey) {
+        // A live unique same-creator decision makes the old reservation obsolete. Its place stays
+        // occupied, but no inferred/deleted lineage can transfer confirmation to this current key.
+        continue;
+      }
+      const release = entry.registeredRelease;
+      if (!release || release.key !== admission.releaseKey || request.payload.decision !== 'going'
+        || (release.payload.terms.registration?.deadline != null && (entry.inclusionTimestamp === null
+          || (entry.inclusionTimestamp >= release.payload.terms.registration.deadline
+            && !release.payload.reconfirmationAccounts?.includes(admission.attendee))))
+        || (release.payload.terms.registration?.admission === 'invite_only'
+          && !release.payload.terms.registration.invitedAccounts.includes(admission.attendee))) {
+        result.diagnostics.push({ code: 'evidence_unavailable', path: 'admissions' });
+      }
+    }
+    return result;
+  }
+
   async loadEvent(projectRoot: EntityKey, options: EventReadOptions = {}): Promise<EventAggregate> {
     const context = await this.core.context(options);
     const result = await this.event(context, projectRoot, options.includeSource === false ? 'skip'
@@ -134,12 +212,17 @@ export class EventReader {
   }
 
   async listEvents(filters: EventFilters = {}, options: ReadOptions = {}): Promise<ListResult<EventAggregate>> {
-    for (const value of [filters.from, filters.to]) assertArkiv(value === undefined
+    for (const value of [filters.from, filters.to, filters.deadlineBefore]) assertArkiv(value === undefined
       || (Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000), 'invalid_input', 'invalid_input', 'Event date filters must be UTC milliseconds.');
     assertArkiv(filters.from === undefined || filters.to === undefined || filters.from <= filters.to,
       'invalid_input', 'invalid_input', 'The event date interval is reversed.');
     assertArkiv(filters.search === undefined || (typeof filters.search === 'string' && filters.search.length <= 200),
       'invalid_input', 'invalid_input', 'The event title search exceeds its limit.');
+    assertArkiv(filters.format === undefined || ['online', 'in_person', 'hybrid'].includes(filters.format), 'invalid_input', 'invalid_input', 'Unknown event format.');
+    assertArkiv(filters.countryCode === undefined || /^[A-Z]{2}$/.test(filters.countryCode), 'invalid_input', 'invalid_input', 'Use a two-letter country code.');
+    assertArkiv(filters.city === undefined || (typeof filters.city === 'string' && filters.city.length <= 200), 'invalid_input', 'invalid_input', 'Invalid city filter.');
+    assertArkiv(filters.availability === undefined || ['open', 'paused', 'closed', 'cancelled', 'ended', 'unverified', 'registration_closed', 'full', 'waitlist'].includes(filters.availability),
+      'invalid_input', 'invalid_input', 'Unknown registration availability filter.');
     const context = await this.core.context(options); const predicates = this.base('event_state');
     if (filters.from !== undefined) predicates.push(gte('ends_at', u64(BigInt(filters.from))));
     if (filters.to !== undefined) predicates.push(lte('starts_at', u64(BigInt(filters.to))));
@@ -158,6 +241,12 @@ export class EventReader {
         seen.add(target);
         const aggregate = await this.event(context, target);
         if (search && !aggregate.release?.payload.terms.title.toLocaleLowerCase('en').includes(search)) continue;
+        const terms = aggregate.release?.payload.terms;
+        if (filters.format && terms?.format !== filters.format) continue;
+        if (filters.countryCode && terms?.location?.countryCode !== filters.countryCode) continue;
+        if (filters.city && terms?.location?.city.toLocaleLowerCase('en') !== filters.city.trim().toLocaleLowerCase('en')) continue;
+        if (filters.availability && deriveEventAvailability(aggregate, this.core.now()) !== filters.availability) continue;
+        if (filters.deadlineBefore !== undefined && (terms?.registration?.deadline == null || terms.registration.deadline > filters.deadlineBefore)) continue;
         items.push(aggregate);
       } catch (error) { diagnostics.push(...targetReasons(error)); }
     }

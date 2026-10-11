@@ -1,8 +1,8 @@
 import type { Actor, DomainReason, EntityKey, SourcePlanRef } from '../../domain/types';
-import type { AttendanceState, AudienceTerms, EventAggregate, EventRecord, EventRelease, EventScope, EventState } from '../../domain/events';
+import type { AttendanceState, AudienceTerms, EventAdmission, EventAggregate, EventAvailability, EventFormat, EventRecord, EventRelease, EventScope, EventState } from '../../domain/events';
 import type { CommandBase, ListResult, MutationResult, OperationIntent, ReadOptions, ReconciliationResult, Result } from '../types';
 
-export interface EventFilters { search?: string; from?: number; to?: number }
+export interface EventFilters { search?: string; from?: number; to?: number; format?: EventFormat; countryCode?: string; city?: string; availability?: EventAvailability; deadlineBefore?: number }
 export interface EventReadOptions extends ReadOptions {
   /** Undefined loads source when availability needs it; true always loads it; false verifies only the event envelope. */
   includeSource?: boolean;
@@ -17,10 +17,13 @@ export interface PublishEventCommand extends CommandBase {
 export interface ReplaceEventCommand extends CommandBase {
   projectRoot: EntityKey; releaseKey: EntityKey; audienceHash: EventRelease['audienceHash'];
   source: SourcePlanRef; status: EventState['status']; expectedHeads: EntityKey[];
+  /** Omit to preserve reservations; an explicit list is an organizer admission/release decision. */
+  admissions?: EventAdmission[];
 }
 export interface ReplaceAttendanceCommand extends CommandBase {
   projectRoot: EntityKey; releaseKey: EntityKey; audienceHash: EventRelease['audienceHash'];
   decision: AttendanceState['decision']; expectedHeads: EntityKey[];
+  joinWaitlist?: boolean;
 }
 export interface EventRepositoryContract {
   readonly mode: 'public';

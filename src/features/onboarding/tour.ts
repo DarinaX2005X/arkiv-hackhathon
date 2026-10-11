@@ -1,5 +1,5 @@
 import type { AppRuntime } from '../../app/context';
-import type { Route } from '../../app/routes';
+import { parseRoute, safeReturnPath, type Route } from '../../app/routes';
 import type { StorageIssue } from '../../app/storage';
 import type { Actor } from '../../domain/types';
 import { isAccountAddress } from '../../app/ids';
@@ -60,37 +60,72 @@ export function workspaceTour(runtime: AppRuntime, actor: Actor | null = runtime
   return controller;
 }
 
-export interface TourStep { title: string; body: string; targetId: string; targetLabel: string }
-const sharedSteps: readonly TourStep[] = [
-  { title: 'Your own work, in one place', body: 'My projects reads the projects owned by your connected wallet. Drafts on this device are listed separately and can be continued or exported.', targetId: 'work-surface', targetLabel: 'Show my work' },
-  { title: 'Offer your part', body: 'My contributions holds your time, place and equipment offers. Each owner publishes their own availability. A project cannot promise someone else’s help.', targetId: 'nav-contributions', targetLabel: 'Show My contributions' },
-  { title: 'Review the exact plan', body: 'Requests brings you to plans using your offers. Read the whole plan and confirm only your own part. A changed plan needs fresh agreement from everyone involved.', targetId: 'nav-requests', targetLabel: 'Show Requests' },
-  { title: 'Come back with the same wallet', body: 'Your public work is read from Arkiv. Browser drafts and pending operations remain here after sign-out. Account has your settings; Help explains recovery and can replay this guide.', targetId: 'account-commands', targetLabel: 'Show Account' },
-];
+export type TourArt = 'event' | 'resources' | 'agreement' | 'return';
+export type TourRole = 'organizer' | 'contributor' | 'visitor';
+export interface TourStep { title: string; body: string; targetId: string; targetLabel: string; art: TourArt }
+
+/** An invitation takes precedence over a preferred starting area. Reading context never navigates. */
+export function tourContext(route: Route, preferred: 'workspace' | 'contributions' | 'my-events' = 'workspace'): Route {
+  if (route.name === 'help') return parseRoute(safeReturnPath(route.returnTo) ?? `/${preferred}`);
+  return route;
+}
+export function tourRole(route: Route): TourRole {
+  if (['events', 'event', 'my-events'].includes(route.name)) return 'visitor';
+  if (['contributions', 'requests'].includes(route.name) || (route.name === 'project' && route.tab === 'agreement')) return 'contributor';
+  return 'organizer';
+}
+export function canShowTour(route: Route, mode: string, actor: Actor | null): boolean {
+  return mode === 'public' && actor?.kind === 'wallet'
+    && ['workspace', 'new-project', 'contributions', 'requests', 'project', 'events', 'event', 'my-events', 'help'].includes(route.name);
+}
+const agreement: TourStep = {
+  title: 'Every owner has a say',
+  body: 'Each person agrees to the exact plan using their own wallet. Arkiv holds their separate decisions. If the plan changes, everyone involved reviews it again.',
+  targetId: 'nav-requests', targetLabel: 'Open Requests', art: 'agreement',
+};
+const returnStep: TourStep = {
+  title: 'Your work is here when you return',
+  body: 'Sign in with the same wallet to find your published work on Arkiv. Unpublished drafts stay on this device. You can replay this welcome tour from Help anytime.',
+  targetId: 'account-commands', targetLabel: 'Open Account', art: 'return',
+};
 export function tourSteps(route: Route): readonly TourStep[] {
-  if (route.name === 'new-project') return [
-    { title: 'Begin with your event', body: 'Describe the outcome, possible dates and what you need. Your entries remain a browser draft until you explicitly publish. An empty plan will show what help is missing.', targetId: 'work-surface', targetLabel: 'Show the project draft' },
-    { title: 'Invite the people who can help', body: 'After publishing, share the project invitation. Contributors offer their own time, place or equipment. They keep control of their availability and decisions.', targetId: 'work-surface', targetLabel: 'Show the project draft' },
-    sharedSteps[2]!, sharedSteps[3]!,
+  const role = tourRole(route);
+  if (role === 'visitor') return [
+    { title: route.name === 'event' ? 'Start with this event' : 'Find your next event',
+      body: 'Discover events online, in person or a mix of both. Open an event to check its time, location and participation rules before you join.',
+      targetId: 'work-surface', targetLabel: route.name === 'event' ? 'Review this event' : 'Browse events', art: 'event' },
+    { title: 'Choose how you take part',
+      body: 'Check whether registration is open, a place is available or a waiting list applies. An invitation may be needed. Signing in alone does not register you.',
+      targetId: 'work-surface', targetLabel: 'Review participation', art: 'resources' },
+    { title: 'Review before you register',
+      body: 'Open events with unlimited places let you join directly. Limited or invitation-only events need organizer confirmation of your request. Check your place or waiting-list status in My events. Your decision is public on Arkiv.',
+      targetId: 'nav-my-events', targetLabel: 'Open My events', art: 'agreement' },
+    returnStep,
   ];
-  if (route.name === 'project') return [
-    { title: 'Start with the current plan', body: 'Plan contains the needs and workable options. A possible arrangement is not an agreement. Public project details stay readable even without a connected wallet.', targetId: 'work-surface', targetLabel: 'Show this project' },
-    { title: 'Everyone decides for themselves', body: 'People shows the contributors and their decisions. Only the owner can confirm an offer for the exact proposed version.', targetId: 'work-surface', targetLabel: 'Show this project' },
-    { title: 'Handle a change openly', body: 'A withdrawal or changed condition can make the plan incomplete. Find a replacement, review the differences and collect fresh agreement before relying on it.', targetId: 'work-surface', targetLabel: 'Show this project' },
-    { title: 'Carry the event through', body: 'Run sheet follows the work, handovers and returns. Report your own actions and leave unconfirmed items visible. History keeps earlier versions separate from the current plan.', targetId: 'work-surface', targetLabel: 'Show this project' },
+  if (role === 'contributor') return [
+    { title: route.name === 'requests' || route.name === 'project' ? 'Review the invitation' : 'Bring what you can offer',
+      body: route.name === 'requests' || route.name === 'project'
+        ? 'Read the proposed work and your part in it. Check the dates, responsibilities and return arrangements before deciding.'
+        : 'Open My contributions to offer your time, a place or equipment. Set your availability and conditions. Each resource stays under its owner’s control.',
+      targetId: 'work-surface', targetLabel: 'Review my part', art: 'resources' },
+    { title: 'Share an offer on your terms',
+      body: route.name === 'contributions' && route.projectRoot
+        ? 'Your invitation is still here. Share your offer with this project when you are ready. Publishing an offer does not agree to its use.'
+        : 'Publish your offer on Arkiv and share it with a project you want to help. Publishing an offer does not agree to its use.',
+      targetId: 'nav-contributions', targetLabel: 'Open My contributions', art: 'event' },
+    agreement, returnStep,
   ];
-  if (route.name === 'contributions') return [
-    { title: 'Offer help on your terms', body: 'Describe your own time, place or equipment, including when it is available. Preview the public details before publishing. An offer does not agree to a project by itself.', targetId: 'work-surface', targetLabel: 'Show my contributions' },
-    { title: 'Share with the right project', body: route.projectRoot ? 'This page retains the project from your invitation. Share your offer with that project so its organizer can include it in a plan.' : 'Share an offer with a project you want to help. The organizer can include it in a plan; only you can agree to its use.', targetId: 'work-surface', targetLabel: 'Show my contributions' },
-    sharedSteps[2]!, sharedSteps[3]!,
+  return [
+    { title: route.name === 'project' ? 'Bring this event together' : 'Make an event happen',
+      body: route.name === 'project'
+        ? 'Start with the needs in this project. Bring people, places and equipment together for an online, in-person or hybrid event.'
+        : 'Start a project for an online, in-person or hybrid event. Add what you want to make happen, possible dates and the help you need.',
+      targetId: 'work-surface', targetLabel: route.name === 'project' ? 'Review this project' : 'Start my project', art: 'event' },
+    { title: 'Invite people to bring their part',
+      body: 'Publish your project when you are ready to invite help. People offer their own time, places and equipment. A draft stays on this device until you publish it.',
+      targetId: 'work-surface', targetLabel: 'Review my project', art: 'resources' },
+    agreement, returnStep,
   ];
-  if (['events', 'event', 'my-events'].includes(route.name)) return [
-    { title: 'Choose an event to join', body: 'Read the event date, place and participation terms before deciding. Attending is separate from offering equipment or helping organize the event.', targetId: 'work-surface', targetLabel: 'Show the event page' },
-    { title: 'Confirm only after reviewing', body: 'Joining records your wallet’s participation publicly on Arkiv. Signing in alone does not register you. You review the exact terms before signing your decision.', targetId: 'work-surface', targetLabel: 'Show the event page' },
-    { title: 'Notice changes before going', body: 'My events restores your registrations with the same wallet. A new time, place or participation rule needs your confirmation again. Preparation problems are shown separately.', targetId: 'nav-my-events', targetLabel: 'Show My events' },
-    sharedSteps[3]!,
-  ];
-  return sharedSteps;
 }
 export function resolveTourTarget(step: TourStep, availableIds: readonly string[]): string | null {
   if (availableIds.includes(step.targetId)) return step.targetId;

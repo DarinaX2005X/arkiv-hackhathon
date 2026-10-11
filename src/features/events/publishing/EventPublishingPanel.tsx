@@ -12,19 +12,19 @@ import { TIRAMISU_CHAIN_ID, type PublicEntityKey } from '../../../domain/types';
 import { Button, Checkbox, Field, Link, Notice, PlanDiff, Select, StatusLabel, Textarea } from '../../../ui';
 import { downloadText } from '../../projects/drafts';
 import { useEventClock } from '../hooks';
-import { availabilityCopy, eventDate } from '../presentation';
+import { availabilityCopy, eventDate, audienceLabels as labels, audienceValue, eventPlace, eventFormatLabel, eventRegistrationLabel } from '../presentation';
 import { browserEventStorage, useEventAction } from '../useEventAction';
 import { confirmPublishingReview, draftAfterPublication, emptyPublishingFields, organizerAccess, preparePublishingReview, publishingDraftMemory, publishingDraftStore, publishingFields,
-  reviewOriginalCommand, submitPublishingCommand, type PublishingCommand, type PublishingDraft, type PublishingFields, type PublishingKind, type PublishingReview } from './model';
+  reviewOriginalCommand, submitPublishingCommand, publishingPreparations, structuredFieldDefaults, termsFromFields, type PublishingCommand, type PublishingDraft, type PublishingFields, type PublishingKind, type PublishingReview } from './model';
 import '../events.css';
 import './publishing.css';
+import { EventAdmissions } from './EventAdmissions';
+import { countryOptions, timeZoneOptions } from '../places';
 
 export interface EventPublishingPanelProps {
   projectRoot: PublicEntityKey; repository: EventRepositoryContract | null; session: AppSession;
   storage?: StoragePort | null; onRefresh?: () => void;
 }
-const labels: Record<keyof AudienceTerms, string> = { title: 'Event title', description: 'About the event', startsAt: 'Start time', endsAt: 'End time',
-  timeZone: 'Time zone', venue: 'Place', instructions: 'Before you come', conditions: 'Participation conditions' };
 const actionCopy: Record<PublishingKind, { title: string; confirm: string; effect: string }> = {
   publish: { title: 'Publish visitor details', confirm: 'Publish event and open registration', effect: 'These details become the current public event version. Anyone registered for an earlier version will need to review and confirm this version themselves.' },
   repair: { title: 'Use the agreed plan', confirm: 'Open registration with this plan', effect: 'Registration will use the current agreed preparations. The public event version and existing registrations stay the same.' },
@@ -56,6 +56,7 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
   const [checking, setChecking] = useState(false);
   const [review, setReview] = useState<PublishingReview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [preparationsAcknowledged, setPreparationsAcknowledged] = useState(false);
   const importFile = useRef<HTMLInputElement>(null);
   const sequence = useRef(0), abort = useRef<AbortController | null>(null), busy = useRef(false), mounted = useRef(true);
   const live = useRef({ projectRoot, repository, scope, session }); live.current = { projectRoot, repository, scope, session };
@@ -72,6 +73,10 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
   const terminal = currentState?.status === 'cancelled' || currentState?.status === 'ended';
   const draftChangedOutside = Boolean(currentDraft && currentDraft.baselineReleaseKey !== (snapshot?.release?.key ?? null));
   const access = snapshot ? organizerAccess(snapshot, session, now) : null;
+  const reviewsPreparations = review?.kind === 'publish' || review?.kind === 'repair';
+  const preparations = useMemo(() => reviewsPreparations && snapshot && review ? publishingPreparations(snapshot, review.command.source, now) : null, [reviewsPreparations, snapshot, review, now]);
+  const preparationsAvailable = Boolean(preparations);
+  useEffect(() => { setPreparationsAcknowledged(false); }, [review, account, session.chainId, session.mode, preparationsAvailable]);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++sequence.current; abort.current?.abort(); }; }, []);
   const stillHere = (token: typeof live.current) => mounted.current && live.current.projectRoot === token.projectRoot && live.current.repository === token.repository
@@ -107,7 +112,7 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
     if (!snapshot || !account || currentDraft) return;
     const restored = cache.get(scope);
     if (restored) { setDraft(restored); return; }
-    const fields = snapshot.release ? publishingFields(snapshot.release.payload.terms) : emptyPublishingFields();
+    const fields = snapshot.release ? publishingFields(snapshot.release.payload.terms) : emptyPublishingFields(true);
     if (!snapshot.release && snapshot.sourceProject?.state.status === 'unique') fields.title = snapshot.sourceProject.state.entity.payload.recipe.title;
     const next: PublishingDraft = { projectRoot, organizer: account, baselineReleaseKey: snapshot.release?.key as PublicEntityKey ?? null, fields };
     cache.set(scope, next); setDraft(next);
@@ -156,7 +161,7 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
     } finally { if (mounted.current) setChecking(false); busy.current = false; }
   }
   async function confirm() {
-    if (!review || !acknowledged || busy.current || !correctChain) return;
+    if (!review || !acknowledged || busy.current || !correctChain || reviewsPreparations && (!preparationsAcknowledged || !preparations)) return;
     const selected = review, token = live.current;
     busy.current = true; setChecking(true); setMessage(null);
     try {
@@ -180,15 +185,15 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
     } finally { if (mounted.current) setChecking(false); busy.current = false; }
   }
 
-  const termsValue = (terms: AudienceTerms, field: keyof AudienceTerms) => field === 'startsAt' || field === 'endsAt'
-    ? `${formatDateTime(terms[field], terms.timeZone)} (${terms.timeZone}; ${new Date(terms[field]).toISOString()})` : String(terms[field]) || 'Not provided';
+  const termsValue = audienceValue;
   const fields = currentDraft?.fields;
+  const preview = fields ? termsFromFields(fields) : null;
   const foldOptions = [{ value: 'reject', label: 'Ask if the clock repeats' }, { value: 'earlier', label: 'First occurrence' }, { value: 'later', label: 'Second occurrence' }];
-  return <section className="pf-event-publishing" aria-label="Event page and registration" aria-busy={submitting || reading}>
-    <div className="pf-publishing-heading"><h2>Invite people to your event</h2><p>Turn an agreed project into a public event page. Visitors can read the details and decide to attend with their own wallet.</p></div>
+  return <section className="pf-event-publishing pf-surface-light" aria-label="Event page and registration" aria-busy={submitting || reading}>
+    <div className="pf-publishing-heading"><h2>Invite people to your event</h2><p>Share the date, place and way to join. Once your team agrees on the preparations, publish the event and welcome registrations.</p></div>
     {availability && <div className="pf-event-title-status"><StatusLabel tone={availabilityCopy[availability].tone}>{availabilityCopy[availability].label}</StatusLabel>
       <Link href={routeHref({ name: 'event', projectRoot })}>View event page</Link></div>}
-    {snapshot?.state.status === 'missing' && <p>No current event publication is available. Before a first publication is signed, any earlier records are checked to protect its history.</p>}
+    {snapshot?.state.status === 'missing' && <p>Your visitor page is not published yet. Prepare the details below, then review them before publishing.</p>}
     {readError && <Notice tone="warning" role="status">{readError}</Notice>}
     {!snapshot && !readError && <p role="status">Reading the event and its preparations…</p>}
     <div className="pf-actions"><Button variant="secondary" onClick={() => void refresh(true, true)} disabled={submitting || reading}>Refresh event</Button></div>
@@ -205,7 +210,7 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
       <Button variant="secondary" onClick={() => void checkOriginal()} disabled={submitting || !correctChain}>Check and review original request</Button>
       <Button variant="quiet" onClick={() => { if (action.recoveryText) downloadText('partfolk-event-request.json', action.recoveryText); }}>Save request backup</Button>
     </div>}
-    {owner && fields && !terminal && <form onSubmit={event => { event.preventDefault(); void prepare('publish'); }}>
+    {owner && fields && !terminal && <div className="pf-publishing-layout"><form onSubmit={event => { event.preventDefault(); void prepare('publish'); }}>
       <h3>What visitors need to know</h3><p>These details will be public. Keep private addresses, access codes and personal contact information out of the event page.</p>
       {storageIssue && <Notice tone="warning">This browser could not keep the draft safely. The text remains here. Save a backup before leaving or changing browsers.</Notice>}
       {draftChangedOutside && <Notice tone="warning" title="A newer event version is available">Your draft is kept. Review the published page, then choose whether to keep your edits against that version or load its visitor details.
@@ -213,15 +218,30 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
           <Button variant="quiet" disabled={submitting || unresolved} onClick={() => currentDraft && snapshot?.release && keepDraft({ ...currentDraft, baselineReleaseKey: snapshot.release.key as PublicEntityKey, fields: publishingFields(snapshot.release.payload.terms) })}>Load published details</Button></div></Notice>}
       <Field label="Event title" value={fields.title} maxLength={200} required disabled={submitting || unresolved} onChange={event => edit('title', event.target.value)} />
       <Textarea label="About the event" value={fields.description} maxLength={10000} rows={4} disabled={submitting || unresolved} onChange={event => edit('description', event.target.value)} />
-      <Field label="Event time zone" value={fields.timeZone} maxLength={100} required hint="Use a named time zone, such as Europe/London or Asia/Almaty. Dates below use this zone." disabled={submitting || unresolved} onChange={event => edit('timeZone', event.target.value)} />
+      <fieldset className="pf-publishing-section"><legend>When it happens</legend><Select label="Event time zone" value={fields.timeZone} options={timeZoneOptions(fields.timeZone)} hint="Starts with your device’s time zone. Changing it keeps the clock times you entered." disabled={submitting || unresolved} onChange={event => edit('timeZone', event.target.value)} />
       <div className="pf-event-form-columns"><Field label="Starts" type="datetime-local" step="0.001" value={fields.startsLocal} required disabled={submitting || unresolved} onChange={event => edit('startsLocal', event.target.value)} />
         <Field label="Ends" type="datetime-local" step="0.001" value={fields.endsLocal} required disabled={submitting || unresolved} onChange={event => edit('endsLocal', event.target.value)} /></div>
       <details className="pf-event-evidence"><summary>If a clock time occurs twice</summary><p>When daylight saving ends, a local time can occur twice. Choose which occurrence the event uses if the review asks you to.</p>
         <div className="pf-event-form-columns"><Select label="Start occurrence" value={fields.startOccurrence} options={foldOptions} disabled={submitting || unresolved} onChange={event => edit('startOccurrence', event.target.value as TimeDisambiguation)} />
-          <Select label="End occurrence" value={fields.endOccurrence} options={foldOptions} disabled={submitting || unresolved} onChange={event => edit('endOccurrence', event.target.value as TimeDisambiguation)} /></div></details>
-      <Field label="Public place or meeting point" value={fields.venue} maxLength={1000} required disabled={submitting || unresolved} onChange={event => edit('venue', event.target.value)} />
+          <Select label="End occurrence" value={fields.endOccurrence} options={foldOptions} disabled={submitting || unresolved} onChange={event => edit('endOccurrence', event.target.value as TimeDisambiguation)} /></div></details></fieldset>
+      <fieldset className="pf-publishing-section"><legend>Where people will join</legend>
+      {!fields.format && <Button variant="secondary" onClick={() => currentDraft && keepDraft({ ...currentDraft, fields: { ...currentDraft.fields, ...structuredFieldDefaults } })}>Add format and registration options</Button>}
+      {fields.format && <Select label="Event format" value={fields.format} disabled={submitting || unresolved} onChange={event => edit('format', event.target.value as PublishingFields['format'])} options={[{ value: 'in_person', label: 'In person' }, { value: 'online', label: 'Online' }, { value: 'hybrid', label: 'Hybrid' }]} />}
+      {fields.format !== 'online' && <><div className="pf-event-form-columns">{fields.format && <><Select label="Country" value={fields.countryCode ?? ''} required options={[{ value: '', label: 'Choose a country' }, ...countryOptions]} disabled={submitting || unresolved} onChange={event => currentDraft && keepDraft({ ...currentDraft, fields: { ...currentDraft.fields, countryCode: event.target.value, country: countryOptions.find(option => option.value === event.target.value)?.label ?? '' } })} /><Field label="City" value={fields.city ?? ''} maxLength={200} required disabled={submitting || unresolved} onChange={event => edit('city', event.target.value)} /></>}</div><Field label="Public venue or meeting point" value={fields.venue} maxLength={1000} required disabled={submitting || unresolved} onChange={event => edit('venue', event.target.value)} /></>}
+      {(fields.format === 'online' || fields.format === 'hybrid') && <><Field label="Public online link" type="url" value={fields.onlineUrl ?? ''} maxLength={2000} hint="Use a public HTTPS link without passwords or access tokens. Or provide joining instructions below." disabled={submitting || unresolved} onChange={event => edit('onlineUrl', event.target.value)} /><Textarea label="How to join online" value={fields.onlineInstructions ?? ''} maxLength={10000} rows={3} hint="Everything on this page is public. Do not include private access codes or passwords." disabled={submitting || unresolved} onChange={event => edit('onlineInstructions', event.target.value)} /></>}
+      </fieldset>
+      {fields.format && <fieldset className="pf-publishing-section"><legend>How registration works</legend>
+        <div className="pf-event-form-columns"><Select label="Places" value={fields.capacityKind ?? 'unlimited'} options={[{ value: 'unlimited', label: 'No capacity limit' }, { value: 'limited', label: 'Limited places' }]} disabled={submitting || unresolved} onChange={event => edit('capacityKind', event.target.value as PublishingFields['capacityKind'])} />{fields.capacityKind === 'limited' && <Field label="Number of places" type="number" min="1" max="512" step="1" value={fields.capacityLimit ?? ''} required disabled={submitting || unresolved} onChange={event => edit('capacityLimit', event.target.value)} />}</div>
+        {fields.capacityKind === 'limited' && <Checkbox label="Offer a waiting list when all places are reserved" checked={fields.waitlist ?? false} disabled={submitting || unresolved} onChange={event => edit('waitlist', event.target.checked)} />}
+        <Select label="Who can register" value={fields.admission ?? 'open'} options={[{ value: 'open', label: 'Everyone' }, { value: 'invite_only', label: 'Invited wallets only' }]} disabled={submitting || unresolved} onChange={event => edit('admission', event.target.value as PublishingFields['admission'])} />
+        {fields.admission === 'invite_only' && <Textarea label="Invited wallet addresses" value={fields.invitedAccounts ?? ''} maxLength={24000} rows={4} hint="One complete 0x wallet address per line, up to 512. This invitation list is public." disabled={submitting || unresolved} onChange={event => edit('invitedAccounts', event.target.value)} />}
+        <Field label="Registration deadline" type="datetime-local" step="0.001" value={fields.deadlineLocal ?? ''} hint={`Optional. Uses ${fields.timeZone}; no later than the event ends.`} disabled={submitting || unresolved} onChange={event => edit('deadlineLocal', event.target.value)} />
+        {fields.deadlineLocal && <Select label="Deadline occurrence when clocks repeat" value={fields.deadlineOccurrence ?? 'reject'} options={foldOptions} disabled={submitting || unresolved} onChange={event => edit('deadlineOccurrence', event.target.value as TimeDisambiguation)} />}
+        <p>{fields.capacityKind === 'limited' || fields.admission === 'invite_only' ? 'Visitors request a place. You confirm each place from the registration queue. Waiting list promotion also needs your confirmation.' : 'Visitors can join directly after reviewing the current event details.'}</p>
+      </fieldset>}
       <Textarea label="Before you come" value={fields.instructions} maxLength={10000} rows={3} hint="Arrival instructions, what to bring and useful accessibility information." disabled={submitting || unresolved} onChange={event => edit('instructions', event.target.value)} />
-      <Textarea label="Participation conditions" value={fields.conditions} maxLength={10000} rows={3} hint="Registration is free and records an intention to attend. It does not guarantee a limited seat." disabled={submitting || unresolved} onChange={event => edit('conditions', event.target.value)} />
+      <Textarea label="Participation conditions" value={fields.conditions} maxLength={10000} rows={3} hint="Explain who the event is for, what to bring and any other conditions." disabled={submitting || unresolved} onChange={event => edit('conditions', event.target.value)} />
+      {message && <Notice tone="warning" role="alert">{message}</Notice>}
       <div className="pf-actions"><Button type="submit" disabled={submitting || unresolved || !correctChain || draftChangedOutside}>{snapshot?.release ? 'Review changes for visitors' : 'Review event publication'}</Button>
         <Button variant="quiet" onClick={() => currentDraft && store && downloadText('partfolk-event-draft.json', store.export(currentDraft))}>Save draft backup</Button>
         <Button variant="quiet" disabled={submitting || unresolved} onClick={() => importFile.current?.click()}>Restore draft backup</Button>
@@ -237,7 +257,7 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
         } catch { if (stillHere(token)) setMessage('The backup could not be read. The original draft is kept.'); }
         finally { input.value = ''; }
       }} />
-    </form>}
+    </form><aside className="pf-publishing-preview" aria-label="Event preview"><h3>Your visitor page</h3><p>Preview as you fill in the details</p><div className="pf-event-preview-object" aria-hidden="true"><svg viewBox="0 0 280 150" fill="none"><ellipse cx="140" cy="128" rx="99" ry="12" fill="#244c3d" opacity=".1"/><path d="M47 38 148 20l19 89-101 19z" fill="#d1ddc4"/><path d="m47 32 101-18 19 89-101 19z" fill="#fcfdf9"/><path d="m47 32 101-18 4 20-101 18z" fill="#2e6349"/><path d="m71 65 65-12m-61 28 51-9m-47 26 37-7" stroke="#9eaf91" strokeWidth="5" strokeLinecap="round"/><path d="m169 48 69 6v61l-69-6z" fill="#183b2b"/><path d="m176 55 55 5v44l-55-5z" fill="#d8edb7"/><path d="m195 116 21 2 8 9-36-3z" fill="#78927b"/><path d="m188 79 9-5 16 10-8 5z" fill="#407655"/></svg></div><h3>{fields.title || 'Your event title'}</h3><p>{fields.description || 'A short introduction will appear here.'}</p>{preview?.ok ? <dl className="pf-event-facts"><div><dt>When</dt><dd>{eventDate(preview.terms)} ({preview.terms.timeZone})</dd></div><div><dt>Format</dt><dd>{eventFormatLabel(preview.terms)}</dd></div><div><dt>Where</dt><dd>{eventPlace(preview.terms)}</dd></div><div><dt>Joining</dt><dd>{eventRegistrationLabel(preview.terms)}</dd></div></dl> : <p className="pf-field-message">{preview && !preview.ok ? preview.message : 'Add a date and place to complete the preview.'}</p>}</aside></div>}
     {owner && currentState && !terminal && <section className="pf-publishing-lifecycle" aria-label="Registration and event status"><h3>Registration and event status</h3>
       <p>Use an agreed replacement plan to restore registration without changing visitor details. Closing registration, cancelling the event and marking it ended have different effects.</p>
       <div className="pf-actions"><Button variant="secondary" disabled={submitting || unresolved || !correctChain} onClick={() => void prepare('repair')}>{currentState.status === 'closed' ? 'Review reopening registration' : 'Review the agreed plan'}</Button>
@@ -245,19 +265,27 @@ export function EventPublishingPanel({ projectRoot, repository, session, storage
         <Button variant="quiet" disabled={submitting || unresolved || !correctChain} onClick={() => void prepare('cancel')}>Review event cancellation</Button>
         <Button variant="quiet" disabled={submitting || unresolved || !correctChain} onClick={() => void prepare('end')}>Review event completion</Button></div>
     </section>}
+    {owner && snapshot && <EventAdmissions event={snapshot} repository={repository} session={session} storage={storage} now={now} refresh={(includeSource = true) => refresh(includeSource, true)} />}
     {terminal && <p>This event is {currentState?.status}. Its public page remains available while its records are retained. Registrations are intentions to attend, not proof of presence.</p>}
     {review && <section className="pf-event-public-preview pf-publishing-review" aria-label="Review public event request"><h3>{actionCopy[review.kind].title}</h3>
       <p>{review.kind === 'publish' && !review.previous ? 'Your event page will become public and registration will open while the project plan remains agreed.' : actionCopy[review.kind].effect}</p>
       {review.kind === 'publish' && review.previous && review.changed.length > 0 && <PlanDiff title="Changes visitors will review" labels={{ requirement: 'Detail', before: 'Published version', after: 'This version' }}
         rows={review.changed.map(field => ({ id: field, label: labels[field], before: <span className="pf-event-prose">{termsValue(review.previous!, field)}</span>, after: <span className="pf-event-prose">{termsValue(review.terms, field)}</span> }))} />}
-      <dl className="pf-event-facts">{(['title', 'description', 'startsAt', 'endsAt', 'timeZone', 'venue', 'instructions', 'conditions'] as const).map(field => <div key={field}><dt>{labels[field]}</dt><dd className="pf-event-prose">{termsValue(review.terms, field)}</dd></div>)}</dl>
+      {reviewsPreparations && <section className="pf-preparation-comparison" aria-label="Preparation plan and guest details">
+        <div className="pf-preparation-comparison-intro"><h4>Check the plan against your guest details</h4><p>Contributors agreed to the preparation plan. You set the public guest times and location. Check that the arrangements work together, including any setup or cleanup outside the guest schedule.</p></div>
+        {preparations ? <div className="pf-preparation-source"><h4>Agreed preparations</h4><dl className="pf-event-facts"><div><dt>Plan option</dt><dd>{preparations.title}</dd></div><div><dt>Plan place reference</dt><dd>{preparations.placeReference}</dd></div><div><dt>Time zone</dt><dd>{preparations.timeZone}</dd></div></dl><ul className="pf-preparation-times">{preparations.requirements.map(item => <li key={item.id}><strong>{item.title}</strong><span>{formatDateTime(item.start, preparations.timeZone)} to {formatDateTime(item.end, preparations.timeZone)}</span></li>)}</ul>{!preparations.requirements.length && <p>This plan has no timed preparation requirements.</p>}</div>
+          : <Notice tone="warning" title="The selected preparation plan needs a fresh check">The plan selected for this review is no longer available with its current agreements. Refresh the event and review the publication again before continuing.</Notice>}
+        <div className="pf-preparation-guests"><h4>Guest details you will publish</h4><dl className="pf-event-facts"><div><dt>When</dt><dd>{eventDate(review.terms)} ({review.terms.timeZone})</dd></div><div><dt>Format</dt><dd>{eventFormatLabel(review.terms)}</dd></div><div><dt>Public place</dt><dd>{eventPlace(review.terms)}</dd></div>{review.terms.online && <div><dt>Online joining</dt><dd className="pf-event-prose">{audienceValue(review.terms, 'online')}</dd></div>}</dl></div>
+        <Checkbox containerClassName="pf-preparation-acknowledgement" label="I checked that this preparation plan supports the guest dates and joining arrangements." checked={preparationsAcknowledged} disabled={submitting || !correctChain || !preparations} onChange={event => setPreparationsAcknowledged(event.target.checked)} />
+      </section>}
+      <dl className="pf-event-facts">{(['title', 'description', 'startsAt', 'endsAt', 'timeZone', 'format', 'location', 'online', 'registration', 'instructions', 'conditions'] as const).map(field => <div key={field}><dt>{labels[field]}</dt><dd className="pf-event-prose">{termsValue(review.terms, field)}</dd></div>)}</dl>
       <p>Your wallet address, these event details, the plan reference and this status will be publicly readable on Arkiv. Publishing can require two wallet confirmations: the details first, then the current event page. Keep the original request if either step is interrupted.</p>
       <dl className="pf-event-facts"><div><dt>Organizer wallet</dt><dd className="pf-event-reference">{review.command.operation.authority.actor.kind === 'wallet' ? review.command.operation.authority.actor.address : ''}</dd></div></dl>
       <details className="pf-event-evidence"><summary>Plan reference and record lifetime</summary><p className="pf-event-reference">{review.command.source.proposalKey}</p>
         <p>This request asks for {Math.ceil(review.command.lifetimeSeconds / 86_400)} days of storage, covering the event and at least 30 days afterward at preparation time. References have their own lifetimes; expiry does not erase downloaded copies or guarantee permanent history.</p>
         <p>{eventDate(review.terms)}</p></details>
       <Checkbox label="I reviewed these public details and the effect of this action." checked={acknowledged} disabled={submitting || !correctChain} onChange={event => setAcknowledged(event.target.checked)} />
-      <div className="pf-actions"><Button variant={review.kind === 'cancel' ? 'danger' : 'primary'} onClick={() => void confirm()} disabled={!acknowledged || submitting || !correctChain || unresolved && !review.resume}
+      <div className="pf-actions"><Button variant={review.kind === 'cancel' ? 'danger' : 'primary'} onClick={() => void confirm()} disabled={!acknowledged || submitting || !correctChain || unresolved && !review.resume || reviewsPreparations && (!preparationsAcknowledged || !preparations)}
         {...(submitting ? { pending: true as const, pendingLabel: 'Checking the original event request' } : { pending: false as const })}>{review.resume ? 'Continue original request' : actionCopy[review.kind].confirm}</Button>
         <Button variant="quiet" disabled={submitting} onClick={() => { setReview(null); setAcknowledged(false); }}>Back to event draft</Button></div>
     </section>}

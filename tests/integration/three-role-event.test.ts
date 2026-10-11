@@ -9,8 +9,8 @@ import type { OperationKind, Result, WriteAuthority } from '../../src/data/types
 import { createWalletGateway } from '../../src/data/wallet';
 import type { NativeTransactionRequest, RpcRequest as WalletRequest } from '../../src/data/wallet';
 import { canonicalJson } from '../../src/domain/canonical';
-import { audienceChanges, deriveEventAvailability } from '../../src/domain/events';
-import type { AudienceTerms } from '../../src/domain/events';
+import { audienceChanges, canAdmitAttendance, deriveEventAvailability, eventRosterVerified, registrationEligibility } from '../../src/domain/events';
+import type { AudienceTerms, EventAggregate } from '../../src/domain/events';
 import { activeSource, deriveReadiness } from '../../src/domain/readiness';
 import { solve } from '../../src/domain/solver';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
@@ -20,6 +20,7 @@ import { prepareRegistration, prepareWithdrawal, targetForEvent, targetForWithdr
 import { prepareDecisionCommand } from '../../src/features/contributions/model';
 import { readEventForActor, readEventForWithdrawal } from '../../src/features/events/hooks';
 import { preparePublishingReview, publishingFields, submitPublishingCommand, validatePublishingReview } from '../../src/features/events/publishing/model';
+import { prepareAdmissionReview, validateAdmissionReview } from '../../src/features/events/publishing/admission';
 import type { PublishingKind } from '../../src/features/events/publishing/model';
 import { repairInput, solveRepair } from '../../src/features/execution/repair';
 import { admitPublisherInput, planningInput, publishPlanInput } from '../../src/features/projects/selectors';
@@ -56,19 +57,21 @@ const audience: AudienceTerms = { title: 'Neighbourhood print exhibition', descr
   startsAt: opening, endsAt: end, timeZone: 'Europe/Paris', venue: 'Community room', instructions: 'Enter through the courtyard.',
   conditions: 'Free open event. Registration records an intention to attend and does not guarantee a reserved place.' };
 
-function workspace() {
-  const ledger = createNativeLedger({ now: NOW });
-  const journals = new Map<AccountAddress, Map<string, string>>();
+function workspace(options: { pageSize?: number } = {}) {
+  const ledger = createNativeLedger({ now: NOW, ...options });
+  const journals = new Map<string, Map<string, string>>();
   const locks = new MemoryOperationStore();
   let serial = 0;
   const nextId = (label: string) => `${label}-${++serial}`;
   /** Each reopening has new repositories/controller; only its own serialized journal survives. */
-  function client(account: AccountAddress, request: RpcRequest = ledger.request) {
-    let storage = journals.get(account);
-    if (!storage) { storage = new Map(); journals.set(account, storage); }
+  function client(account: AccountAddress, request: RpcRequest = ledger.request,
+    device: { id?: string; beforeSend?: () => void | Promise<void> } = {}) {
+    const journalId = `${device.id ?? 'primary'}:${account}`;
+    let storage = journals.get(journalId);
+    if (!storage) { storage = new Map(); journals.set(journalId, storage); }
     const ownStorage = storage, state = { account };
     const store = new BrowserOperationStore({ getItem: key => ownStorage.get(key) ?? null,
-      setItem: (key, value) => { ownStorage.set(key, value); } }, { key: `journal:${account}`, lockKey: `journal:${account}`, locks });
+      setItem: (key, value) => { ownStorage.set(key, value); } }, { key: `journal:${journalId}`, lockKey: `journal:${journalId}`, locks });
     const provider = { request: async (args: WalletRequest): Promise<unknown> => {
       if (args.method === 'eth_accounts') return [state.account];
       if (args.method === 'eth_chainId') return toHex(TIRAMISU_CHAIN_ID);
@@ -77,6 +80,7 @@ function workspace() {
       const record = store.list().find(item => item.step.status === 'unverified'
         && canonicalJson(item.admission?.request) === canonicalJson(transaction));
       if (!record) throw new Error('A native send must have its exact persisted admission.');
+      await device.beforeSend?.();
       return ledger.submit(transaction, record);
     } };
     const gateway = createWalletGateway({ provider, publicRpc: { request } });
@@ -92,8 +96,8 @@ function workspace() {
   return { ledger, client, nextId, freshEvents, freshCore };
 }
 
-async function exhibition() {
-  const f = workspace();
+async function exhibition(options: { pageSize?: number } = {}) {
+  const f = workspace(options);
   expect(f.ledger.readRows()).toEqual([]);
   expect(unwrap(await f.freshEvents().listEvents()).items).toEqual([]);
   expect(unwrap(await f.freshEvents().listMyEvents(actor(attendee))).items).toEqual([]);
@@ -304,5 +308,377 @@ describe('organizer, contributor and attendee through independent production rep
       .filter(payload => payload.entityType === 'attendance_state').every(payload => payload.attendee === attendee)).toBe(true);
     expect(f.ledger.readRows().filter(row => row.attributes.some(attribute => attribute.name === 'entity_type' && attribute.value === 'attendance_state'))).toHaveLength(1);
     expect(f.ledger.readRows().filter(row => row.attributes.some(attribute => attribute.name === 'entity_type' && attribute.value === 'event_release'))).toHaveLength(2);
+  }, 60_000);
+});
+
+type Exhibition = Awaited<ReturnType<typeof exhibition>>;
+const finiteAudience = (rules: Partial<NonNullable<AudienceTerms['registration']>> = {}): AudienceTerms => ({
+  ...audience, termsVersion: 2, format: 'hybrid',
+  location: { countryCode: 'FR', country: 'France', city: 'Paris', venue: audience.venue },
+  online: { url: 'https://example.org/exhibition', instructions: 'Use the public exhibition page.' },
+  conditions: 'The organizer confirms places. Joining the waiting list is optional.',
+  registration: { deadline: opening - 86_400_000, capacity: { kind: 'limited', limit: 1 },
+    waitlist: true, admission: 'open', invitedAccounts: [], ...rules },
+});
+async function requestReview(f: Exhibition, account: AccountAddress, joinWaitlist = false) {
+  const read = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(account)));
+  return prepared(prepareRegistration(read, targetForEvent(read, session(account), f.ledger.now())!, session(account), f.ledger.now(), joinWaitlist));
+}
+async function ownEvent(f: Exhibition, account: AccountAddress, request: RpcRequest = f.ledger.request) {
+  const result = unwrap(await f.freshEvents(request).listMyEvents(actor(account)));
+  expect(result.snapshot).toMatchObject({ completeness: 'complete', freshness: 'fresh', reasons: [] });
+  expect(result.items).toHaveLength(1);
+  return result.items[0]!;
+}
+async function ownerReview(f: Exhibition, account: AccountAddress, kind: 'admit' | 'release', event?: EventAggregate) {
+  const current = event ?? await f.event();
+  const result = prepareAdmissionReview(current, session(organizer), account, kind, f.ledger.now());
+  if (!result.ok) throw new Error(result.message);
+  expect(validateAdmissionReview(result.review, current, session(organizer), f.ledger.now())).toBeNull();
+  return result.review.command;
+}
+async function withdraw(f: Exhibition, account: AccountAddress) {
+  const read = unwrap(await readEventForWithdrawal(f.freshEvents(), f.projectRoot, actor(account)));
+  return unwrap(await f.client(account).events.replaceAttendance(prepared(prepareWithdrawal(read,
+    targetForWithdrawal(read, session(account), f.ledger.now())!, session(account), f.ledger.now()))));
+}
+
+describe('structured events across independent production clients', () => {
+  it('keeps an obsolete reservation occupied across repeated withdrawal and rejoining until an explicit owner decision', async () => {
+    const f = await exhibition({ pageSize: 1 });
+    const published = await f.publish('publish', finiteAudience({ capacity: { kind: 'limited', limit: 2 }, waitlist: false }));
+    const first = unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee))).value;
+    const other = unwrap(await f.client(stranger).events.replaceAttendance(await requestReview(f, stranger))).value;
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, stranger, 'admit')));
+    const original = await f.event();
+    if (original.state.status !== 'unique') throw new Error('Expected one organizer head.');
+    const originalReservations = original.state.entity.payload.admissions;
+    expect(originalReservations).toHaveLength(2);
+    const newcomer = address(7);
+    let currentRequest = first;
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const withdrawn = await withdraw(f, attendee);
+      expect(withdrawn.receipt.consumedKeys).toEqual([currentRequest.key]);
+      expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('withdrawn');
+      expect(myEventStatus(await ownEvent(f, stranger), f.ledger.now())).toBe('going');
+      const beforeRejoin = await f.event();
+      expect(eventRosterVerified(beforeRejoin, f.ledger.now())).toBe(true);
+      expect(registrationEligibility(beforeRejoin, actor(newcomer), f.ledger.now())).toMatchObject({ status: 'full', remaining: 0 });
+      expect(registrationEligibility(beforeRejoin, actor(attendee), f.ledger.now()).status).toBe('request');
+      const rejoined = unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee)));
+      expect(rejoined.receipt.consumedKeys).toEqual([withdrawn.value.key]);
+      expect(rejoined.value.payload.predecessorKeys).toEqual([withdrawn.value.key]);
+      expect(rejoined.value.payload.predecessorKeys).not.toContain(first.key);
+      currentRequest = rejoined.value;
+      const current = await f.event();
+      expect(eventRosterVerified(current, f.ledger.now())).toBe(true);
+      expect(deriveEventAvailability(current, f.ledger.now())).toBe('full');
+      expect(current.state.status === 'unique' && current.state.entity.payload.admissions).toEqual(originalReservations);
+      expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+      expect(myEventStatus(await ownEvent(f, stranger), f.ledger.now())).toBe('going');
+      expect(registrationEligibility(current, actor(newcomer), f.ledger.now())).toMatchObject({ status: 'full', remaining: 0 });
+      const before = f.ledger.sends.length, outsider = f.client(newcomer);
+      expect(await outsider.events.replaceAttendance(outsider.command('replace_attendance', { projectRoot: f.projectRoot,
+        releaseKey: published.release!.key, audienceHash: published.release!.payload.audienceHash,
+        decision: 'going' as const, expectedHeads: [], lifetimeSeconds }))).toMatchObject({ ok: false });
+      expect(f.ledger.sends).toHaveLength(before);
+    }
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'release')));
+    const released = await f.event();
+    expect(registrationEligibility(released, actor(newcomer), f.ledger.now())).toMatchObject({ status: 'request', remaining: 1 });
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+    expect(myEventStatus(await ownEvent(f, stranger), f.ledger.now())).toBe('going');
+    const accepted = unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    expect(accepted.value.payload.admissions).toEqual(expect.arrayContaining([
+      { attendee, attendanceKey: currentRequest.key, releaseKey: published.release!.key },
+      { attendee: stranger, attendanceKey: other.key, releaseKey: published.release!.key },
+    ]));
+    expect(accepted.value.payload.admissions).toHaveLength(2);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    expect(myEventStatus(await ownEvent(f, stranger), f.ledger.now())).toBe('going');
+    expect(registrationEligibility(await f.event(), actor(newcomer), f.ledger.now())).toMatchObject({ status: 'full', remaining: 0 });
+  }, 60_000);
+
+  it('keeps requests pending, atomically arbitrates the last place, and requires explicit release before promotion', async () => {
+    const f = await exhibition({ pageSize: 1 });
+    const published = await f.publish('publish', finiteAudience());
+    expect(registrationEligibility(published, actor(attendee), f.ledger.now())).toMatchObject({ status: 'request', remaining: 1, requiresApproval: true });
+    expect(unwrap(await f.freshEvents().listEvents({ format: 'hybrid', countryCode: 'FR', city: 'paris', availability: 'open', deadlineBefore: opening })).items).toHaveLength(1);
+    expect(unwrap(await f.freshEvents().listEvents({ format: 'online' })).items).toEqual([]);
+
+    const firstRequest = unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee, true))).value;
+    const secondRequest = unwrap(await f.client(stranger).events.replaceAttendance(await requestReview(f, stranger, true))).value;
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+    expect(myEventStatus(await ownEvent(f, stranger), f.ledger.now())).toBe('pending');
+    const reviewed = await f.event();
+    expect(reviewed.roster?.entries.map(entry => entry.attendee)).toEqual([attendee, stranger]);
+    expect(eventRosterVerified(reviewed, f.ledger.now())).toBe(true);
+    expect(reviewed.roster?.entries.every(entry => canAdmitAttendance(reviewed, entry, f.ledger.now()))).toBe(true);
+    const firstDecision = await ownerReview(f, attendee, 'admit', reviewed);
+    const secondDecision = await ownerReview(f, stranger, 'admit', reviewed);
+    expect(firstDecision.expectedHeads).toEqual(secondDecision.expectedHeads);
+
+    // Independent devices have independent journals/locks. Both complete production preflight
+    // before either native batch executes; only the exact consume can protect the final place.
+    let reached = 0, release!: () => void;
+    const together = new Promise<void>(resolve => { release = resolve; });
+    const beforeSend = async () => { reached++; if (reached === 2) release(); await together; };
+    const before = f.ledger.sends.length;
+    const results = await Promise.all([
+      f.client(organizer, f.ledger.request, { id: 'owner-device-a', beforeSend }).events.replaceEvent(firstDecision),
+      f.client(organizer, f.ledger.request, { id: 'owner-device-b', beforeSend }).events.replaceEvent(secondDecision),
+    ]);
+    expect(reached).toBe(2);
+    expect(results.filter(result => result.ok)).toHaveLength(1);
+    expect(results.filter(result => !result.ok)).toEqual([expect.objectContaining({ error: expect.objectContaining({ code: 'unverified' }) })]);
+    expect(f.ledger.sends).toHaveLength(before + 1);
+    const winner = results[0]!.ok ? attendee : stranger, waiting = winner === attendee ? stranger : attendee;
+    const admittedRequest = winner === attendee ? firstRequest : secondRequest;
+    const current = await f.event();
+    expect(current.state.status).toBe('unique');
+    if (current.state.status !== 'unique') throw new Error('The native race must leave exactly one event head.');
+    expect(current.state.entity.payload.admissions).toEqual([{ attendee: winner, attendanceKey: admittedRequest.key, releaseKey: published.release!.key }]);
+    const nativeAdmission = f.ledger.sends.at(-1)!;
+    expect(nativeAdmission.deletedKeys).toEqual(firstDecision.expectedHeads);
+    expect(nativeAdmission.record.batch.creates).toHaveLength(1);
+    expect(myEventStatus(await ownEvent(f, winner), f.ledger.now())).toBe('going');
+    expect(myEventStatus(await ownEvent(f, waiting), f.ledger.now())).toBe('waitlisted');
+    expect(registrationEligibility(current, actor(waiting), f.ledger.now())).toMatchObject({ status: 'waitlist', remaining: 0 });
+    const newcomer = address(7);
+    const fullRead = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(newcomer)));
+    expect(prepareRegistration(fullRead, targetForEvent(fullRead, session(newcomer), f.ledger.now())!, session(newcomer), f.ledger.now())).toMatchObject({ ok: false });
+    unwrap(await f.client(newcomer).events.replaceAttendance(await requestReview(f, newcomer, true)));
+    expect(myEventStatus(await ownEvent(f, newcomer), f.ledger.now())).toBe('waitlisted');
+
+    const staleDecision = winner === attendee ? secondDecision : firstDecision;
+    const { operation: ignored, ...staleFields } = staleDecision;
+    const freshOwner = f.client(organizer, f.ledger.request, { id: 'fresh-owner' });
+    expect(await freshOwner.events.replaceEvent(freshOwner.command('replace_event', staleFields))).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
+    expect(f.ledger.sends).toHaveLength(before + 2);
+
+    const withdrawn = await withdraw(f, winner);
+    expect(withdrawn.receipt.consumedKeys).toEqual([admittedRequest.key]);
+    expect(myEventStatus(await ownEvent(f, winner), f.ledger.now())).toBe('withdrawn');
+    expect(myEventStatus(await ownEvent(f, waiting), f.ledger.now())).toBe('waitlisted');
+    expect(registrationEligibility(await f.event(), actor(waiting), f.ledger.now()).remaining).toBe(0);
+    expect(prepareAdmissionReview(await f.event(), session(organizer), waiting, 'admit', f.ledger.now())).toMatchObject({ ok: false });
+    const releasePlace = await ownerReview(f, winner, 'release');
+    unwrap(await freshOwner.events.replaceEvent(releasePlace));
+    expect(myEventStatus(await ownEvent(f, waiting), f.ledger.now())).toBe('pending');
+    const promotion = await ownerReview(f, waiting, 'admit');
+    f.ledger.loseNextResponse();
+    const lostOwner = f.client(organizer, f.ledger.request, { id: 'promotion-device' });
+    expect(await lostOwner.events.replaceEvent(promotion)).toMatchObject({ ok: false, error: { code: 'unverified' } });
+    const afterLost = f.ledger.sends.length;
+    const reopened = f.client(organizer, f.ledger.request, { id: 'promotion-device' });
+    expect(unwrap(await reopened.events.reconcile(promotion.operation)).status).toBe('confirmed');
+    const confirmed = unwrap(await reopened.events.replaceEvent(promotion));
+    expect(confirmed.receipt.consumedKeys).toEqual(promotion.expectedHeads);
+    expect(f.ledger.sends).toHaveLength(afterLost);
+    expect(myEventStatus(await ownEvent(f, waiting), f.ledger.now())).toBe('going');
+    expect(myEventStatus(await ownEvent(f, winner), f.ledger.now())).toBe('withdrawn');
+    const rejoined = unwrap(await f.client(winner).events.replaceAttendance(await requestReview(f, winner, true)));
+    expect(rejoined.receipt.consumedKeys).toEqual([withdrawn.value.key]);
+    expect(myEventStatus(await ownEvent(f, winner), f.ledger.now())).toBe('waitlisted');
+    expect(myEventStatus(await ownEvent(f, waiting), f.ledger.now())).toBe('going');
+    const afterRejoin = f.ledger.sends.length;
+    // An unconfirmed losing native attempt cannot be treated as permission to send again.
+    const losingClient = f.client(organizer, f.ledger.request, { id: winner === attendee ? 'owner-device-b' : 'owner-device-a' });
+    expect(unwrap(await losingClient.events.reconcile(staleDecision.operation)).status).not.toBe('confirmed');
+    expect(await losingClient.events.replaceEvent(staleDecision)).toMatchObject({ ok: false });
+    expect(f.ledger.sends).toHaveLength(afterRejoin);
+  }, 60_000);
+
+  it('binds reconfirmation and admission to the new release even when earlier audience terms return', async () => {
+    const f = await exhibition();
+    const terms = finiteAudience();
+    const first = await f.publish('publish', terms);
+    unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee)));
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    const oldRead = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(attendee)));
+    const oldTarget = targetForEvent(oldRead, session(attendee), f.ledger.now())!;
+    await f.publish('publish', { ...terms, startsAt: opening + 60_000 });
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('needs_review');
+    const repeated = await f.publish('publish', terms);
+    expect(repeated.release!.payload.audienceHash).toBe(first.release!.payload.audienceHash);
+    expect(repeated.release!.key).not.toBe(first.release!.key);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('needs_review');
+    const fresh = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(attendee)));
+    expect(prepareRegistration(fresh, oldTarget, session(attendee), f.ledger.now())).toMatchObject({ ok: false });
+    const reconfirm = await requestReview(f, attendee);
+    const result = unwrap(await f.client(attendee).events.replaceAttendance(reconfirm));
+    expect(result.value.payload.releaseKey).toBe(repeated.release!.key);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    const noWaitlist = await f.publish('publish', { ...terms, registration: { ...terms.registration!, waitlist: false } });
+    expect(registrationEligibility(noWaitlist, actor(stranger), f.ledger.now())).toMatchObject({ status: 'full', remaining: 0 });
+    const before = f.ledger.sends.length;
+    const outsider = f.client(stranger);
+    expect(await outsider.events.replaceAttendance(outsider.command('replace_attendance', { projectRoot: f.projectRoot,
+      releaseKey: noWaitlist.release!.key, audienceHash: noWaitlist.release!.payload.audienceHash, decision: 'going' as const,
+      expectedHeads: [], lifetimeSeconds, joinWaitlist: false }))).toMatchObject({ ok: false });
+    expect(f.ledger.sends).toHaveLength(before);
+  }, 60_000);
+
+  it('uses canonical inclusion time, rejecting stale reviews and never granting late backdated requests a place', async () => {
+    const f = await exhibition();
+    const deadline = f.ledger.now() + 120_000;
+    await f.publish('publish', finiteAudience({ deadline }));
+    const stale = await requestReview(f, stranger);
+    const reviewed = await requestReview(f, attendee);
+    const { operation: ignored, ...fields } = reviewed;
+    const backdated = { ...fields, operation: createOperationIntent('replace_attendance', authority(attendee), fields,
+      { id: f.nextId('backdated-request'), now: NOW - 86_400_000 }) };
+    const lateWallet = f.client(attendee, f.ledger.request, { beforeSend: () => f.ledger.setTime(deadline) });
+    const recorded = unwrap(await lateWallet.events.replaceAttendance(backdated));
+    expect(recorded.value.payload.createdAt).toBe(NOW - 86_400_000);
+    const current = await f.event();
+    expect(current.roster!.entries[0]!.inclusionTimestamp).toBeGreaterThanOrEqual(deadline);
+    expect(canAdmitAttendance(current, current.roster!.entries[0]!, f.ledger.now())).toBe(false);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('registration_closed');
+    expect(prepareAdmissionReview(current, session(organizer), attendee, 'admit', f.ledger.now())).toMatchObject({ ok: false });
+    const owner = f.client(organizer);
+    const head = current.state.status === 'unique' ? current.state.entity : null;
+    if (!head) throw new Error('Expected the current event head.');
+    const before = f.ledger.sends.length;
+    expect(await owner.events.replaceEvent(owner.command('replace_event', { projectRoot: f.projectRoot,
+      releaseKey: current.release!.key, audienceHash: current.release!.payload.audienceHash, source: head.payload.source,
+      status: 'open' as const, expectedHeads: [head.key], lifetimeSeconds,
+      admissions: [{ attendee, attendanceKey: recorded.value.key, releaseKey: current.release!.key }] }))).toMatchObject({ ok: false });
+    expect(await f.client(stranger).events.replaceAttendance(stale)).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
+    expect(f.ledger.sends).toHaveLength(before);
+  }, 60_000);
+
+  it('allows only still-reserved release-listed wallets to reconfirm changed terms after the deadline', async () => {
+    const f = await exhibition();
+    const deadline = f.ledger.now() + 120_000;
+    const terms = finiteAudience({ deadline });
+    const initial = await f.publish('publish', terms);
+    expect(initial.release!.payload.reconfirmationAccounts).toEqual([]);
+    const firstRequest = unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee))).value;
+    unwrap(await f.client(stranger).events.replaceAttendance(await requestReview(f, stranger, true)));
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    f.ledger.setTime(deadline + 2_000);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    const changed = await f.publish('publish', { ...terms, startsAt: terms.startsAt + 60_000 });
+    expect(changed.release!.key).not.toBe(initial.release!.key);
+    expect(changed.release!.payload.predecessorReleaseKey).toBe(initial.release!.key);
+    expect(changed.release!.payload.reconfirmationAccounts).toEqual([attendee]);
+    expect(deriveEventAvailability(changed, f.ledger.now())).toBe('registration_closed');
+    expect(registrationEligibility(changed, actor(attendee), f.ledger.now())).toMatchObject({ status: 'request', remaining: 0 });
+    expect(registrationEligibility(changed, actor(stranger), f.ledger.now()).status).toBe('registration_closed');
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('needs_review');
+    const newcomer = address(7), before = f.ledger.sends.length;
+    for (const account of [stranger, newcomer]) {
+      const reader = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(account)));
+      expect(prepareRegistration(reader, targetForEvent(reader, session(account), f.ledger.now())!, session(account), f.ledger.now(), true)).toMatchObject({ ok: false });
+      const writer = f.client(account);
+      expect(await writer.events.replaceAttendance(writer.command('replace_attendance', { projectRoot: f.projectRoot,
+        releaseKey: changed.release!.key, audienceHash: changed.release!.payload.audienceHash,
+        decision: 'going' as const, joinWaitlist: true, expectedHeads: reader.attendance?.status === 'unique' ? [reader.attendance.entity.key] : [],
+        lifetimeSeconds }))).toMatchObject({ ok: false });
+    }
+    expect(f.ledger.sends).toHaveLength(before);
+    const reconfirmed = unwrap(await f.client(attendee).events.replaceAttendance(await requestReview(f, attendee)));
+    expect(reconfirmed.receipt.consumedKeys).toEqual([firstRequest.key]);
+    expect(reconfirmed.value.payload.releaseKey).toBe(changed.release!.key);
+    const pending = await f.event();
+    expect(eventRosterVerified(pending, f.ledger.now())).toBe(true);
+    expect(pending.roster!.entries.find(entry => entry.attendee === attendee)!.inclusionTimestamp).toBeGreaterThan(deadline);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+    if (pending.state.status !== 'unique') throw new Error('Expected one event head.');
+    expect(pending.state.entity.payload.admissions).toEqual([{ attendee, attendanceKey: firstRequest.key, releaseKey: initial.release!.key }]);
+    const accepted = unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    expect(accepted.value.payload.admissions).toEqual([{ attendee, attendanceKey: reconfirmed.value.key, releaseKey: changed.release!.key }]);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    expect(eventRosterVerified(await f.event(), f.ledger.now())).toBe(true);
+
+    // Immutable eligibility metadata alone cannot restore a place the organizer explicitly released.
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'release')));
+    const released = await f.event();
+    expect(released.release!.payload.reconfirmationAccounts).toEqual([attendee]);
+    expect(registrationEligibility(released, actor(attendee), f.ledger.now())).toMatchObject({ status: 'registration_closed', remaining: 1 });
+    const returning = unwrap(await readEventForActor(f.freshEvents(), f.projectRoot, actor(attendee)));
+    expect(prepareRegistration(returning, targetForEvent(returning, session(attendee), f.ledger.now())!, session(attendee), f.ledger.now())).toMatchObject({ ok: false });
+  }, 60_000);
+
+  it('checks invitation eligibility for each wallet and retains pending state until the organizer admits it', async () => {
+    const f = await exhibition();
+    const published = await f.publish('publish', finiteAudience({ admission: 'invite_only', invitedAccounts: [attendee], capacity: { kind: 'unlimited' }, waitlist: false }));
+    expect(registrationEligibility(published, actor(stranger), f.ledger.now()).status).toBe('invitation_required');
+    expect(registrationEligibility(published, actor(attendee), f.ledger.now()).status).toBe('request');
+    const before = f.ledger.sends.length, outsider = f.client(stranger);
+    expect(await outsider.events.replaceAttendance(outsider.command('replace_attendance', { projectRoot: f.projectRoot,
+      releaseKey: published.release!.key, audienceHash: published.release!.payload.audienceHash,
+      decision: 'going' as const, expectedHeads: [], lifetimeSeconds }))).toMatchObject({ ok: false });
+    expect(f.ledger.sends).toHaveLength(before);
+    const request = await requestReview(f, attendee);
+    f.ledger.loseNextResponse();
+    expect(await f.client(attendee).events.replaceAttendance(request)).toMatchObject({ ok: false, error: { code: 'unverified' } });
+    const sent = f.ledger.sends.length, reopened = f.client(attendee);
+    expect(unwrap(await reopened.events.reconcile(request.operation)).status).toBe('confirmed');
+    unwrap(await reopened.events.replaceAttendance(request));
+    expect(f.ledger.sends).toHaveLength(sent);
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('pending');
+    unwrap(await f.client(organizer).events.replaceEvent(await ownerReview(f, attendee, 'admit')));
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('going');
+    const changed = await f.publish('publish', finiteAudience({ admission: 'invite_only', invitedAccounts: [stranger], capacity: { kind: 'unlimited' }, waitlist: false }));
+    expect(myEventStatus(await ownEvent(f, attendee), f.ledger.now())).toBe('needs_review');
+    expect(registrationEligibility(changed, actor(attendee), f.ledger.now()).status).toBe('invitation_required');
+  }, 60_000);
+
+  it('fails closed on incomplete roster pages and expired reserved evidence without silently freeing a place', async () => {
+    const f = await exhibition({ pageSize: 1 });
+    // Longer organizer storage makes the attendee's real block expiration independently observable.
+    const owner = f.client(organizer), initial = await f.event();
+    const published = unwrap(await owner.events.publishEvent(owner.command('publish_event', { projectRoot: f.projectRoot,
+      terms: finiteAudience(), source: activeSource(initial.sourceProject!)!, expectedHeads: [], lifetimeSeconds }))).value;
+    const request = await requestReview(f, attendee);
+    const reserved = unwrap(await f.client(attendee).events.replaceAttendance(request)).value;
+    unwrap(await f.client(stranger).events.replaceAttendance(await requestReview(f, stranger, true)));
+    const review = await ownerReview(f, attendee, 'admit');
+    const { operation: ignored, ...fields } = review;
+    let interrupted = 0;
+    const partial: RpcRequest = async args => {
+      const params = args.params as [string, { cursor?: string }];
+      if (args.method === 'arkiv_query' && params[0].includes('attendance_state') && params[1].cursor) {
+        interrupted++; throw Object.assign(new Error('Synthetic unavailable next roster page.'), { status: 503 });
+      }
+      return f.ledger.request(args);
+    };
+    const unavailable = await f.freshEvents(partial).loadEvent(f.projectRoot);
+    expect(interrupted).toBeGreaterThan(0);
+    expect(unavailable.ok ? deriveEventAvailability(unavailable.value, f.ledger.now()) : 'unverified').toBe('unverified');
+    const strangerCommand = await requestReview(f, stranger, true).catch(() => null);
+    expect(strangerCommand).toBeNull(); // Already recorded requests must not be duplicated.
+    const before = f.ledger.sends.length;
+    expect(await f.client(organizer, partial).events.replaceEvent(review)).toMatchObject({ ok: false });
+    expect(f.ledger.sends).toHaveLength(before);
+    unwrap(await owner.events.replaceEvent(owner.command('replace_event', { ...fields, lifetimeSeconds })));
+
+    const row = f.ledger.readRows().find(item => item.key === reserved.key)!;
+    // Preserve contributor/project evidence through its owners' production renewal path,
+    // isolating audience evidence expiration from unrelated preparation expirations.
+    for (const evidence of f.ledger.readRows().filter(item => BigInt(item.expiresAt) <= BigInt(row.expiresAt)
+      && item.attributes.some(attribute => attribute.name === 'project' && attribute.value === 'partfolk'))) {
+      const author = f.client(evidence.creator);
+      unwrap(await author.core.renewEntity(author.command('renew_entity', { entityKey: evidence.key,
+        extendBySeconds: lifetimeSeconds, lifetimeSeconds })));
+    }
+    const afterRenewal = f.ledger.sends.length;
+    f.ledger.advanceBlocks(Number(BigInt(row.expiresAt)) - f.ledger.blockNumber());
+    const expired = await f.event();
+    expect(deriveReadiness(expired.sourceProject!, f.ledger.now()).status).toBe('ready');
+    expect(expired.release?.key).toBe(published.release!.key);
+    expect(expired.state.status).toBe('unique');
+    expect(eventRosterVerified(expired, f.ledger.now())).toBe(false);
+    expect(deriveEventAvailability(expired, f.ledger.now())).toBe('unverified');
+    expect(registrationEligibility(expired, actor(stranger), f.ledger.now())).toMatchObject({ status: 'unverified', remaining: null });
+    expect(expired.state.status === 'unique' && expired.state.entity.payload.admissions).toHaveLength(1);
+    expect(prepareAdmissionReview(expired, session(organizer), stranger, 'admit', f.ledger.now())).toMatchObject({ ok: false });
+    expect(f.ledger.sends).toHaveLength(afterRenewal);
   }, 60_000);
 });

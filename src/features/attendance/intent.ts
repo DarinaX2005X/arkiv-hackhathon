@@ -3,7 +3,7 @@ import type { AppSession } from '../../app/session';
 import { createDraftStore, type StoragePort } from '../../app/storage';
 import { createOperationIntent } from '../../data/operations';
 import type { ReplaceAttendanceCommand } from '../../data/events/types';
-import { attendanceStatus, deriveEventAvailability, validateEventRecord } from '../../domain/events';
+import { attendanceStatus, registrationEligibility, validateEventRecord } from '../../domain/events';
 import type { AccountAddress, ContentHash, PublicEntityKey } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { EventRead } from '../events/hooks';
@@ -60,23 +60,26 @@ export function registrationLifetime(endsAt: number, now: number): number {
   return Math.max(90 * 86_400, Math.ceil((endsAt + 30 * 86_400_000 - now + 60_000) / 2_000) * 2);
 }
 
-export function prepareRegistration(read: EventRead, target: JoinTarget, session: AppSession, now = Date.now()):
+export function prepareRegistration(read: EventRead, target: JoinTarget, session: AppSession, now = Date.now(), joinWaitlist = false):
   { ok: true; command: ReplaceAttendanceCommand } | { ok: false; message: string } {
   if (session.mode !== 'public' || session.actor?.kind !== 'wallet') return { ok: false, message: 'Sign in with your wallet to review this registration.' };
   if (session.chainId !== TIRAMISU_CHAIN_ID) return { ok: false, message: 'Switch your wallet to Tiramisu before confirming.' };
   if (!target.attendee || target.attendee.toLowerCase() !== session.actor.address.toLowerCase()
     || read.actor?.address.toLowerCase() !== session.actor.address.toLowerCase()) return { ok: false, message: 'The wallet changed. Review the registration with your current wallet before continuing.' };
   if (!targetMatchesEvent(target, read)) return { ok: false, message: 'The event details changed. Review the current time, place and participation conditions before confirming.' };
-  if (deriveEventAvailability(read.event, now) !== 'open') return { ok: false, message: 'This event is not currently open for registration. Refresh its status before continuing.' };
+  const eligibility = registrationEligibility(read.event, session.actor, now);
+  if (!['join', 'request', 'waitlist'].includes(eligibility.status)) return { ok: false, message: eligibility.status === 'invitation_required' ? 'This wallet is not on the invitation list.' : 'This event is not currently accepting registrations. Refresh its status before continuing.' };
+  if (eligibility.status === 'waitlist' && !joinWaitlist) return { ok: false, message: 'All places are reserved. Choose the waiting list explicitly to request a place.' };
+  if (joinWaitlist && !read.event.release?.payload.terms.registration?.waitlist) return { ok: false, message: 'This event does not offer a waiting list.' };
   const scope = read.attendance;
   if (!scope || scope.status === 'unverified' || scope.status === 'conflict'
     || (scope.status === 'missing' && scope.reason !== 'not_initialized')) return { ok: false, message: 'Your previous registration could not be verified. Refresh before sending another decision.' };
   if (scope.status === 'unique' && scope.entity.payload.attendee.toLowerCase() !== session.actor.address.toLowerCase()) return { ok: false, message: 'This registration belongs to a different wallet. Refresh before continuing.' };
-  if (attendanceStatus(scope, read.event, now, read.myEvent?.registeredRelease ?? read.event.release) === 'going') return { ok: false, message: 'This wallet is already registered for these event details.' };
+  if (['going', 'pending', 'waitlisted'].includes(attendanceStatus(scope, read.event, now, read.myEvent?.registeredRelease ?? read.event.release))) return { ok: false, message: 'This wallet is already registered for these event details.' };
   const lifetimeSeconds = registrationLifetime(read.event.release!.payload.terms.endsAt, Math.min(now, read.event.snapshot.blockTimestamp));
   if (lifetimeSeconds > 10 * 366 * 86_400) return { ok: false, message: 'This event is too far in the future for the supported record lifetime.' };
   const input = { lifetimeSeconds, projectRoot: target.projectRoot, releaseKey: target.releaseKey, audienceHash: target.audienceHash,
-    decision: 'going' as const, expectedHeads: scope.status === 'unique' ? [scope.entity.key] : [] };
+    decision: 'going' as const, ...(joinWaitlist ? { joinWaitlist: true } : {}), expectedHeads: scope.status === 'unique' ? [scope.entity.key] : [] };
   return { ok: true, command: { ...input, operation: createOperationIntent('replace_attendance', {
     mode: 'public', chainId: TIRAMISU_CHAIN_ID, actor: { kind: 'wallet', address: session.actor.address.toLowerCase() as AccountAddress },
   }, input, { now }) } };

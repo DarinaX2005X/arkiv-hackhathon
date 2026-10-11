@@ -1,3 +1,4 @@
+import { prepareAdmissionReview, validateAdmissionReview } from './admission';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRepositoryActionController, validRepositoryActionRecord } from '../../../app/actions';
 import type { AppSession } from '../../../app/session';
@@ -10,9 +11,8 @@ import type { OperationIntent } from '../../../data/types';
 import { audienceHash, EVENTS_PROTOCOL, type EventAggregate, type EventRecord, type EventRelease } from '../../../domain/events';
 import { TIRAMISU_CHAIN_ID, type Actor, type EntityProvenance, type PublicEntityKey } from '../../../domain/types';
 import { confirmPublishingReview, draftAfterPublication, emptyPublishingFields, preparePublishingReview, publishingDraftMemory, publishingDraftStore,
-  publishingFields, publishingLifetime, reviewOriginalCommand, termsFromFields, validatePublishingReview, validPublishingCommand,
+  publishingFields, publishingLifetime, publishingPreparations, reviewOriginalCommand, termsFromFields, validatePublishingReview, validPublishingCommand,
   type PublishingCommand, type PublishingDraft, type PublishingReview } from './model';
-
 const actor = { kind: 'wallet' as const, address: COORDINATOR };
 const session: AppSession = { mode: 'public', actor, chainId: TIRAMISU_CHAIN_ID, activeDraftId: null, destination: '/projects', storageIssue: null };
 function memoryStorage(): StoragePort {
@@ -41,7 +41,6 @@ function mustReview(result: ReturnType<typeof preparePublishingReview>): Publish
   if (!result.ok) throw new Error(result.message); return result.review;
 }
 afterEach(() => { vi.useRealTimers(); });
-
 describe('organizer publication review', () => {
   it('binds changed visitor terms to the exact current event and agreed source', async () => {
     const { event, draft, source } = await fixture();
@@ -53,6 +52,27 @@ describe('organizer publication review', () => {
     expect(review.command.operation.authority.actor).toEqual(actor);
     expect(validPublishingCommand(review.command)).toBe(true);
     expect(validatePublishingReview(review, event, session, NOW)).toBeNull();
+  });
+  it('summarizes the selected immutable preparation plan without substituting guest details or draft edits', async () => {
+    const { event, draft, source } = await fixture();
+    const selected = event.sourceProject!.proposal!.payload.plan.variant;
+    if (event.sourceProject!.state.status !== 'unique') throw Error('fixture');
+    event.sourceProject!.state.entity.payload.recipe.variants[0]!.venueId = 'Unagreed draft location';
+    const summary = publishingPreparations(event, source, NOW);
+    expect(summary).toEqual({ title: selected.title, placeReference: selected.venueId, timeZone: selected.timeZone,
+      requirements: selected.requirements.map(item => ({ id: item.id, title: item.title, start: item.interval.start, end: item.interval.end })) });
+    expect(summary!.placeReference).not.toBe('Unagreed draft location');
+    // Preparation intervals need not equal organizer-authored guest times.
+    draft.fields.startsLocal = '2030-03-20T18:00'; draft.fields.endsLocal = '2030-03-20T20:00';
+    expect(publishingPreparations(event, source, NOW)).toEqual(summary);
+  });
+  it('does not show another or stale preparation plan beside an earlier publication review', async () => {
+    const { event, source } = await fixture();
+    expect(publishingPreparations(event, { ...source, proposalKey: entityKey(888) }, NOW)).toBeNull();
+    expect(publishingPreparations(event, { ...source, proposalHash: entityKey(889) }, NOW)).toBeNull();
+    expect(publishingPreparations(event, source, NOW + 60001)).toBeNull();
+    event.sourceProject!.proposal!.key = entityKey(890);
+    expect(publishingPreparations(event, source, NOW)).toBeNull();
   });
   it('prepares a first publication from ready project evidence without claiming missing history is new', async () => {
     const { event, draft } = await fixture();
@@ -138,7 +158,6 @@ describe('organizer publication review', () => {
     expect(validatePublishingReview(review, event, session, NOW)).toContain('agreements changed');
   });
 });
-
 describe('event time and draft retention', () => {
   it('round-trips exact milliseconds and the second occurrence of a repeated clock time', async () => {
     const { terms } = await fixture();
@@ -182,7 +201,6 @@ describe('event time and draft retention', () => {
     expect(draftAfterPublication({ ...draft, fields: { ...draft.fields, startsLocal: 'in progress' } }, terms, event)).toBeNull();
   });
 });
-
 describe('durable original event requests', () => {
   it('restores a partially published first event with its original ID and input', async () => {
     const { event, draft } = await fixture(); event.state = { status: 'missing', reason: 'expired_or_deleted' }; event.release = null; draft.baselineReleaseKey = null;
@@ -238,5 +256,65 @@ describe('durable original event requests', () => {
     const confirmed = await confirmPublishingReview(review, { read: async () => event, session: () => session, isCurrent: () => true,
       submit: async command => { writes++; return command.operation.id; } });
     expect(confirmed).toEqual({ ok: true, value: review.command.operation.id }); expect(writes).toBe(1);
+  });
+});
+
+
+describe('organizer place review', () => {
+  async function managed() {
+    const result = await fixture(), { event } = result;
+    if (!event.release || event.state.status !== 'unique') throw Error('fixture');
+    const terms = { ...event.release.payload.terms, termsVersion: 2 as const, format: 'in_person' as const,
+      location: { countryCode: 'GB', country: 'United Kingdom', city: 'London', venue: result.terms.venue }, online: null,
+      registration: { deadline: null, capacity: { kind: 'limited' as const, limit: 1 }, waitlist: true, admission: 'open' as const, invitedAccounts: [] } };
+    event.release.payload.terms = terms; event.release.payload.audienceHash = audienceHash(terms);
+    event.state.entity.payload.audienceHash = event.release.payload.audienceHash; event.state.entity.payload.admissions = [];
+    const person = { kind: 'wallet' as const, address: STRANGER };
+    const attendance = { status: 'unique' as const, entity: { key: entityKey(140), provenance: { ...event.release.provenance, creator: person, owner: person },
+      payload: { protocol: EVENTS_PROTOCOL, schemaVersion: 1 as const, operationId: 'request-place', createdAt: NOW - 1000, entityType: 'attendance_state' as const,
+        projectRoot: event.projectRoot, attendee: STRANGER, releaseKey: event.release.key, audienceHash: event.release.payload.audienceHash, decision: 'going' as const, predecessorKeys: [] } } };
+    event.roster = { snapshot: event.snapshot, diagnostics: [], entries: [{ attendee: STRANGER, attendance, registeredRelease: event.release, inclusionTimestamp: NOW - 500 }] };
+    return { ...result, attendance, state: event.state.entity.payload };
+  }
+  it('binds confirmation to the exact request, event head and owner', async () => {
+    const { event, attendance } = await managed();
+    const result = prepareAdmissionReview(event, session, STRANGER, 'admit', NOW);
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(result.review.command.admissions).toEqual([{ attendee: STRANGER, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }]);
+    expect(validateAdmissionReview(result.review, event, session, NOW)).toBeNull();
+    expect(validateAdmissionReview(result.review, event, { ...session, actor: { kind: 'wallet', address: STRANGER } }, NOW)).not.toBeNull();
+    if (event.state.status === 'unique') event.state.entity.key = entityKey(141);
+    expect(validateAdmissionReview(result.review, event, session, NOW)).toContain('changed');
+  });
+  it('releases an explicit retained reservation when the visitor request is unavailable', async () => {
+    const { event, attendance, state } = await managed();
+    state.admissions = [{ attendee: STRANGER, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }];
+    event.roster = undefined; event.sourceProject = null;
+    expect(prepareAdmissionReview(event, session, STRANGER, 'admit', NOW).ok).toBe(false);
+    const result = prepareAdmissionReview(event, session, STRANGER, 'release', NOW);
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(result.review.command.admissions).toEqual([]);
+    expect(validateAdmissionReview(result.review, event, session, NOW)).toBeNull();
+    expect(prepareAdmissionReview(event, session, COORDINATOR, 'release', NOW).ok).toBe(false);
+  });
+  it('requires reopening a closed deadline when unreserved attendees must accept changed details', async () => {
+    const { event, attendance, state, draft } = await managed();
+    event.release!.payload.terms.registration!.capacity = { kind: 'unlimited' };
+    event.release!.payload.terms.registration!.deadline = NOW - 100;
+    event.release!.payload.terms.registration!.waitlist = false;
+    event.release!.payload.audienceHash = audienceHash(event.release!.payload.terms);
+    state.audienceHash = event.release!.payload.audienceHash; attendance.entity.payload.audienceHash = state.audienceHash;
+    const changed = { ...draft, fields: { ...publishingFields(event.release!.payload.terms), title: 'Updated visitor details' } };
+    const closed = preparePublishingReview(event, session, 'publish', changed, NOW);
+    expect(closed.ok).toBe(false); if (!closed.ok) expect(closed.message).toContain('later registration deadline');
+    changed.fields.deadlineLocal = new Date(NOW + 3600000).toISOString().slice(0, -1);
+    expect(preparePublishingReview(event, session, 'publish', changed, NOW).ok).toBe(true);
+  });
+  it('keeps reservations when publishing and stops a cap reduction before signing', async () => {
+    const { event, attendance, state, draft } = await managed();
+    state.admissions = [{ attendee: STRANGER, attendanceKey: attendance.entity.key, releaseKey: event.release!.key }, { attendee: COORDINATOR, attendanceKey: entityKey(142), releaseKey: event.release!.key }];
+    const result = preparePublishingReview(event, session, 'publish', { ...draft, fields: { ...publishingFields(event.release!.payload.terms), title: 'Changed event', capacityLimit: '1' } }, NOW);
+    expect(result.ok).toBe(false); if (!result.ok) expect(result.message).toContain('Release reserved places');
+    expect(state.admissions).toHaveLength(2);
   });
 });

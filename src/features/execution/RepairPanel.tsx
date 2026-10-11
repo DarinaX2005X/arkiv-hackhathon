@@ -63,7 +63,7 @@ export function RepairPanel({ project, onRefresh, onReviewTransfer }: {
       await onRefresh();
     } catch (problem) { setError(problem instanceof Error ? problem.message : 'The repair could not be proposed. Refresh before trying again.'); }
   }
-  return <section className="pf-stack execution-repair" aria-label="Replace withdrawn contributions">
+  return <section className="pf-sheet pf-stack execution-repair" aria-label="Replace withdrawn contributions">
     <header><h2>Finish the remaining work</h2><p>Keep compatible people and assignments where possible, while checking every remaining need. Work already reported complete stays with its original version.</p></header>
     {withdrawn.length > 0 && <Notice tone="warning" title="A contribution is no longer agreed"><ul>{withdrawn.map(publisher => <li key={publisher.root.key}>{publisherName(project, publisher.root.key)} withdrew or declined. Affected work: {project.proposal!.payload.plan.allocations.filter(allocation => allocation.publisherRoot === publisher.root.key).map(allocation => project.proposal!.payload.plan.variant.requirements.find(requirement => requirement.id === allocation.requirementId)?.title ?? allocation.requirementId).join(', ')}.</li>)}</ul></Notice>}
     {readiness.reasons.length > 0 && <ul>{readiness.reasons.map((reason, index) => <li key={index}>{reasonText(reason)}</li>)}</ul>}

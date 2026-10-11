@@ -8,7 +8,7 @@ import type { ReplaceProjectCommand } from '../../data/types';
 import { createOperationIntent } from '../../data/operations';
 import { Button, Link, Notice } from '../../ui';
 import { RecipeEditor, recipeToEditorDraft, validateEditorDraft } from './editor';
-import { createProjectDrafts, downloadText, draftScope, makeDraft, type SavedProjectDraft } from './drafts';
+import { createProjectDrafts, DraftChangedError, downloadText, draftScope, makeDraft, type SavedProjectDraft } from './drafts';
 import { authorityFor, ownsProject, replaceRecipeInput } from './selectors';
 import { projectsCopy as copy } from './catalog';
 import { ActionFeedback } from './ActionFeedback';
@@ -26,6 +26,7 @@ export function NeedsPanel({ project, onRefresh, onDraftChange }: { project: Pro
   const [saveStatus, setSaveStatus] = useState(store.status());
   const action = useRepositoryAction(`project-edit:${project.root.key}`);
   const [failure, setFailure] = useState<string | null>(null);
+  const [localConflict, setLocalConflict] = useState(false);
   const owner = ownsProject(project, session.actor);
   if (!owner) return <section className="pf-stack"><ProjectNeeds project={project} /><p>Only the coordinator can change these needs.</p>{state && state.payload.lifecycle !== 'closed' && <Link href={routeHref({ name: 'contributions', projectRoot: project.root.key, returnTo: routePath({ name: 'project', projectRoot: project.root.key, tab: 'needs' }) })}>Prepare my contribution</Link>}</section>;
   if (!state || !draft) return <Notice tone="warning">A unique current project record is required to edit these needs.</Notice>;
@@ -34,15 +35,21 @@ export function NeedsPanel({ project, onRefresh, onDraftChange }: { project: Pro
   const staleBase = draft.baselineStateKey !== state.key;
   const dirty = !validation.recipe || canonicalJson(validation.recipe) !== canonicalJson(state.payload.recipe);
   const waiting = action.state.status === 'submitting' || action.state.status === 'needs-verification';
-  const retain = (next: SavedProjectDraft) => { setDraft(next); store.upsert(next); setSaveStatus(store.status()); runtime.session.selectDraft(next.id); onDraftChange?.(); };
+  const retain = (next: SavedProjectDraft) => {
+    setDraft(next);
+    try { store.upsert(next, store.get(draft.id) ? draft : undefined); setSaveStatus(store.status()); runtime.session.selectDraft(next.id); onDraftChange?.(); }
+    catch (error) { setLocalConflict(error instanceof DraftChangedError); setFailure(error instanceof Error ? error.message : 'Your local draft could not be saved. Export it before leaving.'); setSaveStatus({ persisted: false, issue: { code: 'write_failed', recoverableText: null } }); }
+  };
   const submit = async (resume = false) => {
-    if (!authority || (!resume && !validation.recipe) || !owner) return;
+    if (!authority || (!resume && !validation.recipe) || !owner || localConflict) return;
     try {
       if (resume) {
         const result = await action.resume((repository, frozen: ReplaceProjectCommand) => repository.replaceProject(frozen));
         if (result.ok && result.value.operation.phase === 'complete') { retain({ ...draft, baselineStateKey: result.value.value.key, updatedAt: runtime.now() }); setFailure(null); await onRefresh(); }
         return;
       }
+      const conflict = store.currentConflict(draft);
+      if (conflict) { setLocalConflict(true); setFailure(new DraftChangedError(conflict).message); return; }
       const id = crypto.randomUUID(), now = runtime.now();
       const input = replaceRecipeInput(project, validation.recipe!, id, now);
       if (!resume && staleBase) { setFailure('This editor was opened against an earlier record. Export the draft, then reload the current needs before applying it.'); return; }
@@ -55,12 +62,15 @@ export function NeedsPanel({ project, onRefresh, onDraftChange }: { project: Pro
     } catch (error) { setFailure(error instanceof Error ? error.message : 'The change could not be prepared. Your draft is retained.'); }
   };
   return <section className="pf-stack">
-    <div className="project-heading"><div><h2>What does this project need?</h2><p>Choose possible dates, then describe the people, place, and equipment needed for each.</p></div><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Find a plan</Link></div>
+    <div className="project-heading"><div><h2>Project needs</h2><p>Add possible dates and the help needed to make your event happen.</p></div><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Find a plan</Link></div>
     {staleBase && <Notice tone="warning" title="This project changed since the editor was opened"><p>Your input is retained. Export it before choosing to load the current needs.</p><Button variant="secondary" onClick={() => retain({ ...draft, editor: recipeToEditorDraft(state.payload.recipe), baselineStateKey: state.key, updatedAt: runtime.now() })}>Load current needs into the editor</Button></Notice>}
     <RecipeEditor value={state.payload.recipe} draft={draft.editor} onChange={() => {}} disabled={waiting || state.payload.lifecycle === 'closed'} onDraftChange={editor => retain({ ...draft, editor, updatedAt: runtime.now() })} />
     {!saveStatus.persisted && <Notice tone="warning">{copy.memoryOnly}</Notice>}
-    {failure && <Notice tone="warning">{failure}</Notice>}
-    <div className="pf-actions"><Button onClick={() => { void submit(); }} disabled={!validation.valid || !dirty || staleBase || waiting || !authority || state.payload.lifecycle === 'closed'} disabledReason={staleBase ? 'The saved project changed. Review the current needs first.' : !authority ? 'Select the coordinator account in this mode.' : !validation.valid ? 'Complete the marked fields first.' : undefined}>Save project needs</Button>
+    {failure && <Notice tone="warning"><p>{failure}</p>{localConflict && <div className="pf-actions"><Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>Export my open copy</Button><Button variant="secondary" onClick={() => {
+      try { const saved = store.reloadSaved(draft.id); setDraft(saved ?? { ...makeDraft(scope.current, state.payload.recipe, runtime.now()), projectRoot: project.root.key, baselineStateKey: state.key }); setLocalConflict(false); setFailure(null); setSaveStatus(store.status()); }
+      catch (error) { setFailure(error instanceof Error ? error.message : 'The saved draft could not be read. Your open copy is retained.'); }
+    }}>Reload saved needs</Button></div>}</Notice>}
+    <div className="pf-actions"><Button onClick={() => { void submit(); }} disabled={!validation.valid || !dirty || staleBase || localConflict || waiting || !authority || state.payload.lifecycle === 'closed'} disabledReason={localConflict ? 'Review the saved draft before publishing these changes.' : staleBase ? 'The saved project changed. Review the current needs first.' : !authority ? 'Select the coordinator account in this mode.' : !validation.valid ? 'Complete the marked fields first.' : undefined}>Save project needs</Button>
       <Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>{copy.exportDraft}</Button>
       <Button variant="quiet" disabled={waiting} onClick={() => retain({ ...draft, editor: recipeToEditorDraft(state.payload.recipe), baselineStateKey: state.key, updatedAt: runtime.now() })}>Discard my unsaved edits</Button>
     </div>

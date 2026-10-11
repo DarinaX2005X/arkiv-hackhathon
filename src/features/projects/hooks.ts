@@ -23,5 +23,12 @@ export function useProjectDrafts() {
   const scope = draftScope(session.mode, session.actor);
   const storage = useMemo(() => createProjectDrafts(runtime, scope), [runtime, scope]);
   const [, refresh] = useState(0);
+  useEffect(() => {
+    const reload = () => { storage.refresh(); refresh(value => value + 1); };
+    reload();
+    window.addEventListener('storage', reload);
+    window.addEventListener('focus', reload);
+    return () => { window.removeEventListener('storage', reload); window.removeEventListener('focus', reload); };
+  }, [storage]);
   return { storage, scope, changed: () => refresh(value => value + 1) };
 }

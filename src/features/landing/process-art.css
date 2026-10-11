@@ -24,7 +24,7 @@
 .pf-process-inset { fill: var(--surface-inset); }
 .pf-process-window { fill: var(--surface-strong); }
 .pf-process-clay { fill: var(--process-clay); }
-.pf-process-clay-side { fill: color-mix(in srgb, var(--art-clay) 75%, var(--brand-ink)); }
+.pf-process-clay-side { fill: var(--art-shadow); }
 .pf-process-forest { fill: var(--process-forest); }
 .pf-process-ink { fill: var(--brand-ink); }
 .pf-process-strip { fill: var(--art-sand); }
@@ -32,7 +32,7 @@
 .pf-process-case-side { fill: var(--brand-ink); }
 .pf-process-case-lid { fill: var(--action); }
 .pf-process-latch { fill: var(--art-cream); }
-.pf-process-latch-inset { fill: var(--art-clay); }
+.pf-process-latch-inset { fill: var(--art-shadow); }
 .pf-process-seal { fill: var(--process-forest); }
 .pf-process-seal-side { fill: var(--brand-ink); }
 .pf-process-seal-impression { fill: var(--art-sand); }

@@ -1,0 +1,27 @@
+.pf-welcome-tour.pf-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px 28px 24px; overflow-y: auto; overscroll-behavior: contain; }
+.pf-welcome-tour .pf-dialog-header { justify-content: flex-end; margin-bottom: 12px; }
+.pf-welcome-tour .pf-dialog-header > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.pf-welcome-tour .pf-dialog-body { padding: 0; margin-block-start: 0; }
+.pf-welcome-tour-art { aspect-ratio: 2 / 1; border-radius: 16px; overflow: hidden; pointer-events: none; animation: pf-welcome-appear 180ms ease-out; }
+.pf-welcome-tour-art svg { display: block; width: 100%; height: auto; }
+.pf-welcome-tour-copy { padding-top: 24px; }
+.pf-welcome-tour-copy h3 { font-size: clamp(24px, 4vw, 30px); font-weight: 500; line-height: 1.15; letter-spacing: -.025em; color: var(--text-on-light, #172B23); }
+.pf-welcome-tour-copy > p { margin-top: 14px; color: var(--text-on-light-secondary, #53675C); font-size: 17px; line-height: 1.6; }
+.pf-welcome-tour-copy > .pf-welcome-tour-progress { font-size: 14px; margin-top: 22px; }
+.pf-welcome-tour-dots { display: flex; gap: 7px; padding-top: 9px; }
+.pf-welcome-tour-dots span { width: 8px; height: 8px; border-radius: 50%; background: #A8BAA0; }
+.pf-welcome-tour-dots span[data-current='true'] { width: 25px; border-radius: 5px; background: #28583F; }
+.pf-welcome-tour .pf-dialog-footer { margin-top: 24px; padding-top: 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; border: 0; }
+.pf-welcome-tour-navigation { display: flex; flex-wrap: wrap; gap: 10px; }
+.pf-welcome-tour-storage { margin-top: 16px; }
+@keyframes pf-welcome-appear { from { opacity: .65; } to { opacity: 1; } }
+@media (max-width: 480px) {
+  .pf-welcome-tour.pf-dialog { padding: 12px 16px 20px; }
+  .pf-welcome-tour-copy { padding-top: 20px; }
+  .pf-welcome-tour-copy > p { font-size: 16px; }
+  .pf-welcome-tour .pf-dialog-footer { flex-direction: column-reverse; align-items: stretch; }
+  .pf-welcome-tour-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-welcome-tour-navigation .pf-button { width: 100%; }
+  .pf-welcome-tour-skip { align-self: center; }
+}
+@media (prefers-reduced-motion: reduce) { .pf-welcome-tour-art { animation: none; } }

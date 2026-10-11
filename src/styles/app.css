@@ -1,20 +1,23 @@
 .pf-app-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
-  max-width: 1440px; margin-inline: auto; padding: 22px var(--page-gutter);
+  position: relative; z-index: 10;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 20px;
+  max-width: 1280px; margin-inline: auto; padding: 22px var(--page-gutter);
 }
-.pf-app-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pf-app-navigation { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; min-width: 0; }
 .pf-app-navigation a {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 44px; padding: 10px 16px; border: 1px solid transparent; border-radius: var(--radius-pill);
-  text-decoration: none; font-weight: 500; line-height: 24px; color: var(--text-secondary);
-  transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease), transform var(--motion-press) var(--motion-ease);
+  min-height: 44px; padding: 10px 12px; border: 1px solid transparent; border-radius: var(--radius-control);
+  text-align: center; text-decoration: none; font-weight: 500; line-height: 22px; color: var(--text-secondary);
+  transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease), transform var(--motion-press) var(--motion-ease);
 }
-.pf-app-navigation a[aria-current='page'] { color: var(--selected-text); background: var(--surface-work); border-color: var(--edge-light); box-shadow: var(--shadow-control); }
-.pf-app-navigation a:active { transform: translateY(1px); box-shadow: var(--shadow-inset); transition-duration: var(--motion-press); }
+.pf-app-navigation a[aria-current='page'] { color: var(--on-action-on-dark); background: var(--action-on-dark); border-color: var(--action-on-dark); }
+.pf-app-navigation a:active { transform: scale(.98); transition-duration: var(--motion-press); }
+.pf-app-header--public .pf-app-navigation { justify-content: flex-end; }
 
 .pf-mode-line {
   display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px;
-  max-width: 1376px; margin-inline: auto; padding: 14px var(--page-gutter);
+  max-width: 1216px; margin-inline: auto; padding: 14px var(--page-gutter);
   color: var(--text-primary); background: transparent; border-block: 1px solid var(--border-quiet);
   font-size: 14px;
 }
@@ -22,10 +25,10 @@
 .pf-app-main > * { min-width: 0; }
 .pf-app-main--home { padding-top: 20px; }
 .pf-foundation-intro { max-width: 850px; padding-block: 24px; }
-.pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(36px, 4.6vw, 64px); line-height: 1.03; font-weight: 500; color: var(--text-primary); }
+.pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(32px, 4vw, 44px); line-height: 1.03; font-weight: 500; color: var(--text-primary); }
 .pf-foundation-intro > p { max-width: 62ch; }
 
-.pf-workspace-bar { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 12px; width: calc(100% - var(--page-gutter) * 2); max-width: 1376px; margin-inline: auto; }
+.pf-workspace-bar { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 12px; width: calc(100% - var(--page-gutter) * 2); max-width: 1216px; margin-inline: auto; }
 .pf-workspace-controls { flex: 1; min-width: min(100%, 280px); padding: 0 18px; background: var(--surface-soft); border: 1px solid var(--border-quiet); border-radius: var(--radius-control); }
 .pf-workspace-controls[open] { padding-bottom: 18px; }
 .pf-workspace-controls > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 64px; }
@@ -44,15 +47,21 @@
 .pf-workspace-connection { flex: 1 1 320px; min-width: min(100%, 280px); }
 .pf-workspace-connection .pf-actions { flex-wrap: wrap; }
 .pf-workspace-status { display: grid; gap: 4px; flex: 1 1 400px; max-width: 76ch; }
-.pf-account-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.pf-account-header { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .pf-account-menu { position: relative; }
-.pf-account-menu > summary { min-height: 44px; padding: 10px 18px; border: 1px solid var(--border-control); border-radius: var(--radius-pill); background: var(--surface-work); box-shadow: var(--shadow-control); color: var(--text-primary); font-weight: 500; }
-.pf-account-menu[open] > summary { background: var(--selected-surface); color: var(--selected-text); }
-.pf-account-menu-panel { position: absolute; inset-inline-end: 0; top: calc(100% + 12px); z-index: 20; width: min(320px, calc(100vw - 32px)); padding: 16px; display: grid; gap: 4px; border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet); background: var(--surface-work); box-shadow: var(--shadow-surface); }
-.pf-account-menu-panel > a, .pf-account-menu-support > a { display: flex; align-items: center; min-height: 44px; padding: 10px 12px; border-radius: var(--radius-control); text-decoration: none; }
-.pf-account-menu-panel .pf-button { justify-content: flex-start; text-align: start; width: 100%; }
-.pf-account-menu-identity { display: grid; gap: 4px; padding: 8px 12px 16px; overflow-wrap: anywhere; }
-.pf-account-menu-support { display: grid; gap: 4px; border-top: 1px solid var(--border-quiet); margin-top: 8px; padding-top: 8px; }
+.pf-account-menu > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-quiet); border-radius: var(--radius-control); background: transparent; color: var(--text-primary); font-weight: 500; list-style: none; }
+.pf-account-menu > summary::-webkit-details-marker { display: none; }
+.pf-account-menu > summary svg { flex: 0 0 16px; transition: transform var(--motion-hover) var(--motion-ease); }
+.pf-account-menu[open] > summary { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-control); }
+.pf-account-menu[open] > summary svg { transform: rotate(180deg); }
+.pf-account-menu-panel { position: absolute; inset-inline-end: 0; top: calc(100% + 12px); z-index: 20; width: min(320px, calc(100vw - 32px)); max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; padding: 12px; display: grid; gap: 8px; border: 1px solid var(--border-quiet); border-radius: var(--radius-dialog); background: var(--surface-work); box-shadow: var(--shadow-layer); }
+.pf-account-menu-group, .pf-account-menu-support { display: grid; gap: 2px; }
+.pf-account-menu-group + .pf-account-menu-group, .pf-account-menu-support { border-top: 1px solid var(--border-quiet); padding-top: 8px; }
+.pf-account-menu-panel a { display: flex; align-items: center; min-height: 44px; padding: 10px 12px; border-radius: var(--radius-control); text-decoration: none; color: var(--text-primary); }
+.pf-account-menu-panel a[aria-current='page'] { color: var(--selected-text); background: var(--selected-surface); font-weight: 600; }
+.pf-account-menu-panel .pf-button { justify-content: flex-start; text-align: start; width: 100%; padding-inline: 12px; color: var(--text-primary); }
+.pf-account-menu-identity { display: grid; gap: 4px; padding: 10px 12px; overflow-wrap: anywhere; }
+.pf-account-menu-identity .pf-account-address { color: var(--text-secondary); font-size: 14px; }
 .pf-account-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr); gap: 48px; align-items: start; width: 100%; max-width: 1120px; margin-inline: auto; }
 .pf-account-main { min-width: 0; }
 .pf-account-main > .pf-button { justify-self: start; }
@@ -65,11 +74,6 @@
 .pf-account-signout h2 { font-size: 24px; }
 .pf-account-work-links { display: grid; gap: 4px; justify-items: start; }
 .pf-account-work-links a { display: inline-flex; min-height: 44px; align-items: center; }
-.pf-tour { display: grid; gap: 20px; padding: 24px 28px; border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet); background: var(--selected-surface); color: var(--text-primary); }
-.pf-tour-content { display: grid; gap: 8px; max-width: 78ch; }
-.pf-tour-content h2 { font-size: 22px; line-height: 1.3; font-weight: 600; }
-.pf-tour-controls { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: center; }
-.pf-tour-controls .pf-actions { flex-wrap: wrap; }
 .pf-workspace-other-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
 .pf-workspace-other-paths a { display: inline-flex; min-height: 44px; align-items: center; }
 .project-open-by-id > form { margin-top: 12px; }
@@ -80,7 +84,7 @@
   grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
   align-items: start;
   gap: 32px 64px;
-  max-width: 1440px;
+  max-width: 1280px;
   margin-inline: auto;
   padding: 48px var(--page-gutter) 56px;
   border-top: 1px solid var(--border-quiet);
@@ -116,32 +120,40 @@
 .pf-skip {
   position: absolute; inset-inline-start: 16px; top: -100px; z-index: 50;
   min-height: 44px; padding: 10px 16px; border-radius: var(--radius-control);
-  background: var(--surface-work); color: var(--text-primary);
+  background: var(--surface-work); color: var(--text-on-light);
 }
 .pf-skip:focus { top: 8px; }
 
 @media (hover: hover) and (pointer: fine) {
   .pf-account-menu > summary:hover { background: var(--surface-hover); }
   .pf-account-menu-panel a:hover { background: var(--surface-soft); color: var(--action); }
-  .pf-app-navigation a:hover { color: var(--selected-text); background: var(--surface-hover); }
-  .pf-app-navigation a[aria-current='page']:hover { color: var(--selected-text); background: var(--surface-work); box-shadow: var(--shadow-control-hover); }
+  .pf-app-navigation a:hover { color: var(--text-primary); background: var(--surface-hover); }
+  .pf-app-navigation a[aria-current='page']:hover { color: var(--on-action-on-dark); background: var(--action-on-dark); border-color: var(--text-on-dark); }
 }
 @media (max-width: 959px) {
-  .pf-app-header { align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+  .pf-app-header { grid-template-columns: 1fr auto; gap: 16px; }
+  .pf-app-header > .pf-brand { grid-column: 1; grid-row: 1; justify-self: start; }
+  .pf-app-header > .pf-account-header { grid-column: 2; grid-row: 1; }
+  .pf-app-header > .pf-app-navigation { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
   .pf-account-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .pf-account-context { padding: 0 8px; }
   .pf-mode-line { margin-inline: var(--page-gutter); }
   .pf-workspace-controls { padding-inline: 12px; }
 }
 @media (max-width: 599px) {
-  .pf-app-header { display: grid; gap: 16px; padding-block: 16px; }
-  .pf-account-menu-panel { inset-inline-start: 0; inset-inline-end: auto; }
-  .pf-app-navigation { gap: 4px; }
-  .pf-app-navigation a { padding-inline: 12px; }
+  .pf-app-header { gap: 16px 8px; padding-block: 16px; }
+  .pf-wordmark { font-size: 23px; }
+  .pf-account-header { gap: 6px; }
+  .pf-account-header > .pf-button { padding-inline: 10px; }
+  .pf-account-menu { position: static; }
+  .pf-account-menu > summary { padding-inline: 10px; }
+  .pf-account-menu-panel { inset-inline: var(--page-gutter); top: 64px; width: auto; max-height: calc(100dvh - 88px); }
+  .pf-app-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; width: 100%; }
+  .pf-app-header--public .pf-app-navigation { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pf-app-navigation a { padding-inline: 10px; }
   .pf-mode-line { flex-direction: column; gap: 4px; margin-inline: var(--page-gutter); padding: 12px 0; }
   .pf-app-main { gap: 24px; padding-block: 28px 48px; }
   .pf-app-main--home { padding-top: 16px; }
-  .pf-tour { padding: 20px 16px; }
   .pf-workspace-bar { width: calc(100% - var(--page-gutter) * 2); }
   .pf-workspace-controls > summary { align-items: flex-start; padding-block: 10px; }
   .pf-workspace-change { margin-inline-start: 0; }

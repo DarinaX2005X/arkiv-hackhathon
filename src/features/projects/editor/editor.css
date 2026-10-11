@@ -37,10 +37,23 @@
   gap: var(--space-6);
   min-width: 0;
   padding: var(--space-6);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-quiet);
   border-radius: var(--radius-sheet);
   background: var(--surface-work);
 }
+
+.pf-recipe-outline { display: flex; flex-direction: column; gap: var(--space-4); }
+.pf-recipe-outline > .pf-recipe-fieldset { padding: 0; border: 0; }
+.pf-recipe-editor details > summary { cursor: pointer; min-height: 44px; display: list-item; padding-block: var(--space-3); font-weight: 500; }
+.pf-recipe-editor details[open] > summary { margin-bottom: var(--space-3); }
+.pf-recipe-editor details .pf-recipe-dependencies { margin-top: var(--space-4); }
+.pf-recipe-variant .pf-recipe-fieldset, .project-page .pf-recipe-fieldset { padding: 0; border: 0; }
+.pf-recipe-validation { font-size: .95rem; color: var(--text-secondary); }
+.pf-recipe-variant .pf-recipe-requirement { border: 0; background: var(--surface-inset); padding: var(--space-5, 20px); border-radius: var(--radius-control); }
+.pf-recipe-section-heading h2 { font-size: 1.5rem; }
+.pf-recipe-section-heading p { margin-top: var(--space-2); }
+.pf-recipe-fields input[type='datetime-local'] { min-width: 0; max-width: 100%; }
+.pf-recipe-editor .pf-recipe-fieldset:disabled { opacity: .7; }
 
 .pf-recipe-requirement {
   display: flex;

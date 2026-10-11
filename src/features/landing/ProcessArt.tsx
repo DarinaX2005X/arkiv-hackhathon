@@ -1,10 +1,10 @@
 import { useId, type CSSProperties } from 'react';
 import './process-art.css';
 
-/** Original explanatory objects. The three scenes share the exhibition's
+/** Original explanatory objects. The scenes share the event stage's
  * oblique camera, opaque materials and light from the upper left. Captions
  * live in HTML; this artwork contains no live state or interactive controls. */
-export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' }) {
+export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' | 'join' }) {
   const id = `process-${useId().replaceAll(':', '')}`;
   const materials = {
     '--process-paper': `url(#${id}-paper)`,
@@ -23,8 +23,8 @@ export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' }) {
       </linearGradient>
       <linearGradient id={`${id}-clay`} x1="0%" y1="0%" x2="100%" y2="85%">
         <stop stopColor="var(--art-cream)" />
-        <stop offset=".32" stopColor="var(--art-clay)" />
-        <stop offset="1" stopColor="var(--art-clay)" />
+        <stop offset=".32" stopColor="var(--art-sand)" />
+        <stop offset="1" stopColor="var(--art-shadow)" />
       </linearGradient>
       <linearGradient id={`${id}-forest`} x1="0%" y1="0%" x2="100%" y2="100%">
         <stop stopColor="var(--action)" />
@@ -34,8 +34,33 @@ export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' }) {
         <feGaussianBlur stdDeviation="2.5" />
       </filter>
     </defs>
-    {kind === 'set' ? <SetArt /> : kind === 'offer' ? <OfferArt /> : <AgreeArt />}
+    {kind === 'set' ? <SetArt /> : kind === 'offer' ? <OfferArt /> : kind === 'join' ? <JoinArt /> : <AgreeArt />}
   </svg>;
+}
+
+function JoinArt() {
+  return <>
+    <path className="pf-process-shadow" d="m30 106 98-54 94 52-99 55Z" />
+    {/* A folded event programme and a solid location marker share the stage. */}
+    <path className="pf-process-paper-side" d="m29 91 95-53 91 51v7l-95 53-91-51Z" />
+    <path className="pf-process-paper" d="m29 91 95-53 91 51-95 53Z" />
+    <path className="pf-process-inset" d="m49 90 69-38 35 20-68 38Z" />
+    <path className="pf-process-plan-line" d="m65 87 17 10 20-11 15 8 20-11m-45-17 15 8" />
+    <path className="pf-process-paper-line" d="m115 118 45-25m-35 31 45-25m-25 30 35-20" />
+    <g transform="matrix(1 .54 0 1 98 30)">
+      <path className="pf-process-case-side" d="M0 18C0-8 43-11 43 15c0 18-23 41-23 41L12 51S0 33 0 18Z" />
+      <path className="pf-process-forest" d="M-7 23c0-27 42-27 42-1 0 18-21 40-21 40S-7 42-7 23Z" />
+      <circle className="pf-process-cream" cx="14" cy="21" r="9" />
+      <path className="pf-process-case-highlight" d="M-3 16Q1 3 14 3" />
+    </g>
+    <g transform="matrix(1 .54 0 1 166 40)">
+      <path className="pf-process-paper-side" d="m0 0 6-4h37v52l-6 4H0Z" />
+      <rect className="pf-process-paper" width="37" height="56" rx="3" />
+      <path className="pf-process-forest" d="M0 3q0-3 3-3h31q3 0 3 3v13H0Z" />
+      <path className="pf-process-paper-line" d="M8 26h21M8 34h21M8 42h13" />
+      <path className="pf-process-handle" d="M10-5v10M27-5v10" />
+    </g>
+  </>;
 }
 
 function SetArt() {

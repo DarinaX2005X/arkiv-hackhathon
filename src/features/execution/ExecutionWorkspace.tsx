@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
 import { routeHref } from '../../app/routes';
@@ -33,7 +33,7 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
   const remaining = duty.kind === 'task' ? 0 : duty.quantity - row.reportedQuantity;
   return <article className="execution-duty" id={`runbook-duty-${duty.id}`} tabIndex={-1}>
     <div className="execution-duty-time"><time dateTime={new Date(duty.interval.start).toISOString()}>{formatDateTime(duty.interval.start, zone)}</time><span>until {formatDateTime(duty.interval.end, zone)}</span></div>
-    <div className="pf-stack execution-duty-content"><header><h3>{duty.title}</h3><StatusLabel tone={row.status === 'evidence_unavailable' ? 'warning' : row.completed ? 'success' : row.status === 'not_reported' ? 'neutral' : 'warning'}>{rowLabels[row.status]}</StatusLabel></header>
+    <div className="pf-stack execution-duty-content"><header><h4>{duty.title}</h4><StatusLabel tone={row.status === 'evidence_unavailable' ? 'warning' : row.completed ? 'success' : row.status === 'not_reported' ? 'neutral' : 'warning'}>{rowLabels[row.status]}</StatusLabel></header>
       <p>{duty.kind === 'task' ? `Responsible: ${publisherName(project, duty.publisherRoot)}` : `${publisherName(project, duty.giver)} gives ${duty.quantity} ${duty.unit} to ${publisherName(project, duty.receiver)}`}</p>
       {duty.instructions && <p>{duty.instructions}</p>}
       {duty.dependsOn.length > 0 && <p>After: {duty.dependsOn.map(id => proposal.payload.plan.runbook.find(item => item.id === id)?.title ?? id).join(', ')}</p>}
@@ -67,6 +67,7 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
 
 export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: ProjectAggregate; onRefresh: () => void | Promise<void>; onReuse?: (template: RecipeTemplate) => void }) {
   const runtime = useApp(), session = useAppSession();
+  const exportId = useId();
   const [selectedKey, setSelectedKey] = useState<EntityKey | null>(null), [mine, setMine] = useState(false), [error, setError] = useState('');
   const [reviewTransfer, setReviewTransfer] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<RecordedOutcome>('completed_with_outstanding'), [statement, setStatement] = useState(''), [reviewedClosure, setReviewedClosure] = useState(false);
@@ -76,7 +77,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
   const source = selected ? sourceForProposal(project, selected.key) : null;
   const rows = selected ? runbookRows(project, selected, source, session.actor) : [];
   useEffect(() => {
-    if (reviewTransfer && selected?.key === project.proposal?.key) {
+    if (reviewTransfer && selected) {
       document.getElementById(`runbook-duty-${reviewTransfer}`)?.focus();
       setReviewTransfer(null);
     }
@@ -87,6 +88,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
   const blocked = [action.state.status, closeAction.state.status].some(status => status === 'submitting' || status === 'needs-verification');
   const owned = ownPublisherRoots(project, session.actor);
   const displayed = rows.filter(row => !mine || row.mine);
+  const nextDuty = rows.find(row => row.mine && !row.completed);
   const grouped = new Map<string, RunbookRow[]>();
   for (const row of displayed) {
     const day = utcToLocalDateTime(row.obligation.interval.start, selected!.payload.plan.variant.timeZone).slice(0, 10);
@@ -135,21 +137,21 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
     window.location.hash = routeHref({ name: 'new-project' });
   }
   return <section className="pf-stack execution-workspace" aria-label="Project runbook">
-    <header><h2>Run sheet</h2><p>Follow the agreed times, report your own work, and confirm transfers from each side.</p></header>
-    {selected ? <><Select label="Plan version" value={selected.key} onChange={event => setSelectedKey(event.target.value as EntityKey)} options={versions.map(item => ({ value: item.key, label: `${item.payload.plan.variant.title}, ${formatDateTime(item.payload.createdAt, item.payload.plan.variant.timeZone)}${activeSource(project)?.proposalKey === item.key ? ' (current)' : ' (historical)'}` }))} />
+    <header className="execution-heading"><div><h2>Run sheet</h2><p>Follow the agreed times, report your work and confirm equipment transfers.</p></div><Button variant="secondary" onClick={() => { const target = document.getElementById(exportId); target?.scrollIntoView({ block: 'start' }); target?.focus({ preventScroll: true }); }}>Export run sheet</Button></header>
+    {selected ? <><section className="pf-sheet execution-overview"><dl><div><dt>Duties in this version</dt><dd>{rows.length}</dd></div><div><dt>Reported complete</dt><dd>{rows.filter(row => row.completed).length}</dd></div><div><dt>Still to resolve</dt><dd>{rows.filter(row => !row.completed).length}</dd></div></dl>{nextDuty && <div className="execution-next"><div><h3>Your next unfinished duty</h3><p>{nextDuty.obligation.title}</p></div><Button onClick={() => { setMine(false); setReviewTransfer(nextDuty.obligation.id); }}>Review my duty</Button></div>}</section><div className="execution-version"><Select label="Plan version" value={selected.key} onChange={event => setSelectedKey(event.target.value as EntityKey)} options={versions.map(item => ({ value: item.key, label: `${item.payload.plan.variant.title}, ${formatDateTime(item.payload.createdAt, item.payload.plan.variant.timeZone)}${activeSource(project)?.proposalKey === item.key ? ' (current)' : ' (historical)'}` }))} />
+      <Checkbox label="My tasks and transfers" checked={mine} onChange={event => setMine(event.target.checked)} /></div>
       <Notice tone={readiness.status === 'ready' && activeSource(project)?.proposalKey === selected.key ? 'success' : 'warning'} title={versionStatus(project, selected, runtime.now())}>
         <p>{state?.lifecycle === 'in_progress' ? 'The project is in progress.' : state?.lifecycle === 'planning' ? 'The project has not started yet.' : 'This is the recorded project outcome.'}</p>
         <a href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' })}>Open the complete plan and agreement</a>
       </Notice><details><summary>Version and record details</summary><p>Last checked {formatDateTime(project.snapshot.fetchedAt, selected.payload.plan.variant.timeZone)} ({selected.payload.plan.variant.timeZone}). Progress is recorded separately by each contributor.</p><p className="execution-id">Proposal {selected.key}<br />Hash {selected.payload.proposalHash}<br />Activation {source?.activationKey ?? 'Not available'}</p></details>
-      <Checkbox label="My tasks and transfers" checked={mine} onChange={event => setMine(event.target.checked)} />
       {displayed.length === 0 && <EmptyState title={mine ? 'No tasks for the selected account in this version' : 'No runbook duties are available'} description={mine ? 'Switch off this filter to view the complete runbook.' : 'Review the complete plan before continuing.'} />}
-      {[...grouped].map(([day, duties]) => <section className="pf-stack execution-day" aria-label={`Runbook for ${day}`} key={day}><h3>{formatDateTime(duties[0]!.obligation.interval.start, selected.payload.plan.variant.timeZone, { dateStyle: 'full', timeStyle: undefined })}</h3>{duties.map(row => <Duty key={`${selected.key}:${row.obligation.id}`} row={row} project={project} proposal={selected} source={source} blocked={blocked || !authority} onRecord={(id, input) => void record(id, input)} />)}</section>)}
+      {[...grouped].map(([day, duties]) => <section className="pf-sheet pf-stack execution-day" aria-label={`Runbook for ${day}`} key={day}><h3>{formatDateTime(duties[0]!.obligation.interval.start, selected.payload.plan.variant.timeZone, { dateStyle: 'full', timeStyle: undefined })}</h3>{duties.map(row => <Duty key={`${selected.key}:${row.obligation.id}`} row={row} project={project} proposal={selected} source={source} blocked={blocked || !authority} onRecord={(id, input) => void record(id, input)} />)}</section>)}
     </> : <EmptyState title="No agreed runbook yet" description="Find a complete plan, name its transfers, then ask every required owner to agree." actions={<a href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Find a plan</a>} />}
     <div className="pf-actions"><Button variant="secondary" onClick={() => void onRefresh()}>Refresh current records</Button>{coordinator && state?.lifecycle === 'planning' && <Button disabled={blocked || !authority || readiness.status !== 'ready'} disabledReason="Everyone must agree to the current exact version before the project is marked started." onClick={() => void start()}>Mark project in progress</Button>}</div>
     {error && <Notice tone="warning" role="alert">{error}</Notice>}
     <ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} onResume={() => void action.resume<ReplaceBookCommand, unknown>((repository, command) => repository.replaceBook(command)).then(() => onRefresh())} />
     <RepairPanel project={project} onRefresh={onRefresh} onReviewTransfer={id => { setSelectedKey(project.proposal?.key ?? null); setMine(false); setReviewTransfer(id); }} />
-    <section className="pf-stack execution-completion" aria-label="Completion review"><h2>{state?.completion ? 'Recorded project outcome' : 'Completion review'}</h2>
+    <section className="pf-sheet pf-stack execution-completion" aria-label="Completion review"><h2>{state?.completion ? 'Recorded project outcome' : 'Completion review'}</h2>
       {state?.completion && <Notice title={state.completion.outcome.replaceAll('_', ' ')}><p>Recorded {formatDateTime(state.completion.recordedAt, state.recipe.timeZone)}.</p><p>{state.completion.statement}</p><p>{state.completion.outstandingObligationIds.length} unfinished duties and {state.completion.outstandingCustodyHoldIds.length} equipment holds were recorded at closure. Later owner updates remain separate.</p></Notice>}
       <p>{execution.completed.length} owner-reported completed duties; {execution.outstandingObligationIds.length} duties still outstanding. Supporting evidence: {execution.evidenceAvailability}.</p>
       <ul>{execution.completed.map(work => <li key={`${work.source.activationKey}:${work.obligationId}`}>Reported complete: {versions.flatMap(version => version.payload.plan.runbook).find(duty => duty.id === work.obligationId)?.title ?? work.obligationId}. Evidence is {work.evidenceAvailability}; the original version is retained.</li>)}
@@ -171,7 +173,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
         <Button disabled={blocked || !authority || !reviewedClosure || reviewedFingerprint !== completionFingerprint || !statement.trim()} onClick={() => void close()}>Record this final outcome</Button></>}
       <ActionFeedback state={closeAction.state} action={closeAction} onReconcile={() => void closeAction.reconcile().then(() => onRefresh())} />
     </section>
-    <section className="pf-stack"><h2>Use the recipe again</h2><p>Create a separate local draft with these needs and useful settings. Choose new dates and invite current contributions. Old assignments, occupied times, decisions and progress are not copied.</p><Button variant="secondary" disabled={!state} onClick={reuse}>Use as a starting point</Button>{draftExport && <Button variant="secondary" onClick={() => { try { downloadText('partfolk-reused-draft.json', draftExport); } catch { setError('The draft download could not start. Keep this page open and try again.'); } }}>Download the unsaved new draft</Button>}</section>
-    <ExecutionExports project={project} selectedProposalKey={selected?.key} />
+    <section className="pf-sheet pf-stack"><h2>Use the recipe again</h2><p>Create a separate draft in My projects with these needs and useful settings. Choose new dates and invite current contributions. Earlier assignments and agreements stay with this event.</p><Button variant="secondary" disabled={!state} onClick={reuse}>Use as a starting point</Button>{draftExport && <Button variant="secondary" onClick={() => { try { downloadText('partfolk-reused-draft.json', draftExport); } catch { setError('The draft download could not start. Keep this page open and try again.'); } }}>Download the unsaved new draft</Button>}</section>
+    <ExecutionExports id={exportId} project={project} selectedProposalKey={selected?.key} />
   </section>;
 }

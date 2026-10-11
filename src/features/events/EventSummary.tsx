@@ -3,7 +3,7 @@ import { formatDateTime } from '../../app/time';
 import { isPublicEntityKey } from '../../app/ids';
 import { deriveEventAvailability, type EventAggregate, type EventAvailability } from '../../domain/events';
 import { Link, StatusLabel } from '../../ui';
-import { availabilityCopy, eventDate, shortAddress } from './presentation';
+import { availabilityCopy, eventDate, shortAddress, eventPlace, eventFormatLabel, eventRegistrationLabel } from './presentation';
 
 export function EventStatus({ status }: { status: EventAvailability }) {
   const copy = availabilityCopy[status];
@@ -14,13 +14,13 @@ export function EventSummary({ event, now, unverified = false }: { event: EventA
   const terms = event.release?.payload.terms;
   const status = unverified ? 'unverified' : deriveEventAvailability(event, now);
   const date = terms ? new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', timeZone: terms.timeZone }).format(new Date(terms.startsAt)) : null;
-  return <article className="pf-event-row">
+  return <article className="pf-event-row pf-surface-light">
     <div className="pf-event-date" aria-hidden="true">{date ?? 'Date unavailable'}</div>
     <div className="pf-event-row-content">
       <h2>{isPublicEntityKey(event.projectRoot)
         ? <Link href={routeHref({ name: 'event', projectRoot: event.projectRoot })}>{terms?.title ?? 'Event details unavailable'}</Link>
         : terms?.title ?? 'Event details unavailable'}</h2>
-      {terms ? <><p className="pf-event-meta">{eventDate(terms)} <span>({terms.timeZone})</span></p><p>{terms.venue}</p>
+      {terms ? <><p className="pf-event-meta">{eventDate(terms)} <span>({terms.timeZone})</span></p><p>{eventFormatLabel(terms)}: {eventPlace(terms)}</p><p className="pf-event-meta">{eventRegistrationLabel(terms)}</p>{terms.registration?.deadline != null && <p className="pf-event-meta">Register by {formatDateTime(terms.registration.deadline, terms.timeZone)}</p>}
         {terms.description && <p className="pf-event-description">{terms.description}</p>}</> : <p>The original page may have expired or become unavailable. Open the record to check its status.</p>}
       <EventStatus status={status} />
     </div>
@@ -31,7 +31,7 @@ export function EventSummary({ event, now, unverified = false }: { event: EventA
 export function EventEvidence({ event }: { event: EventAggregate }) {
   const organizer = event.root?.payload.coordinator;
   return <details className="pf-event-evidence"><summary>About this public record</summary><div className="pf-stack pf-stack--compact">
-    <p>Partfolk reads this event and its contributors’ agreements from Arkiv. Registration records an intention to attend an open, free event. It does not reserve a limited seat or prove attendance.</p>
+    <p>Partfolk reads this event and its contributors’ agreements from Arkiv. Your registration belongs to the exact event version you reviewed. When places are limited or invitations are required, the organizer confirms your place separately. It does not prove attendance.</p>
     <dl className="pf-event-facts">
       <div><dt>Last read</dt><dd>{formatDateTime(event.snapshot.fetchedAt, 'UTC')} UTC</dd></div>
       <div><dt>Organizer wallet</dt><dd>{organizer?.kind === 'wallet' ? <span title={organizer.address}>{shortAddress(organizer.address)}</span> : 'Could not be verified'}</dd></div>

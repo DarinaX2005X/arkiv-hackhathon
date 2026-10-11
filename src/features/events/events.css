@@ -1,27 +1,34 @@
 .pf-events-page { display: grid; gap: var(--space-8); width: 100%; min-width: 0; }
 .pf-events-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); }
-.pf-events-heading > div { display: grid; gap: var(--space-4); max-width: 48rem; }
+.pf-events-heading > div { display: grid; gap: var(--space-4); max-width: 48rem; min-width: 0; }
 .pf-events-heading > .pf-link { flex-shrink: 0; padding-block: var(--space-3); }
+.pf-events-heading h1 { max-width: 19ch; font-size: clamp(2.2rem, 4vw, 3.2rem); line-height: 1.08; overflow-wrap: anywhere; }
 .pf-events-heading p { max-width: 64ch; color: var(--text-secondary); }
-.pf-event-filters { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(9rem, .55fr) minmax(9rem, .55fr) auto; gap: var(--space-4); padding: var(--space-6); border-radius: var(--radius-sheet); background: var(--surface-work); box-shadow: var(--shadow-surface); align-items: end; }
-.pf-event-filters > .pf-button { align-self: end; margin-bottom: 0; }
-.pf-event-filter-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); color: var(--text-secondary); font-size: 14px; }
-.pf-event-filter-error { grid-column: 1 / -1; color: var(--danger-text); }
+.pf-event-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); padding: var(--space-6); border-radius: 16px; background: var(--surface-work); box-shadow: var(--shadow-surface); }
+.pf-event-filter-core { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: var(--space-4); }
+.pf-event-filter-core > .pf-field:first-child { grid-column: span 2; }
+.pf-event-filters .pf-field { min-width: 0; }
+.pf-event-filter-more { min-width: 0; }
+.pf-event-filter-more summary { min-height: 44px; padding-block: var(--space-3); color: var(--action); cursor: pointer; }
+.pf-event-filter-more .pf-button { margin-top: var(--space-4); }
+.pf-event-filter-extra { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); align-items: start; margin-block: var(--space-4); }
+.pf-event-filter-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); color: var(--text-secondary); font-size: 14px; }
+.pf-event-filter-error { color: var(--danger-text); }
 .pf-events-results { display: grid; gap: var(--space-4); min-width: 0; }
 .pf-events-result-label { color: var(--text-secondary); }
 .pf-event-list { display: grid; gap: var(--space-4); }
-.pf-event-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; align-items: start; gap: var(--space-6); background: var(--surface-work); padding: var(--space-6); border-radius: var(--radius-sheet); box-shadow: var(--shadow-surface); }
-.pf-event-date { display: grid; place-items: center; min-height: 5.5rem; border-radius: var(--radius-control); background: var(--surface-soft); color: var(--brand-ink); font-size: 22px; font-weight: 500; text-align: center; line-height: 1.25; padding: var(--space-3); font-variant-numeric: tabular-nums; }
+.pf-event-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; align-items: start; gap: var(--space-6); background: var(--surface-work); padding: var(--space-6); border-radius: 16px; box-shadow: var(--shadow-surface); transition: box-shadow 180ms ease, transform 180ms ease; }
+.pf-event-date { display: grid; place-items: center; min-height: 5.5rem; border-radius: var(--radius-control); background: var(--surface-soft); color: var(--brand-ink); font-size: 22px; font-weight: 500; text-align: center; line-height: 1.25; padding: var(--space-3); font-variant-numeric: tabular-nums; box-shadow: inset 0 1px 0 rgb(255 255 255 / .9), 0 1px 2px rgb(10 35 24 / .05); }
 .pf-event-row-content { min-width: 0; display: grid; justify-items: start; gap: var(--space-2); }
-.pf-event-row h2 { font-size: 22px; line-height: 1.3; }
+.pf-event-row h2 { font-size: 22px; line-height: 1.3; overflow-wrap: anywhere; }
 .pf-event-row h2 a { text-decoration-thickness: 1px; text-decoration-color: var(--border-quiet); }
-.pf-event-row h2 a:hover { text-decoration-color: currentColor; }
 .pf-event-meta { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .pf-event-description { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 68ch; color: var(--text-secondary); }
 .pf-event-open { display: flex; align-items: center; min-height: 44px; }
 .pf-event-detail-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: var(--space-8); align-items: start; }
-.pf-event-body { display: grid; gap: var(--space-8); background: var(--surface-work); padding: var(--sheet-padding); border-radius: var(--radius-sheet); box-shadow: var(--shadow-surface); min-width: 0; }
+.pf-event-body { display: grid; gap: var(--space-8); background: var(--surface-work); padding: var(--sheet-padding); border-radius: 22px; box-shadow: var(--shadow-surface); min-width: 0; }
 .pf-event-body section { display: grid; gap: var(--space-3); }
+.pf-event-body section > .pf-button { justify-self: start; }
 .pf-event-prose { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
 .pf-event-facts { display: grid; gap: var(--space-4); margin: 0; }
 .pf-event-facts > div { display: grid; grid-template-columns: minmax(6.5rem, .5fr) minmax(0, 1fr); gap: var(--space-4); }
@@ -31,36 +38,49 @@
 .pf-event-evidence { color: var(--text-secondary); }
 .pf-event-evidence summary { min-height: 44px; padding-block: var(--space-3); color: var(--action); cursor: pointer; }
 .pf-event-evidence[open] summary { margin-bottom: var(--space-4); }
-.pf-event-registration { display: grid; gap: var(--space-4); background: var(--surface-soft); padding: var(--space-6); border-radius: var(--radius-sheet); min-width: 0; }
-.pf-event-registration h2 { font-size: 24px; }
+.pf-event-evidence summary:focus-visible, .pf-event-filter-more summary:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; border-radius: 6px; }
+.pf-event-registration { display: grid; gap: var(--space-4); background: var(--surface-work); padding: var(--space-6); border-radius: 16px; min-width: 0; box-shadow: var(--shadow-surface); }
+.pf-event-registration h2 { font-size: 24px; line-height: 1.2; }
 .pf-event-registration .pf-button { width: 100%; }
 .pf-event-registration .pf-actions { align-items: flex-start; }
 .pf-event-registration .pf-actions .pf-button { width: auto; }
-.pf-event-public-preview { display: grid; gap: var(--space-4); border-radius: var(--radius-control); padding: var(--space-4); background: var(--surface-work); }
+.pf-event-public-preview { display: grid; gap: var(--space-4); border-radius: var(--radius-control); padding: var(--space-4); background: var(--surface-work); min-width: 0; }
+.pf-event-registration .pf-event-public-preview { background: var(--surface-soft); }
 .pf-event-public-preview .pf-event-facts > div { grid-template-columns: 1fr; gap: var(--space-1); }
 .pf-event-registration .pf-field-message { margin: 0; }
 .pf-event-title-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .pf-event-publishing { display: grid; gap: var(--space-6); }
 .pf-event-publishing form { display: grid; gap: var(--space-4); }
 .pf-event-form-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
-.pf-my-events-tools { display: flex; align-items: end; gap: var(--space-4); flex-wrap: wrap; }
+.pf-my-events-tools { display: flex; align-items: end; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-6); border-radius: 16px; }
 .pf-my-events-tools .pf-field { min-width: min(100%, 17rem); }
 .pf-my-events-list { display: grid; gap: var(--space-6); }
-.pf-my-event { display: grid; gap: var(--space-4); min-width: 0; padding: var(--sheet-padding); background: var(--surface-work); border-radius: var(--radius-sheet); box-shadow: var(--shadow-surface); }
+.pf-my-event { display: grid; gap: var(--space-4); min-width: 0; padding: var(--sheet-padding); background: var(--surface-work); border-radius: 16px; box-shadow: var(--shadow-surface); }
+.pf-my-event .pf-button { justify-self: start; }
 .pf-my-event-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); }
 .pf-my-event-heading > div { display: grid; gap: var(--space-2); min-width: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .pf-event-row:has(a:hover) { transform: translateY(-2px); box-shadow: 0 8px 20px rgb(8 27 20 / .11); }
+  .pf-event-row h2 a:hover { text-decoration-color: currentColor; }
+}
 @media (max-width: 960px) {
-  .pf-event-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pf-event-filters > .pf-field:first-child { grid-column: 1 / -1; }
-  .pf-event-filters > .pf-button { grid-column: 1 / -1; justify-self: start; }
+  .pf-event-filter-extra { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pf-event-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .pf-event-detail-grid .pf-event-registration { order: -1; }
 }
 @media (max-width: 600px) {
   .pf-events-heading { flex-direction: column; gap: var(--space-3); }
   .pf-event-filters, .pf-event-row { padding: var(--space-4); }
-  .pf-event-row { grid-template-columns: 4rem minmax(0, 1fr); gap: var(--space-4); }
+  .pf-event-filter-core, .pf-event-filter-extra { grid-template-columns: minmax(0, 1fr); }
+  .pf-event-filter-core > .pf-field:first-child { grid-column: auto; }
+  .pf-event-filter-more .pf-button { width: 100%; }
+  .pf-event-body, .pf-event-registration { padding: var(--space-6); }
+  .pf-event-row { grid-template-columns: 3.7rem minmax(0, 1fr); gap: var(--space-4); }
+  .pf-event-row h2 { font-size: 20px; }
   .pf-event-date { min-height: 4rem; font-size: 18px; padding: var(--space-2); }
   .pf-event-open { grid-column: 2; }
   .pf-event-filter-foot { align-items: flex-start; flex-direction: column; }
   .pf-event-facts > div, .pf-event-form-columns { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .pf-event-registration .pf-button, .pf-event-filters .pf-button { min-height: 44px; }
 }
+@media (prefers-reduced-motion: reduce) { .pf-event-row { transition: none; transform: none !important; } }

@@ -93,7 +93,7 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
     if (canContinue()) await onRefresh();
   };
   const usefulHelp = state.result?.reasons.filter(reason => reason.params?.additionalHelpSufficient === true) ?? [];
-  return <section className="pf-stack">
+  return <section className="pf-sheet pf-stack">
     <header><h2>Find a plan everyone can take on</h2><p>We check who is available, what they can offer, and whether every part of your project is covered.</p></header>
     {hasUnsavedNeeds && <Notice tone="warning" title="Your needs editor contains changes"><p>This search uses the currently saved needs. Save or discard the editor changes before proposing a plan.</p><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'needs' })}>Return to the needs editor</Link></Notice>}
     <details><summary>Keep a preferred assignment</summary><div className="pf-stack"><p>Choose someone for a particular job. The search will keep this assignment and tell you if it prevents a complete plan.</p>

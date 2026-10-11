@@ -2,7 +2,7 @@ import type { AttributeInputs, Entity } from '@arkiv-network/sdk';
 import { i32, key, bytes32, u64 } from '@arkiv-network/sdk/attr';
 import { eq } from '@arkiv-network/sdk/query';
 import { canonicalJson } from '../../domain/canonical';
-import { MAX_EVENT_PAYLOAD_BYTES, validateEventPayload } from '../../domain/events';
+import { MAX_EVENT_STATE_PAYLOAD_BYTES, validateEventPayload } from '../../domain/events';
 import type { EventPayload, EventRecord } from '../../domain/events';
 import type { AccountAddress, PublicEntityKey, Snapshot } from '../../domain/types';
 import { ArkivRepositoryError, assertArkiv } from '../arkiv/errors';
@@ -44,7 +44,7 @@ export function decodeEventEntity<T extends EventPayload>(raw: Entity, expectedT
   assertArkiv(raw.creationFlags?.raw === 1 && raw.creationFlags.readonly === true && raw.creationFlags.permissionlessExtension === false,
     'unverified', 'not_readonly', 'Event records must be readonly with owner-controlled extension.');
   assertArkiv(raw.contentType === 'application/json' && raw.payload instanceof Uint8Array, 'unverified', 'invalid_schema', 'The event payload is missing.');
-  assertArkiv(raw.payload.byteLength <= MAX_EVENT_PAYLOAD_BYTES, 'payload_too_large', 'payload_too_large', 'The event payload exceeds its limit.');
+  assertArkiv(raw.payload.byteLength <= MAX_EVENT_STATE_PAYLOAD_BYTES, 'payload_too_large', 'payload_too_large', 'The event payload exceeds its limit.');
   assertArkiv(snapshot.mode === 'public' && snapshot.blockNumber !== null && typeof raw.createdAt === 'bigint' && typeof raw.expiresAt === 'bigint'
     && raw.createdAt >= 0n && raw.createdAt <= BigInt(snapshot.blockNumber) && raw.expiresAt > BigInt(snapshot.blockNumber),
     'expired', 'expired', 'The event record is not live at the requested block.');

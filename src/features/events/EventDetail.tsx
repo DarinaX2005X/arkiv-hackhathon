@@ -9,7 +9,7 @@ import { RegistrationPanel } from '../attendance/RegistrationPanel';
 import { AudienceChanges } from '../attendance/AudienceChanges';
 import { EventEvidence, EventStatus } from './EventSummary';
 import { useEventClock, useEventRead } from './hooks';
-import { eventDate, eventError } from './presentation';
+import { eventDate, eventError, eventPlace, eventFormatLabel, eventRegistrationLabel, downloadEventCalendar } from './presentation';
 import './events.css';
 
 export interface EventDetailProps { projectRoot: PublicEntityKey; repository: EventRepositoryContract | null; session: AppSession; storage?: StoragePort | null }
@@ -29,12 +29,14 @@ export function EventDetail({ projectRoot, repository, session, storage }: Event
     {error && <ErrorState title="This event could not be refreshed" description={eventError(error)} actions={<Button variant="secondary" onClick={() => void refresh()} disabled={pending}>Try again</Button>} />}
     {event && !terms && !pending && <Notice tone="warning" title="The visitor page is unavailable">The event details may have expired, been removed or could not be authenticated. No cancellation or registration status can be inferred from this missing record.</Notice>}
     {event && value && <div className="pf-event-detail-grid">
-      <article className="pf-event-body">
+      <article className="pf-event-body pf-surface-light">
         {terms && <>
         {needsReview && <AudienceChanges previous={value.myEvent?.registeredRelease?.payload.terms ?? null} current={terms} />}
         <section><h2>About the event</h2><p className="pf-event-prose">{terms.description || 'The organizer has not added a description.'}</p></section>
-        <section><h2>When and where</h2><dl className="pf-event-facts"><div><dt>Time</dt><dd>{eventDate(terms)}</dd></div><div><dt>Time zone</dt><dd>{terms.timeZone}</dd></div><div><dt>Place</dt><dd className="pf-event-prose">{terms.venue}</dd></div></dl></section>
-        <section><h2>Before you come</h2><p className="pf-event-prose">{terms.instructions || 'No preparation instructions have been provided.'}</p></section>
+        <section><h2>When and where</h2><dl className="pf-event-facts"><div><dt>Format</dt><dd>{eventFormatLabel(terms)}</dd></div><div><dt>Time</dt><dd>{eventDate(terms)}</dd></div><div><dt>Time zone</dt><dd>{terms.timeZone}</dd></div><div><dt>Place</dt><dd className="pf-event-prose">{eventPlace(terms)}</dd></div></dl><Button variant="secondary" disabled={status === 'unverified'} disabledReason={status === 'unverified' ? 'Refresh the event before saving its calendar details.' : undefined} onClick={() => downloadEventCalendar(terms, projectRoot, status === 'cancelled')}>{status === 'cancelled' ? 'Save cancelled calendar event' : 'Add to calendar'}</Button></section>
+        {terms.online && <section><h2>Join online</h2>{terms.online.url && /^https?:\/\//i.test(terms.online.url) && <Link href={terms.online.url} target="_blank" rel="noopener noreferrer">Open public event link</Link>}<p className="pf-event-prose">{terms.online.instructions}</p></section>}
+        <section><h2>Registration details</h2><p>{eventRegistrationLabel(terms)}</p>{terms.registration?.deadline != null && <p>Registration closes {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: terms.timeZone }).format(terms.registration.deadline)} ({terms.timeZone})</p>}{terms.registration?.waitlist && <p>You can choose to join the waiting list if all places are reserved.</p>}</section>
+        <section><h2>Before you join</h2><p className="pf-event-prose">{terms.instructions || 'No preparation instructions have been provided.'}</p></section>
         <section><h2>Participation conditions</h2><p className="pf-event-prose">{terms.conditions || 'No additional participation conditions have been provided.'}</p></section>
         </>}
         <EventEvidence event={event} />

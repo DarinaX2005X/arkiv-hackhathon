@@ -43,7 +43,7 @@ export function OfferInbox({ project, onRefresh }: { project: ProjectAggregate; 
   };
   const admitted = project.state.status === 'unique' ? project.state.entity.payload.publisherRoots : [];
   const unique = [...new Map(links.filter(link => link.status === 'current' && link.publisher).map(link => [link.entity.payload.publisherRoot, link])).values()];
-  return <section className="pf-stack"><h2>{copy.offerInbox}</h2><p>{copy.admissionNote}</p>
+  return <section className="pf-sheet pf-stack"><h2>{copy.offerInbox}</h2><p>{copy.admissionNote}</p>
     {loading && <p role="status">Reading submitted offers…</p>}{error && <Notice tone="warning">{error}</Notice>}
     {!loading && !error && unique.length === 0 && <p>No offers have arrived yet. Share the project invitation with people who can help.</p>}
     {unique.map(link => { const publisher = link.publisher!; const book = publisher.book.status === 'unique' ? publisher.book.entity.payload : null; const included = admitted.includes(publisher.root.key);

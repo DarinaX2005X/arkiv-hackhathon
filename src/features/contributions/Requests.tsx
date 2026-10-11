@@ -6,6 +6,7 @@ import { Button, ContributionRow, EmptyState, Field, LoadingState, Notice, Statu
 import { actorScope, isContributionTarget, publisherName } from './model';
 import { ProjectAgreementPanel } from './Agreement';
 import { useReadGuard } from './shared';
+import './contributions.css';
 
 export function requestProjects(publishers: PublisherAggregate[], links: DiscoveryLink[]): EntityKey[] {
   return [...new Set([...links.map(link => link.entity.payload.projectRoot), ...publishers.flatMap(p => p.book.status === 'unique'

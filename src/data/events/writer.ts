@@ -2,8 +2,8 @@ import { key } from '@arkiv-network/sdk/attr';
 import { eq } from '@arkiv-network/sdk/query';
 import { canonicalJson, hashCanonical } from '../../domain/canonical';
 import { activeSource, deriveReadiness, sameSource } from '../../domain/readiness';
-import { EVENTS_PROTOCOL, audienceHash, deriveEventAvailability } from '../../domain/events';
-import type { AttendanceState, EventAggregate, EventPayload, EventRecord, EventRelease, EventScope, EventState } from '../../domain/events';
+import { EVENTS_PROTOCOL, audienceHash, eventPublicationDeadlineGuard, requestEligibleForAdmission, registrationEligibility } from '../../domain/events';
+import type { AttendanceState, EventAdmission, EventAggregate, EventPayload, EventRecord, EventRelease, EventScope, EventState } from '../../domain/events';
 import type { AccountAddress, EntityKey, ProjectAggregate, SourcePlanRef } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { CommandBase, MutationResult, OperationIntent, OperationKind, OperationPhase, ReconciliationResult } from '../types';
@@ -148,6 +148,7 @@ export class EventWriter {
   private async publishEventAttempt(input: PublishEventCommand): Promise<MutationResult<EventAggregate>> {
     const command = this.begin(input, 'publish_event'); const { operation } = command;
     let predecessorReleaseKey: EntityKey | null = null;
+    let reconfirmationAccounts: AccountAddress[] | undefined;
     // Validate all material fields before wallet preparation, including a provisional release envelope.
     eventPayload({ ...this.base(operation, operation.id), entityType: 'event_release', projectRoot: command.projectRoot,
       predecessorReleaseKey, terms: command.terms, audienceHash: audienceHash(command.terms), source: command.source });
@@ -157,13 +158,26 @@ export class EventWriter {
       if (!previous) await this.initialPublication(context, command.projectRoot, operation);
       assertArkiv(!previous || !['cancelled', 'ended'].includes(previous.payload.status), 'invalid_input', 'closed_project', 'A cancelled or ended event cannot silently reopen.');
       predecessorReleaseKey = previous?.payload.releaseKey ?? null;
+      assertArkiv(!event.release || event.release.payload.terms.termsVersion !== 2 || command.terms.termsVersion === 2,
+        'invalid_input', 'invalid_schema', 'Structured conditions cannot be downgraded to a legacy release.');
+      reconfirmationAccounts = command.terms.termsVersion === 2 ? (previous?.payload.admissions ?? []).map(admission => admission.attendee).sort() : undefined;
+      if (command.terms.registration?.capacity.kind === 'limited') assertArkiv((previous?.payload.admissions?.length ?? 0) <= command.terms.registration.capacity.limit,
+        'invalid_input', 'invalid_input', 'Release reserved places explicitly before reducing capacity below the reserved roster.');
       this.ready(event.sourceProject, command.source);
+      if (event.release && !event.roster && command.terms.registration?.deadline != null
+        && command.terms.registration.deadline <= this.reader.core.now()
+        && audienceHash(command.terms) !== event.release.payload.audienceHash) event.roster = await this.reader.roster(context, event);
+      const deadlineGuard = eventPublicationDeadlineGuard(event, command.terms, this.reader.core.now());
+      assertArkiv(deadlineGuard !== 'unverified', 'unverified', 'incomplete_snapshot', 'Read the complete current attendee evidence before reviewing this deadline change.');
+      assertArkiv(deadlineGuard !== 'reopen_required', 'invalid_input', 'invalid_input',
+        'Existing unreserved attendees need to accept these changes. Explicitly choose a later registration deadline, up to the event end, before publishing changed terms.');
       assertArkiv(command.terms.endsAt > context.snapshot.blockTimestamp, 'invalid_input', 'expired', 'An event that has ended cannot open for participation.');
       this.retention(command.lifetimeSeconds, command.terms.endsAt, context.snapshot.blockTimestamp); await this.finish(context);
     };
     const releaseResult = await this.step(operation, 'proposal_pending', id => ({ creates: [nativeEventCreate({ ...this.base(operation, id),
       entityType: 'event_release', projectRoot: command.projectRoot, predecessorReleaseKey, terms: command.terms,
-      audienceHash: audienceHash(command.terms), source: command.source }, command.lifetimeSeconds)] }), publicationPreflight, command.expectedHeads);
+      audienceHash: audienceHash(command.terms), source: command.source,
+      ...(reconfirmationAccounts !== undefined ? { reconfirmationAccounts } : {}) }, command.lifetimeSeconds)] }), publicationPreflight, command.expectedHeads);
     const release = this.created<EventRelease>(releaseResult, 'event_release'); await this.progress(operation, 'proposal_confirmed');
     const stateResult = await this.replaceStateStep({ operation, lifetimeSeconds: command.lifetimeSeconds, projectRoot: command.projectRoot,
       releaseKey: release.key, audienceHash: release.payload.audienceHash, source: command.source, status: 'open', expectedHeads: command.expectedHeads }, true);
@@ -172,15 +186,18 @@ export class EventWriter {
   }
   private async replaceStateStep(command: ReplaceEventCommand, newRelease: boolean): Promise<Verified> {
     let release: EventRecord<EventRelease> | null = null;
+    let admissions: EventAdmission[] | undefined;
     return this.step(command.operation, 'activation_pending', id => {
       assertArkiv(release, 'unverified', 'missing_proposal', 'The reviewed release is unavailable.');
       const state: EventState = { ...this.base(command.operation, id), entityType: 'event_state', projectRoot: command.projectRoot,
         releaseKey: command.releaseKey, audienceHash: command.audienceHash, source: command.source, status: command.status,
-        startsAt: release.payload.terms.startsAt, endsAt: release.payload.terms.endsAt, predecessorKeys: command.expectedHeads };
+        startsAt: release.payload.terms.startsAt, endsAt: release.payload.terms.endsAt, predecessorKeys: command.expectedHeads,
+        ...(admissions !== undefined ? { admissions } : {}) };
       return { creates: [nativeEventCreate(state, command.lifetimeSeconds)], deletes: command.expectedHeads.map(publicKey) };
     }, async () => {
-      const context = await this.reader.core.context(); const event = await this.reader.event(context, command.projectRoot,
-        command.status === 'open' ? 'required' : 'skip'); this.owned(event, command.operation);
+      const context = await this.reader.core.context(); let event = await this.reader.event(context, command.projectRoot,
+        command.status === 'open' && command.admissions === undefined ? 'required' : 'skip',
+        command.status === 'open' && command.admissions === undefined); this.owned(event, command.operation);
       const previous = this.expected(event.state, command.expectedHeads);
       release = await this.reader.entity<EventRelease>(context, command.releaseKey, 'event_release', this.account(command.operation));
       assertArkiv(release && release.payload.projectRoot === command.projectRoot && release.payload.audienceHash === command.audienceHash,
@@ -188,13 +205,36 @@ export class EventWriter {
       if (!previous) await this.initialPublication(context, command.projectRoot, command.operation, release);
       assertArkiv(newRelease ? release.payload.predecessorReleaseKey === (previous?.payload.releaseKey ?? null)
         : previous && previous.payload.releaseKey === release.key, 'stale_heads', 'proposal_mismatch', 'Changing public terms requires publishing a new successor release.');
+      admissions = command.admissions ?? previous?.payload.admissions;
+      if (release.payload.terms.termsVersion === 2) admissions ??= [];
+      const releasingOnly = command.admissions !== undefined && previous && !newRelease && command.status === previous.payload.status
+        && sameSource(command.source, previous.payload.source) && command.admissions.length < (previous.payload.admissions?.length ?? 0)
+        && command.admissions.every(admission => (previous.payload.admissions ?? []).some(old => equal(old, admission)));
+      if (command.status === 'open' && command.admissions !== undefined && !releasingOnly) {
+        event = await this.reader.event(context, command.projectRoot, 'required');
+      }
+      if (admissions !== undefined) {
+        assertArkiv(release.payload.terms.termsVersion === 2, 'invalid_input', 'invalid_schema', 'Structured public terms are required before managing places.');
+        const rules = release.payload.terms.registration!;
+        assertArkiv(rules.capacity.kind === 'unlimited' || admissions.length <= rules.capacity.limit,
+          'invalid_input', 'invalid_input', 'The reserved roster exceeds the published capacity. Release places before reducing capacity.');
+        // Validate exact new admissions. Preserving an old reservation cannot grant a new request a place.
+        const added = admissions.filter(admission => !(previous?.payload.admissions ?? []).some(old => equal(old, admission)));
+        assertArkiv(!newRelease || added.length === 0, 'invalid_input', 'invalid_input', 'New public terms preserve reservations and require fresh requests before admission.');
+        for (const admission of added) {
+          const entry = event.roster?.entries.find(candidate => candidate.attendee === admission.attendee);
+          assertArkiv(entry && entry.attendance.status === 'unique' && entry.attendance.entity.key === admission.attendanceKey
+            && admission.releaseKey === release.key && requestEligibleForAdmission(event, entry, this.reader.core.now()),
+          'unverified', 'evidence_unavailable', 'Only an authenticated, timely request for the current release can receive a place.');
+        }
+      }
       if (previous && ['cancelled', 'ended'].includes(previous.payload.status)) {
         assertArkiv(command.status === previous.payload.status && !newRelease, 'invalid_input', 'closed_project', 'A cancelled or ended event is terminal.');
       }
-      if (command.status === 'open') {
+      if (command.status === 'open' && !releasingOnly) {
         this.ready(event.sourceProject, command.source);
         assertArkiv(release.payload.terms.endsAt > context.snapshot.blockTimestamp, 'invalid_input', 'expired', 'The event has already ended.');
-      } else {
+      } else if (command.status !== 'open') {
         assertArkiv(previous && sameSource(previous.payload.source, command.source), 'invalid_input', 'activation_mismatch', 'Closing the event must preserve its previously published source.');
         if (command.status === 'ended') assertArkiv(context.snapshot.blockTimestamp >= release.payload.terms.endsAt, 'invalid_input', 'invalid_input', 'The scheduled end has not arrived yet.');
       }
@@ -215,7 +255,8 @@ export class EventWriter {
     const command = this.begin(input, 'replace_attendance'); const account = this.account(command.operation);
     const verified = await this.step(command.operation, 'initial_state_pending', id => ({ creates: [nativeEventCreate({ ...this.base(command.operation, id),
       entityType: 'attendance_state', projectRoot: command.projectRoot, attendee: account, releaseKey: command.releaseKey,
-      audienceHash: command.audienceHash, decision: command.decision, predecessorKeys: command.expectedHeads }, command.lifetimeSeconds)],
+      audienceHash: command.audienceHash, decision: command.decision, predecessorKeys: command.expectedHeads,
+      ...(command.joinWaitlist !== undefined ? { joinWaitlist: command.joinWaitlist } : {}) }, command.lifetimeSeconds)],
       deletes: command.expectedHeads.map(publicKey) }), async () => {
       const context = await this.reader.core.context();
       const attendance = await this.reader.scope<AttendanceState>(context, 'attendance_state', command.projectRoot, account);
@@ -224,7 +265,17 @@ export class EventWriter {
         const event = await this.reader.event(context, command.projectRoot);
         assertArkiv(event.state.status === 'unique' && event.release && event.release.key === command.releaseKey
           && event.release.payload.audienceHash === command.audienceHash, 'stale_heads', 'proposal_mismatch', 'The event terms changed. Review the current release before confirming.');
-        assertArkiv(deriveEventAvailability(event, this.reader.core.now()) === 'open', 'stale_heads', 'activation_mismatch', 'Registration is paused until the event has a fresh, agreed plan.');
+        const eligibility = registrationEligibility(event, { kind: 'wallet', address: account }, this.reader.core.now());
+        const ownReservedPlace = event.state.entity.payload.admissions?.some(admission => admission.attendee === account);
+        assertArkiv(['join', 'request'].includes(eligibility.status)
+          || (eligibility.status === 'waitlist' && command.joinWaitlist === true)
+          || ((eligibility.status === 'full' || eligibility.status === 'waitlist') && ownReservedPlace),
+        'stale_heads', 'activation_mismatch', 'Registration requires an open deadline, current invitation, and an available request or explicit waiting-list choice.');
+        assertArkiv(!command.joinWaitlist || event.release.payload.terms.registration?.waitlist === true,
+          'invalid_input', 'invalid_input', 'This release does not offer a waiting list.');
+        assertArkiv(!previous || previous.payload.decision !== 'going' || previous.payload.releaseKey !== command.releaseKey
+          || previous.payload.audienceHash !== command.audienceHash || previous.payload.joinWaitlist !== command.joinWaitlist,
+        'invalid_input', 'invalid_input', 'This exact registration is already recorded. Refresh or reconcile the original action.');
         this.retention(command.lifetimeSeconds, event.release.payload.terms.endsAt, context.snapshot.blockTimestamp);
       } else {
         assertArkiv(previous && previous.payload.releaseKey === command.releaseKey && previous.payload.audienceHash === command.audienceHash,

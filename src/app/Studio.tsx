@@ -1,8 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { RootApp, type RouteRegistry, type RouteViewProps } from './App';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
+import { RootApp, ViewLoadBoundary, type RouteRegistry, type RouteViewProps } from './App';
 import { useAppSession } from './context';
-import { parseRoute, routeHref, routePath, safeReturnPath } from './routes';
-import { createStudioWorkspaces, LOCAL_COORDINATOR, type StudioWorkspaces, type WorkspaceKind } from './workspaces';
+import { parseRoute, routeHref } from './routes';
+import { createStudioWorkspaces, LOCAL_COORDINATOR, type StudioWorkspaces } from './workspaces';
 import { injectedProvider } from './network';
 import { isPublicEntityKey } from './ids';
 import { copyRecipeToPublicDraft } from './projectSharing';
@@ -11,16 +11,33 @@ import { makeSmallWorksFixture, SMALL_WORKS_PROJECT_ROOT } from '../domain/fixtu
 import type { Actor, ProjectRecipe, RecipeTemplate } from '../domain/types';
 import { Button, Dialog, Link, LoadingState, Notice, Select } from '../ui';
 import { LandingRoute } from '../features/landing';
-import { HelpRoute } from '../features/help';
-import { NewProjectRoute, ProjectPage, WorkspaceRoute, createProjectDrafts, draftScope, makeDraft, templateToEditorDraft, type ProjectPanelProps, type SavedProjectDraft } from '../features/projects';
-import { ContributionsPage, ProjectAgreementPanel, RequestsPage, type ContributionTemplate } from '../features/contributions';
-import { ExecutionWorkspace } from '../features/execution';
-import { GuidedPractice } from '../features/practice/GuidedPractice';
-import { AccountCommands, AccountPage, SignInPage, workDestination } from '../features/account';
+import { createProjectDrafts, draftScope, makeDraft, type SavedProjectDraft } from '../features/projects/drafts';
+import { templateToEditorDraft } from '../features/projects/editor/model';
+import type { ProjectPanelProps } from '../features/projects/ProjectPage';
+import type { ContributionTemplate } from '../features/contributions/model';
+import { AccountCommands } from '../features/account/AccountCommands';
+import { workDestination } from '../features/account/account';
 import { selectNewProjectDraft } from '../features/projects/draft-session';
-import { WorkspaceTour, workspaceTour } from '../features/onboarding';
-import { EventCatalog, EventDetail, MyEvents } from '../features/events';
-import { EventPublishingPanel } from '../features/events/publishing';
+import { canShowTour, workspaceTour } from '../features/onboarding/tour';
+
+// Module-scoped lazy components retain their identity across route and account updates.
+// Each screen owns its CSS; draft helpers remain synchronous and independent of screens.
+const HelpRoute = lazy(() => import('../features/help/Help').then(module => ({ default: module.HelpRoute })));
+const WorkspaceRoute = lazy(() => import('../features/projects/Workspace').then(module => ({ default: module.WorkspaceRoute })));
+const NewProjectRoute = lazy(() => import('../features/projects/NewProject').then(module => ({ default: module.NewProjectRoute })));
+const ProjectPage = lazy(() => import('../features/projects/ProjectPage').then(module => ({ default: module.ProjectPage })));
+const ContributionsPage = lazy(() => import('../features/contributions/Contributions').then(module => ({ default: module.ContributionsPage })));
+const ProjectAgreementPanel = lazy(() => import('../features/contributions/Agreement').then(module => ({ default: module.ProjectAgreementPanel })));
+const RequestsPage = lazy(() => import('../features/contributions/Requests').then(module => ({ default: module.RequestsPage })));
+const ExecutionWorkspace = lazy(() => import('../features/execution/ExecutionWorkspace').then(module => ({ default: module.ExecutionWorkspace })));
+const GuidedPractice = lazy(() => import('../features/practice/GuidedPractice').then(module => ({ default: module.GuidedPractice })));
+const SignInPage = lazy(() => import('../features/account/AccountPages').then(module => ({ default: module.SignInPage })));
+const AccountPage = lazy(() => import('../features/account/AccountPages').then(module => ({ default: module.AccountPage })));
+const EventCatalog = lazy(() => import('../features/events/EventCatalog').then(module => ({ default: module.EventCatalog })));
+const EventDetail = lazy(() => import('../features/events/EventDetail').then(module => ({ default: module.EventDetail })));
+const MyEvents = lazy(() => import('../features/attendance/MyEvents').then(module => ({ default: module.MyEvents })));
+const EventPublishingPanel = lazy(() => import('../features/events/publishing/EventPublishingPanel').then(module => ({ default: module.EventPublishingPanel })));
+const WorkspaceTour = lazy(() => import('../features/onboarding/WorkspaceTour').then(module => ({ default: module.WorkspaceTour })));
 
 const sampleRoles = [
   ['coordinator', 'Exhibition coordinator'], ['library', 'Library (exhibition space)'],
@@ -45,12 +62,13 @@ function WorkspaceControls({ manager }: { manager: StudioWorkspaces }) {
   const route = parseRoute(session.destination);
   if (['home', 'sign-in', 'account', 'onboarding'].includes(route.name)) return null;
   const signIn = { name: 'sign-in' as const, returnTo: workDestination(route) };
+  // Ordinary public browsing needs no repeated connection or mode banner.
+  if (selected.kind === 'public' && !connection.error && !selected.issue) return null;
   return <div className="pf-workspace-bar">
     {selected.kind === 'practice' ? <details className="pf-workspace-controls">
       <summary><span className="pf-workspace-summary"><strong>Practice only</strong><span className="pf-secondary">Sample people and decisions. Nothing is published.</span></span><span className="pf-workspace-change">Choose a practice role</span></summary>
       <Select label="Practice as" value={session.actor?.kind === 'local' ? session.actor.id : ''} onChange={event => manager.setLocalActor({ kind: 'local', id: event.target.value as `local-actor:${string}` })} options={sampleRoles.map(([id, label]) => ({ value: `local-actor:${id}`, label }))} />
-    </details> : <div className="pf-workspace-status"><strong>{selected.kind === 'local' ? 'Local work on this device' : session.actor ? 'Your public work' : 'Reading public work'}</strong><span className="pf-secondary">{selected.kind === 'local' ? 'Local projects and drafts are kept in this browser. Publishing a copy is a separate action.' : session.actor ? 'Your wallet signs only when you choose to publish or make a decision.' : 'You can read without signing in. Connect your wallet to find your own records or publish.'}</span></div>}
-    {selected.kind === 'public' && !session.actor && <Link className="pf-button pf-button--secondary" href={routeHref(signIn)}>Sign in to continue</Link>}
+    </details> : selected.kind === 'local' ? <div className="pf-workspace-status"><strong>Saved on this device</strong><span className="pf-secondary">These local projects are available in this browser. You can publish a copy when it is ready.</span></div> : null}
     {selected.kind === 'local' && <Button variant="secondary" onClick={() => { void manager.select('public', { name: 'workspace' }).then(() => { window.location.hash = '/workspace'; }); }}>Open my public work</Button>}
     {connection.error && selected.kind === 'public' && <Notice tone="warning">{connection.error} <Link href={routeHref(signIn)}>Reconnect wallet</Link></Notice>}
     {selected.issue && <Notice tone="warning">{selected.issue}</Notice>}
@@ -71,7 +89,7 @@ function PracticeGuidance() {
 function PracticeRoute({ manager, onStartProject }: { manager: StudioWorkspaces; onStartProject: () => void }) {
   const [revision, setRevision] = useState(0), [resetOpen, setResetOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const openProject = () => { window.location.hash = routeHref({ name: 'project', projectRoot: SMALL_WORKS_PROJECT_ROOT, tab: 'plans' }).slice(1); };
-  return <div className="pf-stack"><header className="pf-foundation-intro"><h1>A small exhibition. Everyone brings a part.</h1><p>Bring together a place, equipment and a crew. Then see how the plan changes when someone steps away.</p></header>
+  return <div className="pf-stack"><header className="pf-foundation-intro"><h1>Bring a small exhibition together</h1><p>Bring together a place, equipment and a crew. Then see how the plan changes when someone steps away.</p></header>
     <GuidedPractice repository={manager.practiceRepository} now={manager.runtimes.practice.now} refreshKey={revision} onRefresh={() => setRevision(value => value + 1)} onOpenProject={openProject} />
     <div className="pf-actions"><Link href={routeHref({ name: 'new-project' })} onClick={event => { event.preventDefault(); onStartProject(); }}>Start my own project</Link><Button variant="quiet" onClick={() => setResetOpen(true)}>Start the example again</Button></div>
     <PracticeGuidance />
@@ -96,11 +114,9 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     void manager.select('public', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
   };
   const Help = (props: RouteViewProps) => <HelpRoute {...props} onCreateProject={startProject} onReplayTour={() => {
-    const candidate = parseRoute(safeReturnPath('returnTo' in props.route ? props.route.returnTo : undefined) ?? '/workspace');
-    const target = candidate.name === 'home' || candidate.name === 'demo' || (candidate.name === 'project' && candidate.projectRoot === SMALL_WORKS_PROJECT_ROOT)
-      ? { name: 'workspace' as const } : candidate;
-    const open = manager.getSnapshot().kind === 'practice' ? manager.select('public', target) : manager.followRoute(target);
-    void open.then(() => { workspaceTour(manager.getSnapshot().runtime).start(); window.location.hash = routePath(target); });
+    const current = manager.getSnapshot();
+    if (current.kind === 'public') workspaceTour(current.runtime).start();
+    else void manager.select('public', props.route).then(() => workspaceTour(manager.getSnapshot().runtime).start());
   }} />;
   const reuse = (template: RecipeTemplate) => {
     const runtime = manager.runtimes.local;
@@ -112,12 +128,13 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     runtime.session.selectDraft(draft.id);
     void manager.select('local', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
   };
-  const Runbook = (props: Parameters<typeof ExecutionWorkspace>[0]) => <ExecutionWorkspace {...props} onReuse={reuse} />;
+  const Runbook = (props: Parameters<typeof ExecutionWorkspace>[0]) => <Suspense fallback={<LoadingState title="Opening the run sheet" />}><ExecutionWorkspace {...props} onReuse={reuse} /></Suspense>;
   const Organizer = ({ project, onRefresh }: ProjectPanelProps) => {
     const session = useAppSession();
-    return isPublicEntityKey(project.root.key) ? <EventPublishingPanel projectRoot={project.root.key} repository={manager.events} session={session} storage={manager.storage} onRefresh={onRefresh} /> : null;
+    return isPublicEntityKey(project.root.key) ? <Suspense fallback={<LoadingState title="Opening event details" />}><EventPublishingPanel projectRoot={project.root.key} repository={manager.events} session={session} storage={manager.storage} onRefresh={onRefresh} /></Suspense> : null;
   };
-  const slots = { agreementView: ProjectAgreementPanel, runbookView: Runbook, organizerView: Organizer };
+  const Agreement = (props: ProjectPanelProps) => <Suspense fallback={<LoadingState title="Opening agreements" />}><ProjectAgreementPanel {...props} /></Suspense>;
+  const slots = { agreementView: Agreement, runbookView: Runbook, organizerView: Organizer };
   const Project = ({ route }: RouteViewProps) => route.name === 'project' ? <ProjectPage key={route.projectRoot} projectRoot={route.projectRoot} tab={route.tab} practice={route.projectRoot === SMALL_WORKS_PROJECT_ROOT} guidance={route.projectRoot === SMALL_WORKS_PROJECT_ROOT ? <PracticeGuidance /> : undefined} onShareRecipe={share} {...slots} /> : null;
   const Contributions = (props: RouteViewProps) => {
     const session = useAppSession();
@@ -144,6 +161,7 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
 
 export function Studio({ manager }: { manager: StudioWorkspaces }) {
   const state = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
+  const session = useSyncExternalStore(state.runtime.session.subscribe, state.runtime.session.getSnapshot, state.runtime.session.getSnapshot);
   useEffect(() => {
     const follow = () => { void manager.followRoute(parseRoute(window.location.hash)); };
     window.addEventListener('hashchange', follow);
@@ -152,7 +170,9 @@ export function Studio({ manager }: { manager: StudioWorkspaces }) {
   // Stable per manager: switching a role never remounts the project or loses a draft.
   const routes = routeRegistry(manager);
   if (state.loading) return <main className="pf-page pf-app-main"><LoadingState title="Opening your workspace" description="Your other projects and drafts are kept separately." /></main>;
-  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} account={<AccountCommands manager={manager} />} guide={state.kind === 'practice' ? undefined : <WorkspaceTour />} />;
+  const tourEligible = state.kind !== 'practice' && canShowTour(parseRoute(session.destination), session.mode, session.actor);
+  const guide = tourEligible ? <ViewLoadBoundary destination={session.destination} failureTitle="The welcome tour could not open"><Suspense fallback={null}><WorkspaceTour /></Suspense></ViewLoadBoundary> : undefined;
+  return <RootApp key={`${state.kind}:${state.generation}`} runtime={state.runtime} routes={routes} controls={<WorkspaceControls manager={manager} />} account={<AccountCommands manager={manager} />} guide={guide} />;
 }
 const registries = new WeakMap<StudioWorkspaces, RouteRegistry>();
 function routeRegistry(manager: StudioWorkspaces) {

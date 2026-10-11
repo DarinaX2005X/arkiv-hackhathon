@@ -5,7 +5,10 @@ import type { AudienceTerms, EventAvailability } from '../../domain/events';
 import type { Tone } from '../../ui';
 
 export const availabilityCopy: Record<EventAvailability, { label: string; tone: Tone; explanation: string }> = {
-  open: { label: 'Open for registration', tone: 'success', explanation: 'You can record your intention to attend this event.' },
+  registration_closed: { label: 'Registration deadline passed', tone: 'neutral', explanation: 'The registration deadline has passed. Existing confirmed places are kept.' },
+  full: { label: 'Fully booked', tone: 'neutral', explanation: 'All places are reserved. Check back if the organizer releases a place.' },
+  waitlist: { label: 'Waiting list open', tone: 'warning', explanation: 'All places are reserved. You can ask to join the waiting list; a place is confirmed only by the organizer.' },
+  open: { label: 'Open for registration', tone: 'success', explanation: 'Registration is open. Review how places are confirmed before joining.' },
   paused: { label: 'Plans are being updated', tone: 'warning', explanation: 'The organizers need to restore agreement on the event preparations. New registrations are paused.' },
   closed: { label: 'Registration closed', tone: 'neutral', explanation: 'The organizer has closed registration. Existing registrations remain visible.' },
   cancelled: { label: 'Event cancelled', tone: 'danger', explanation: 'The organizer has cancelled this event.' },
@@ -56,3 +59,33 @@ export function catalogueFilters(search: string, from: string, to: string, timeZ
 }
 
 export const shortAddress = (value: string): string => `${value.slice(0, 8)}…${value.slice(-6)}`;
+
+export const eventFormatLabel = (terms: AudienceTerms): string => terms.format === 'online' ? 'Online' : terms.format === 'hybrid' ? 'Hybrid' : terms.format === 'in_person' ? 'In person' : 'Location provided';
+export const eventPlace = (terms: AudienceTerms): string => terms.format === 'online' ? 'Online' : terms.location ? [terms.location.venue, terms.location.city, terms.location.country].filter(Boolean).join(', ') : terms.venue;
+export function eventRegistrationLabel(terms: AudienceTerms): string {
+  const rules = terms.registration;
+  if (!rules) return 'Open registration';
+  return [rules.admission === 'invite_only' ? 'Invited wallets only' : 'Open to everyone', rules.capacity.kind === 'limited' ? `${rules.capacity.limit} places, organizer confirmation` : rules.admission === 'invite_only' ? 'Organizer confirmation' : 'No capacity limit'].join(', ');
+}
+export const audienceLabels: Record<keyof AudienceTerms, string> = { title: 'Event title', description: 'About the event', startsAt: 'Start time', endsAt: 'End time', timeZone: 'Time zone', venue: 'Place', instructions: 'Before you join', conditions: 'Participation conditions', termsVersion: 'Event details', format: 'Event format', location: 'Location', online: 'Online access', registration: 'Registration rules' };
+export function audienceValue(terms: AudienceTerms, field: keyof AudienceTerms): string {
+  if (field === 'startsAt' || field === 'endsAt') return `${formatDateTime(terms[field], terms.timeZone)} (${terms.timeZone})`;
+  if (field === 'format') return eventFormatLabel(terms);
+  if (field === 'location') return terms.location ? eventPlace(terms) : 'No physical location';
+  if (field === 'online') return terms.online ? [terms.online.url, terms.online.instructions].filter(Boolean).join('\n') : 'No online access';
+  if (field === 'registration') return terms.registration ? [eventRegistrationLabel(terms), terms.registration.deadline === null ? 'No registration deadline' : `Register by ${formatDateTime(terms.registration.deadline, terms.timeZone)} (${terms.timeZone})`, terms.registration.waitlist ? 'Waiting list available by choice' : 'No waiting list', ...(terms.registration.admission === 'invite_only' ? [`Invited wallets: ${terms.registration.invitedAccounts.join(', ')}`] : [])].join('\n') : 'Open registration with no capacity limit';
+  if (field === 'termsVersion') return terms.termsVersion === 2 ? 'Structured event details' : 'Original event details';
+  return String(terms[field] ?? '') || 'Not provided';
+}
+
+/** Calendar text is escaped and folded by UTF-8 octets, including untrusted titles. */
+export function eventCalendar(terms: AudienceTerms, eventId: string, now = Date.now(), cancelled = false): string {
+  const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/\r?\n|\r/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
+  const stamp = (at: number) => new Date(at).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const fold = (line: string) => { let current = '', size = 0; const rows: string[] = []; for (const char of line) { const bytes = new TextEncoder().encode(char).length; if (size + bytes > 75) { rows.push(current); current = ' '; size = 1; } current += char; size += bytes; } rows.push(current); return rows.join('\r\n'); };
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Partfolk//Events//EN', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT', `UID:${escape(eventId)}@partfolk`, `DTSTAMP:${stamp(now)}`, `DTSTART:${stamp(terms.startsAt)}`, `DTEND:${stamp(terms.endsAt)}`, `SUMMARY:${escape(terms.title)}`, ...(cancelled ? ['STATUS:CANCELLED'] : []), `LOCATION:${escape(eventPlace(terms))}`, `DESCRIPTION:${escape([terms.description, terms.instructions, terms.conditions, terms.online?.url, terms.online?.instructions, 'Check Partfolk for current event details. A calendar entry does not confirm a place.'].filter(Boolean).join('\n\n'))}`, 'END:VEVENT', 'END:VCALENDAR'].map(fold).join('\r\n') + '\r\n';
+}
+export function downloadEventCalendar(terms: AudienceTerms, eventId: string, cancelled = false) {
+  const url = URL.createObjectURL(new Blob([eventCalendar(terms, eventId, Date.now(), cancelled)], { type: 'text/calendar;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'partfolk-event.ics'; link.click(); URL.revokeObjectURL(url);
+}

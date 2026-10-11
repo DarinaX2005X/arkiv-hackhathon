@@ -1,0 +1,58 @@
+.pf-event-scene { min-width: 0; width: 100%; position: relative; pointer-events: none; }
+.pf-event-art { display: block; width: 100%; height: auto; aspect-ratio: 72 / 61; overflow: visible; }
+.pf-event-far-plane { fill: var(--surface-dark-light); opacity: .35; }
+.pf-event-light { fill: var(--event-light); }
+.pf-event-ground-shadow { fill: var(--surface-dark); opacity: .65; filter: var(--event-shadow); }
+.pf-event-base { fill: var(--surface-dark-light); }
+.pf-event-base-side { fill: var(--surface-dark); }
+.pf-event-base-edge { fill: none; stroke: var(--edge-light); stroke-width: 1.3; }
+.pf-event-paper, .pf-event-base-light { fill: var(--event-paper); }
+.pf-event-room-edge { fill: var(--event-edge); }
+.pf-event-rim, .pf-event-cream { fill: var(--art-cream); }
+.pf-event-arch-reveal { fill: var(--art-shadow); }
+.pf-event-contact { fill: var(--surface-dark); opacity: .3; filter: var(--event-shadow); }
+.pf-event-floor-light { fill: var(--art-highlight); opacity: .45; }
+.pf-event-floor-line { fill: none; stroke: var(--art-cream); stroke-width: 3; }
+.pf-event-green { fill: var(--event-green); }
+.pf-event-mint { fill: var(--action-on-dark); }
+.pf-event-caption { stroke: var(--art-shadow); stroke-width: 2; stroke-linecap: round; }
+.pf-event-leg { fill: none; stroke: var(--on-action-on-dark); stroke-width: 5; stroke-linecap: round; }
+.pf-event-screen-foot-side, .pf-event-screen-stand { fill: var(--art-shadow); }
+.pf-event-screen-face { fill: var(--event-screen); }
+.pf-event-screen-highlight { fill: var(--art-cream); opacity: .07; }
+.pf-event-screen-detail { fill: none; stroke: var(--art-sand); stroke-width: 1.5; opacity: .35; }
+.pf-event-screen-camera { fill: var(--surface-dark); }
+.pf-event-connection { fill: none; stroke: var(--action-on-dark); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: .6; }
+.pf-event-case-side { fill: var(--surface-dark); }
+.pf-event-case-top { fill: var(--surface-dark-light); }
+.pf-event-case-seam { fill: none; stroke: var(--surface-dark); stroke-width: 2; }
+.pf-event-case-handle { fill: none; stroke: var(--art-sand); stroke-width: 5; stroke-linecap: round; }
+.pf-event-case-edge { fill: none; stroke: var(--art-shadow); stroke-width: 1.5; opacity: .6; }
+.pf-event-agreement-lines { fill: none; stroke: var(--art-shadow); stroke-width: 3; stroke-linecap: round; }
+.pf-event-agreement-mark { fill: none; stroke: var(--on-action-on-dark); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.pf-event-stem { fill: none; stroke: var(--action-on-dark); stroke-width: 2.5; stroke-linecap: round; }
+.pf-event-leaf { fill: var(--surface-dark-light); stroke: var(--art-shadow); stroke-opacity: .25; stroke-width: 1; }
+.pf-event-trousers, .pf-event-shoe, .pf-event-hair { fill: var(--surface-dark); }
+.pf-event-skin { fill: var(--art-sand); }
+.pf-event-coat-edge { fill: var(--art-shadow); }
+.pf-event-coat { fill: var(--event-paper); }
+.pf-event-person--mint .pf-event-coat { fill: var(--action-on-dark); }
+.pf-event-person--forest .pf-event-coat { fill: var(--event-green); }
+.pf-event-person--forest .pf-event-coat-edge { fill: var(--surface-dark); }
+
+/* The scene keeps a fully readable static pose. Only the bounded screen light
+   and leaf cluster breathe; all records, controls and text remain still. */
+.pf-event-screen-highlight { animation: pf-event-reflection 12s ease-in-out infinite; animation-play-state: paused; }
+.pf-event-leaf { transform-box: fill-box; transform-origin: 50% 100%; animation: pf-event-leaves 14s ease-in-out infinite; animation-play-state: paused; }
+.pf-event-scene[data-playing='true'] .pf-event-screen-highlight,
+.pf-event-scene[data-playing='true'] .pf-event-leaf { animation-play-state: running; }
+@keyframes pf-event-reflection { 0%, 100% { opacity: .045; } 50% { opacity: .13; } }
+@keyframes pf-event-leaves { 0%, 100% { transform: rotate(-1deg); } 50% { transform: rotate(2deg); } }
+@media (max-width: 560px) {
+  .pf-event-secondary-object { display: none; }
+  .pf-event-art { aspect-ratio: 72 / 61; }
+  .pf-event-far-plane { opacity: .18; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-event-screen-highlight, .pf-event-leaf { animation: none; }
+}

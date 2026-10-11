@@ -9,11 +9,12 @@ import type { CreateProjectCommand } from '../../data/types';
 import type { ProjectAggregate } from '../../domain/types';
 import { Button, Checkbox, Dialog, Link, Notice } from '../../ui';
 import { RecipeEditor, validateEditorDraft } from './editor';
-import { createProjectDrafts, draftScope, downloadText, type SavedProjectDraft } from './drafts';
+import { createProjectDrafts, DraftChangedError, draftScope, downloadText, type SavedProjectDraft } from './drafts';
 import { newProjectDraftForSharing, openNewProjectDraft, saveNewProjectDraft, startNewProjectDraft } from './draft-session';
 import { authorityFor, PROJECT_LIFETIME_SECONDS } from './selectors';
 import { projectsCopy as copy } from './catalog';
 import { ActionFeedback } from './ActionFeedback';
+import './projects.css';
 
 export interface NewProjectRouteProps extends Partial<RouteViewProps> {
   onShareDraft?: (draft: SavedProjectDraft) => void;
@@ -34,10 +35,13 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   const [openError, setOpenError] = useState<string | null>(null);
   const save = (next: SavedProjectDraft) => {
     try {
-      const status = saveNewProjectDraft(runtime, next);
+      const status = saveNewProjectDraft(runtime, next, draft);
       setDraftSession(previous => ({ ...previous, draft: next, store: createProjectDrafts(runtime, next.scope), status }));
       runtime.session.selectDraft(next.id);
-    } catch { setOpenError('Reconnect the account that owns this draft before changing it. Its original input has been retained.'); }
+    } catch (error) {
+      setDraftSession(previous => ({ ...previous, draft: next, status: { persisted: false, issue: { code: 'write_failed', recoverableText: null } } }));
+      setOpenError(error instanceof DraftChangedError ? error.message : 'Reconnect the account that owns this draft before changing it. Its original input has been retained.');
+    }
   };
   useEffect(() => {
     const opened = openNewProjectDraft(runtime);
@@ -48,21 +52,30 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   useEffect(() => { setReview(false); setPublicAcknowledged(false); }, [session.actor, session.mode]);
   const ownsCurrentDraft = () => {
     const current = runtime.session.getSnapshot();
-    return draft.scope === draftScope(current.mode, current.actor) && activeDraft.current === draft.id;
+    if (draft.scope !== draftScope(current.mode, current.actor) || activeDraft.current !== draft.id) return false;
+    const conflict = store.currentConflict(draft);
+    if (conflict) {
+      setOpenError(new DraftChangedError(conflict).message);
+      return false;
+    }
+    return true;
   };
   const bindConfirmedProject = (project: ProjectAggregate, origin: SavedProjectDraft) => {
     const originStore = createProjectDrafts(runtime, origin.scope);
+    originStore.refresh();
     const latest = originStore.get(origin.id) ?? origin;
     const bound = { ...latest, projectRoot: project.root.key,
       baselineStateKey: project.state.status === 'unique' ? project.state.entity.key : null,
       updatedAt: Math.max(latest.updatedAt, runtime.now()) };
     // A late confirmation belongs to its original draft, even after navigation
     // or an account switch. Never replace another form or redirect its owner.
-    originStore.upsert(bound);
+    // Deleting a local draft cannot cancel an already submitted publication.
+    // Keep the confirmed project accessible without restoring deleted text.
+    try { originStore.upsert(bound); } catch (error) { if (!(error instanceof DraftChangedError)) throw error; }
     const current = runtime.session.getSnapshot();
     if (!mounted.current || activeDraft.current !== origin.id || current.activeDraftId !== origin.id
       || draftScope(current.mode, current.actor) !== origin.scope) return;
-    save(bound);
+    setDraftSession(previous => ({ ...previous, draft: bound, store: originStore, status: originStore.status() }));
     setReview(false);
     window.location.hash = routeHref({ name: 'project', projectRoot: project.root.key, tab: 'needs' }).slice(1);
   };
@@ -90,16 +103,16 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
     }
     setOpenError('The original publication is confirmed, but its project could not be read yet. Check it again; this form will not create a second project.');
   };
-  return <div className="pf-stack">
-    <header><h1>Start your project</h1><p>Describe the outcome and the people, place and equipment it needs. Contributors bring their own offers.</p></header>
-    <p>{session.mode === 'public' ? 'Prepare your draft here. Publishing will make its details public.' : 'Your draft stays on this device until you choose to share it.'}</p>
+  return <div className="pf-stack project-create">
+    <header className="project-heading"><div><h1>Create a project</h1><p>A workshop, an online talk or a gathering in your neighborhood. Describe your event and the help that will make it happen.</p></div><Link href={routeHref({ name: 'workspace' })}>My projects</Link></header>
+    <ol className="project-steps" aria-label="Project creation"><li><span>1</span>Describe the event</li><li><span>2</span>Add dates and help</li><li><span>3</span>Review and share</li></ol>
     {ownerChanged && <Notice tone="warning" title="This draft belongs to another account context"><p>Your original input is retained. Reconnect its account to continue editing or publishing. Connecting a different account does not transfer this draft.</p><Button variant="secondary" onClick={() => { const next = startNewProjectDraft(runtime); setDraftSession(next); runtime.session.selectDraft(next.draft.id); setOpenError(null); }}>Start a separate draft in this account</Button></Notice>}
     {!saveStatus.persisted && <Notice tone="warning">{copy.memoryOnly}</Notice>}
     {store.exportRecovery() !== null && <Notice tone="warning" title="Saved drafts need recovery"><p>The unreadable data is preserved and has not been replaced.</p><Button variant="secondary" onClick={() => downloadText('partfolk-drafts-recovery.txt', store.exportRecovery()!, 'text/plain')}>Export original data</Button></Notice>}
     {draftSession.recoveryText !== null && <Notice tone="warning" title="The saved draft location needs recovery"><p>The original location data is preserved. Export it before closing this page.</p><Button variant="secondary" onClick={() => downloadText('partfolk-draft-location-recovery.txt', draftSession.recoveryText!, 'text/plain')}>Export original draft location</Button></Notice>}
     <RecipeEditor value={validation.recipe ?? { title: '', outcome: '', timeZone: draft.editor.timeZone, variants: [], instructions: '' }} draft={draft.editor}
       onDraftChange={editor => save({ ...draft, editor, updatedAt: runtime.now() })} onChange={() => {}} disabled={waiting || ownerChanged} />
-    <div className="pf-actions">
+    <div className="pf-sheet pf-stack"><h2>Review your project</h2><p>{session.mode === 'public' ? 'Publishing lets contributors read your event details and offer their help.' : 'Keep preparing on this device or review a public copy to invite contributors.'}</p><div className="project-form-actions">
       {session.mode === 'local' && onShareDraft && <Button onClick={() => {
         if (waiting || !ownsCurrentDraft()) return;
         const shared = newProjectDraftForSharing(runtime, draft);
@@ -110,11 +123,17 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
       <Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>{copy.exportDraft}</Button>
       <Button variant={session.mode === 'local' && onShareDraft ? 'secondary' : 'primary'} onClick={() => { if (ownsCurrentDraft()) setReview(true); }} disabled={ownerChanged || !validation.valid || waiting || action.state.status === 'confirmed' || !runtime.repository || !authority} disabledReason={ownerChanged ? 'Reconnect the account that owns this draft.' : !authority ? session.mode === 'public' ? 'Connect your wallet on Tiramisu to publish. Your draft is retained.' : 'Choose your local organizer context to create a local project.' : !validation.valid ? 'Complete the marked fields first.' : undefined}>{session.mode === 'public' ? 'Review public project' : 'Create local project'}</Button>
     </div>
-    <p role="status">{saveStatus.persisted ? copy.saved : copy.memoryOnly}</p>
+    <p className="project-create-status" role="status">{saveStatus.persisted ? copy.saved : copy.memoryOnly}</p></div>
     <ActionFeedback state={action.state} action={action} onReconcile={() => { void checkOriginal(); }} onResume={action.recoverableCommand ? () => { void submit(action.recoverableCommand as CreateProjectCommand); } : undefined} />
     {action.state.status === 'confirmed' && draft.projectRoot === null && <Button variant="secondary" disabled={ownerChanged || !authority} onClick={() => { void checkOriginal(); }}>Open the confirmed project</Button>}
-    {openError && <Notice tone="warning">{openError}</Notice>}
-    <Link href={routeHref({ name: 'workspace' })}>Return to Projects</Link>
+    {openError && <Notice tone="warning"><p>{openError}</p>{!ownerChanged && <div className="pf-actions"><Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>Export my open copy</Button><Button variant="secondary" disabled={waiting} onClick={() => {
+      try {
+        const saved = store.reloadSaved(draft.id);
+        if (!saved) { setOpenError('This draft is no longer saved. Export your open copy or start a new draft from My projects.'); return; }
+        setDraftSession(previous => ({ ...previous, draft: saved, status: store.status() })); setReview(false); setOpenError(null);
+      } catch (error) { setOpenError(error instanceof Error ? error.message : 'The saved draft could not be read. Your open copy is retained.'); }
+    }}>Reload saved draft</Button></div>}</Notice>}
+    <Link href={routeHref({ name: 'workspace' })}>Return to My projects</Link>
     <Dialog open={review && !ownerChanged} title={session.mode === 'public' ? copy.publicPreview : 'Create this local project'} closeLabel="Keep editing" onClose={() => setReview(false)} footer={<Button onClick={() => { void submit(); }} disabled={ownerChanged || !validation.valid || !authority || waiting || action.state.status === 'confirmed' || (session.mode === 'public' && !publicAcknowledged)}>{session.mode === 'public' ? 'Publish project' : 'Create local project'}</Button>}>
       <div className="pf-stack"><h3>{draft.editor.title}</h3><p>{draft.editor.outcome}</p><p>{draft.editor.variants.length} date and place options. Project time zone: {draft.editor.timeZone}.</p>
         <p>{session.mode === 'public' ? copy.publicNote : 'This creates a project in your local workspace. Other people have not offered or accepted anything.'}</p>

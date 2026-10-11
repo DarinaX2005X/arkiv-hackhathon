@@ -72,6 +72,11 @@ export function createNativeLedger(options: { now?: number; pageSize?: number } 
     blockNumber += Math.max(1, Math.ceil((next - time) / 2_000));
     time = next; archive();
   }
+  /** Storage deadlines use blocks. A faster chain can exhaust storage before a nominal UTC duration. */
+  function advanceBlocks(count: number) {
+    assert.ok(Number.isSafeInteger(count) && count > 0, 'Advance by a positive number of blocks.');
+    blockNumber += count; time += 2_000; archive();
+  }
   const request: RpcRequest = async args => {
     calls.push(structuredClone(args));
     const params = Array.isArray(args.params) ? args.params : [];
@@ -189,7 +194,7 @@ export function createNativeLedger(options: { now?: number; pageSize?: number } 
     return hash;
   }
 
-  return { request, now: () => time, setTime, blockNumber: () => blockNumber, submit, sends, calls,
+  return { request, now: () => time, setTime, advanceBlocks, blockNumber: () => blockNumber, submit, sends, calls,
     readRows: (at = blockNumber) => structuredClone(snapshot(at)),
     loseNextResponse: () => { loseResponse = true; } };
 }

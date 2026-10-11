@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ComponentType, type ReactNode } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { routeHref, projectInvitation, type ProjectTab } from '../../app/routes';
 import type { RouteViewProps } from '../../app/App';
@@ -17,6 +17,7 @@ import { OfferInbox } from './OfferInbox';
 import { PlansPanel } from './PlansPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { ProjectPlan } from './ProjectPlan';
+import './projects.css';
 
 export interface ProjectPanelProps { project: ProjectAggregate; onRefresh: () => Promise<void> }
 export interface ProjectSlots { agreementView?: ComponentType<ProjectPanelProps>; runbookView?: ComponentType<ProjectPanelProps>; organizerView?: ComponentType<ProjectPanelProps> }
@@ -29,9 +30,12 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
   const editorScope = draftScope(session.mode, session.actor);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [sharingRecipe, setSharingRecipe] = useState<ProjectRecipe | null>(null);
+  const [guestsOpen, setGuestsOpen] = useState(false), [guestsVisited, setGuestsVisited] = useState(false);
+  const guestsId = useId();
+  useEffect(() => { setGuestsOpen(false); }, [projectRoot, tab]);
   const [, setDraftRevision] = useState(0);
   if (!project) return loading ? <LoadingState title="Reading the project" description="Checking its current records and referenced contributors." />
-    : <ErrorState title="This project could not be opened" description={error ? repositoryErrorText(error) : 'A project repository has not been connected.'} actions={<Button onClick={() => { void refresh(); }}>Try a fresh read</Button>} />;
+    : <ErrorState title="This project could not be opened" description={error ? repositoryErrorText(error) : 'The project source is unavailable. Try again in a moment.'} actions={<Button onClick={() => { void refresh(); }}>Try a fresh read</Button>} />;
   const state = project.state.status === 'unique' ? project.state.entity.payload : null;
   const { readiness, draft } = projectStatus(project, runtime.now());
   const editorDraft = createProjectDrafts(runtime, editorScope).list().find(item => item.projectRoot === project.root.key);
@@ -43,6 +47,9 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
   const ownsPublicProject = !practice && isPublicEntityKey(projectRoot) && session.mode === 'public'
     && session.actor?.kind === 'wallet' && project.root.payload.coordinator.kind === 'wallet'
     && session.actor.address.toLowerCase() === project.root.payload.coordinator.address.toLowerCase();
+  const guestsAvailable = ownsPublicProject && Boolean(Organizer);
+  const showGuests = guestsAvailable && guestsOpen;
+  const openGuests = () => { setGuestsVisited(true); setGuestsOpen(true); };
   const planTab: ProjectTab = planArea ? tab : project.proposal ? 'plans' : 'needs';
   const navigation: { tab: ProjectTab; label: string; current: boolean }[] = [
     { tab: planTab, label: 'Plan', current: planArea },
@@ -53,6 +60,17 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
     : unsavedChanges ? 'Changes waiting to be saved' : draft.changed ? 'New needs to plan'
       : !project.proposal && readiness.status === 'possible' ? 'Still planning'
         : ({ possible: 'Plan found', awaiting_approval: 'Waiting for contributors', declined: 'A contributor cannot take part', ready: 'Everyone has agreed', changed: 'The plan needs an update', conflict: 'The plan needs a check', unverified: 'Could not check the latest plan' } as const)[readiness.status];
+  const nextStep = state?.lifecycle === 'closed'
+    ? { title: 'Review what happened', description: 'Your outcome and earlier decisions stay available in the project history.', tab: 'history' as const, action: 'View project outcome' }
+    : unsavedChanges || draft.changed
+      ? { title: 'Finish updating your event', description: 'Save the changed needs before asking people to review a new plan.', tab: 'needs' as const, action: 'Review project needs' }
+      : readiness.status === 'ready'
+        ? guestsAvailable
+          ? { title: 'Welcome your guests', description: 'Publish or update the visitor page, set how people join and manage registration. Your agreed work remains in the run sheet.', tab: 'guests' as const, action: 'Manage guest page' }
+          : { title: 'Bring the event together', description: 'Use the agreed run sheet to follow the times, report work and confirm equipment transfers.', tab: 'runbook' as const, action: 'Open run sheet' }
+        : project.proposal
+          ? { title: readiness.status === 'awaiting_approval' ? 'Collect each owner’s decision' : 'Review the current agreement', description: 'Check who can take part and whether the saved terms still match their offers.', tab: 'agreement' as const, action: 'Review contributions' }
+          : { title: 'Bring in the help you need', description: 'Invite contributors to offer their time, space or equipment, then find a complete plan.', tab: 'agreement' as const, action: 'Open contributions' };
   const share = async () => {
     if (!isPublicEntityKey(project.root.key) || project.state.status !== 'unique') { setShareMessage('Check the saved project before copying its invitation.'); return; }
     const link = projectInvitation(window.location.href, project.root.key);
@@ -79,13 +97,18 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
     {displayDraft && project.proposal && <p className="project-change-note">{unsavedChanges ? 'Save your edited needs before finding a new plan.' : 'These needs have changed. Find a new plan for everyone to review.'} <Link href={routeHref({ name: 'project', projectRoot, tab: 'agreement' })}>See the current plan and decisions</Link></p>}
     {shareMessage && <Notice role="status">{shareMessage}</Notice>}
     {guidance}
-    <nav className="project-tabs" aria-label="Project journey">{navigation.map(item => <a key={item.label} href={routeHref({ name: 'project', projectRoot, tab: item.tab })} aria-current={item.current ? 'page' : undefined}>{item.label}</a>)}</nav>
-    {planArea && ownsPublicProject && Organizer && <details className="pf-sheet pf-organizer-event"><summary>Event page and registration</summary><p className="pf-secondary">Publish the details guests need, manage registration and keep event details current when plans change.</p><Organizer project={project} onRefresh={refresh} /></details>}
+    {!showGuests && tab !== nextStep.tab && state && <section className="pf-sheet project-next"><div><h2>{nextStep.title}</h2><p>{nextStep.description}</p></div>{nextStep.tab === 'guests' ? <Button onClick={openGuests}>{nextStep.action}</Button> : <Link className="pf-button pf-button--primary" href={routeHref({ name: 'project', projectRoot, tab: nextStep.tab })}>{nextStep.action}</Link>}</section>}
+    <nav className="project-tabs" aria-label="Project journey">{navigation.map(item => <a key={item.label} href={routeHref({ name: 'project', projectRoot, tab: item.tab })} onClick={() => setGuestsOpen(false)} aria-current={item.current && !showGuests ? 'page' : undefined}>{item.label}</a>)}
+      {guestsAvailable && <button type="button" aria-expanded={showGuests} aria-controls={guestsId} onClick={openGuests}>Guests & registration</button>}
+    </nav>
+    {guestsAvailable && Organizer && <section id={guestsId} className="pf-stack pf-organizer-event" hidden={!showGuests}>{guestsVisited && <Organizer project={project} onRefresh={refresh} />}</section>}
+    <div className="pf-stack" hidden={showGuests}>
     {tab === 'needs' && <NeedsPanel key={`${projectRoot}:${editorScope}`} project={project} onRefresh={refresh} onDraftChange={() => setDraftRevision(value => value + 1)} />}
     {tab === 'plans' && <><div className="project-context-action"><p>Use the saved needs and available offers to find a plan everyone can take on.</p><Link href={routeHref({ name: 'project', projectRoot, tab: 'needs' })}>Edit project needs</Link></div><PlansPanel key={projectRoot} project={project} onRefresh={refresh} autoSolve={practice} /></>}
     {tab === 'history' && <HistoryPanel project={project} onRefresh={refresh} />}
     {tab === 'agreement' && <><OfferInbox project={project} onRefresh={refresh} />{Agreement ? <Agreement project={project} onRefresh={refresh} /> : project.proposal ? <ProjectPlan project={project} plan={project.proposal.payload.plan} title="The current plan" /> : <p>Find a complete plan before asking everyone to agree. <Link href={routeHref({ name: 'project', projectRoot, tab: 'plans' })}>Find a plan</Link></p>}</>}
-    {tab === 'runbook' && (Runbook ? <Runbook project={project} onRefresh={refresh} /> : <Notice>The run sheet controls are being connected. No task has been marked complete by opening this view.</Notice>)}
+    {tab === 'runbook' && (Runbook ? <Runbook project={project} onRefresh={refresh} /> : <section className="pf-sheet pf-stack"><h2>Run sheet</h2><p>Read the duties and equipment transfers in the complete agreement.</p><Link href={routeHref({ name: 'project', projectRoot, tab: 'agreement' })}>Open the complete agreement</Link></section>)}
+    </div>
     <Dialog open={sharingRecipe !== null} title="Share this project with contributors" closeLabel="Keep working locally" onClose={() => setSharingRecipe(null)} footer={<Button onClick={() => { if (sharingRecipe && onShareRecipe) { onShareRecipe(structuredClone(sharingRecipe)); setSharingRecipe(null); } }}>Review the public draft</Button>}>
       {sharingRecipe && <div className="pf-stack"><h3>{sharingRecipe.title}</h3><p>{sharingRecipe.outcome}</p><p>You will review a new public draft before publishing it. Only the project needs are copied. Local offers, decisions, and progress stay in this workspace.</p><p>{sharingRecipe.variants.length} date and place options will be copied with their dates and instructions.</p></div>}
     </Dialog>

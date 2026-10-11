@@ -9,23 +9,25 @@ import { attendanceStatus, deriveEventAvailability, type AttendanceStatus } from
 import { Button, EmptyState, ErrorState, Link, LoadingState, Notice, Select, StatusLabel, type Tone } from '../../ui';
 import { EventStatus } from '../events/EventSummary';
 import { useEventClock } from '../events/hooks';
-import { eventDate, eventError, shortAddress } from '../events/presentation';
+import { eventDate, eventError, shortAddress, eventPlace, eventFormatLabel, downloadEventCalendar } from '../events/presentation';
 import { AudienceChanges } from './AudienceChanges';
 import '../events/events.css';
 
 export interface MyEventsProps { repository: EventRepositoryContract | null; session: AppSession; storage?: StoragePort | null }
 const statusCopy: Record<AttendanceStatus, { label: string; tone: Tone }> = {
+  pending: { label: 'Awaiting organizer confirmation', tone: 'warning' }, waitlisted: { label: 'On the waiting list', tone: 'warning' }, full: { label: 'No place available', tone: 'neutral' }, invitation_required: { label: 'Invitation required', tone: 'warning' }, registration_closed: { label: 'Deadline passed', tone: 'neutral' },
   not_registered: { label: 'No current registration', tone: 'neutral' }, going: { label: 'Registered', tone: 'success' },
   withdrawn: { label: 'Withdrawn', tone: 'neutral' }, needs_review: { label: 'Review new version', tone: 'warning' },
   cancelled: { label: 'Event cancelled', tone: 'danger' }, ended: { label: 'Event ended', tone: 'neutral' },
   unverified: { label: 'Registration needs verification', tone: 'warning' },
 };
-export type MyEventFilter = 'all' | 'upcoming' | 'needs_review' | 'past';
+export type MyEventFilter = 'all' | 'upcoming' | 'needs_review' | 'pending' | 'past';
 export function myEventStatus(item: MyEvent, now: number): AttendanceStatus {
   return item.event ? attendanceStatus(item.attendance, item.event, now, item.registeredRelease) : 'unverified';
 }
 export function matchesMyEventFilter(status: AttendanceStatus, filter: MyEventFilter) {
   if (filter === 'all') return true;
+  if (filter === 'pending') return ['pending', 'waitlisted', 'full', 'invitation_required', 'registration_closed'].includes(status);
   if (filter === 'upcoming') return status === 'going';
   if (filter === 'needs_review') return status === 'needs_review' || status === 'unverified';
   return status === 'cancelled' || status === 'ended' || status === 'withdrawn';
@@ -60,11 +62,11 @@ export function MyEvents({ repository, session }: MyEventsProps) {
   const shown = rows.filter(row => matchesMyEventFilter(row.status, filter));
   return <section className="pf-events-page" aria-labelledby="my-events-title">
     <header className="pf-events-heading"><div><h1 id="my-events-title">My events</h1><p>Your registrations, the latest visitor details and changes to the events you chose.</p>
-      {account && <p>Reading public registrations for <span title={account}>{shortAddress(account)}</span>.</p>}</div><Link href={routeHref({ name: 'events' })}>Browse events</Link></header>
+      {account && <p>Registrations for <span title={account}>{shortAddress(account)}</span>.</p>}</div><Link href={routeHref({ name: 'events' })}>Browse events</Link></header>
     {!account ? <EmptyState title="Find your registrations" description="Sign in with the wallet you used to register. Your events are read from Arkiv, including when you return on another device."
       actions={<Link className="pf-button pf-button--primary" href={routeHref({ name: 'sign-in', returnTo: routePath({ name: 'my-events' }) })}>Sign in to view my events</Link>} /> : <>
-      <div className="pf-my-events-tools"><Select label="Show events" value={filter} onChange={event => setFilter(event.target.value as MyEventFilter)} options={[
-        { value: 'all', label: 'All registrations' }, { value: 'upcoming', label: 'Registered events' }, { value: 'needs_review', label: 'Needs attention' }, { value: 'past', label: 'Ended, cancelled or withdrawn' },
+      <div className="pf-my-events-tools pf-surface-light"><Select label="Show events" value={filter} onChange={event => setFilter(event.target.value as MyEventFilter)} options={[
+        { value: 'all', label: 'All registrations' }, { value: 'upcoming', label: 'Confirmed events' }, { value: 'pending', label: 'Requests and waiting list' }, { value: 'needs_review', label: 'Needs attention' }, { value: 'past', label: 'Ended, cancelled or withdrawn' },
       ]} /><Button variant="secondary" onClick={() => void refresh()} disabled={pending}>Refresh my events</Button></div>
       {pending && <LoadingState title="Reading your registrations" description="Checking your own public decisions and the current event versions." />}
       {error && <ErrorState title="Your registrations could not be refreshed" description={eventError(error)} />}
@@ -76,13 +78,19 @@ export function MyEvents({ repository, session }: MyEventsProps) {
       <div className="pf-my-events-list">{shown.map(({ item, status }) => {
         const terms = item.event?.release?.payload.terms ?? item.registeredRelease?.payload.terms;
         const availability = item.event && !unverified ? deriveEventAvailability(item.event, now) : 'unverified';
-        return <article key={item.projectRoot} className="pf-my-event">
+        return <article key={item.projectRoot} className="pf-my-event pf-surface-light">
           <div className="pf-my-event-heading"><div><h2>{terms?.title ?? 'Event details unavailable'}</h2>
-            {terms && <><p className="pf-event-meta">{eventDate(terms)} ({terms.timeZone})</p><p>{terms.venue}</p></>}</div>
+            {terms && <><p className="pf-event-meta">{eventDate(terms)} ({terms.timeZone})</p><p>{eventFormatLabel(terms)}: {eventPlace(terms)}</p></>}</div>
             <StatusLabel tone={statusCopy[status].tone}>{statusCopy[status].label}</StatusLabel></div>
           {status === 'going' && availability !== 'open' && <div className="pf-stack pf-stack--compact"><EventStatus status={availability} />
             {availability === 'paused' && <p>Your intention to attend is kept while the organizers update the preparations.</p>}</div>}
           {status === 'needs_review' && item.event?.release && <AudienceChanges previous={item.registeredRelease?.payload.terms ?? null} current={item.event.release.payload.terms} />}
+          {status === 'pending' && <p>Your request is saved. Your place needs the organizer’s confirmation.</p>}
+          {status === 'waitlisted' && <p>You chose the waiting list. The organizer can confirm a place when one becomes available.</p>}
+          {status === 'full' && <p>There is no confirmed place for this request. Open the event to check waiting list options.</p>}
+          {status === 'invitation_required' && <p>This wallet is no longer eligible under the current invitation list. Review the event details.</p>}
+          {status === 'registration_closed' && <p>The registration deadline has passed. Review the event to check your request.</p>}
+          {status === 'going' && terms && <Button variant="secondary" onClick={() => downloadEventCalendar(terms, item.projectRoot)}>Add to calendar</Button>}
           {status === 'cancelled' && <p>The organizer cancelled this event. Your original decision remains part of the public record.</p>}
           {status === 'ended' && <p>This event has ended. Your registration records an intention to attend, not proof of physical attendance.</p>}
           {status === 'withdrawn' && <p>You withdrew your registration. You can review the event and join again if registration is open.</p>}

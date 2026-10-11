@@ -8,7 +8,7 @@ import { createOperationIntent } from '../../../data/operations';
 import type { EventRepositoryContract, PublishEventCommand, ReplaceEventCommand } from '../../../data/events/types';
 import type { MutationResult, Result } from '../../../data/types';
 import { canonicalJson, hashCanonical } from '../../../domain/canonical';
-import { audienceChanges, audienceHash, EVENTS_PROTOCOL, validateEventPayload, validateEventRecord, validateEventReleaseBinding,
+import { audienceChanges, audienceHash, eventPublicationDeadlineGuard, EVENTS_PROTOCOL, validateEventPayload, validateEventRecord, validateEventReleaseBinding,
   type AudienceTerms, type EventAggregate, type EventRecord, type EventState } from '../../../domain/events';
 import { activeSource, deriveReadiness, sameActor, sameSource, validateCurrentEntity } from '../../../domain/readiness';
 import { TIRAMISU_CHAIN_ID, type AccountAddress, type PublicEntityKey, type SourcePlanRef } from '../../../domain/types';
@@ -16,6 +16,9 @@ import { TIRAMISU_CHAIN_ID, type AccountAddress, type PublicEntityKey, type Sour
 export interface PublishingFields {
   title: string; description: string; startsLocal: string; endsLocal: string; timeZone: string;
   venue: string; instructions: string; conditions: string; startOccurrence: TimeDisambiguation; endOccurrence: TimeDisambiguation;
+  format?: 'online' | 'in_person' | 'hybrid'; countryCode?: string; country?: string; city?: string;
+  onlineUrl?: string; onlineInstructions?: string; deadlineLocal?: string; deadlineOccurrence?: TimeDisambiguation;
+  capacityKind?: 'unlimited' | 'limited'; capacityLimit?: string; waitlist?: boolean; admission?: 'open' | 'invite_only'; invitedAccounts?: string;
 }
 export interface PublishingDraft {
   projectRoot: PublicEntityKey; organizer: AccountAddress; baselineReleaseKey: PublicEntityKey | null; fields: PublishingFields;
@@ -38,13 +41,14 @@ export function publishingDraftMemory(repository: EventRepositoryContract | null
   if (!memory) { memory = new Map(); draftMemories.set(repository, memory); }
   return memory;
 }
+export const structuredFieldDefaults = { format: 'in_person' as const, countryCode: '', country: '', city: '', onlineUrl: '', onlineInstructions: '', deadlineLocal: '', deadlineOccurrence: 'reject' as const, capacityKind: 'unlimited' as const, capacityLimit: '', waitlist: false, admission: 'open' as const, invitedAccounts: '' };
 const day = 86_400_000;
 const fail = (message: string): { ok: false; message: string } => ({ ok: false, message });
 
-export function emptyPublishingFields(): PublishingFields {
+export function emptyPublishingFields(structured = false): PublishingFields {
   let timeZone = 'UTC';
   try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* Explicit UTC fallback. */ }
-  return { title: '', description: '', startsLocal: '', endsLocal: '', timeZone, venue: '', instructions: '', conditions: '', startOccurrence: 'reject', endOccurrence: 'reject' };
+  return { title: '', description: '', startsLocal: '', endsLocal: '', timeZone, venue: '', instructions: '', conditions: '', startOccurrence: 'reject', endOccurrence: 'reject', ...(structured ? structuredFieldDefaults : {}) };
 }
 
 /** Keep even sub-second published instants when an untouched form is reopened. */
@@ -58,7 +62,8 @@ export function publishingFields(terms: AudienceTerms): PublishingFields {
   };
   return { title: terms.title, description: terms.description, startsLocal: local(terms.startsAt), endsLocal: local(terms.endsAt),
     timeZone: terms.timeZone, venue: terms.venue, instructions: terms.instructions, conditions: terms.conditions,
-    startOccurrence: occurrence(terms.startsAt), endOccurrence: occurrence(terms.endsAt) };
+    startOccurrence: occurrence(terms.startsAt), endOccurrence: occurrence(terms.endsAt),
+    ...(terms.termsVersion === 2 && terms.registration ? { ...structuredFieldDefaults, format: terms.format, countryCode: terms.location?.countryCode ?? '', country: terms.location?.country ?? '', city: terms.location?.city ?? '', onlineUrl: terms.online?.url ?? '', onlineInstructions: terms.online?.instructions ?? '', deadlineLocal: terms.registration.deadline === null ? '' : local(terms.registration.deadline), deadlineOccurrence: terms.registration.deadline === null ? 'reject' as const : occurrence(terms.registration.deadline), capacityKind: terms.registration.capacity.kind, capacityLimit: terms.registration.capacity.kind === 'limited' ? String(terms.registration.capacity.limit) : '', waitlist: terms.registration.waitlist, admission: terms.registration.admission, invitedAccounts: terms.registration.invitedAccounts.join('\n') } : {}) };
 }
 
 export function validPublishingDraft(value: unknown): value is PublishingDraft {
@@ -69,7 +74,15 @@ export function validPublishingDraft(value: unknown): value is PublishingDraft {
     || !draft.fields || typeof draft.fields !== 'object' || Array.isArray(draft.fields)) return false;
   const fields = draft.fields as Record<string, unknown>;
   const limits = { title: 200, description: 10000, startsLocal: 32, endsLocal: 32, timeZone: 100, venue: 1000, instructions: 10000, conditions: 10000 };
-  return Object.keys(fields).sort().join(',') === [...Object.keys(limits), 'startOccurrence', 'endOccurrence'].sort().join(',')
+  const extraLimits = { countryCode: 2, country: 100, city: 200, onlineUrl: 2000, onlineInstructions: 10000, deadlineLocal: 32, capacityLimit: 12, invitedAccounts: 24000 };
+  const allowed = [...Object.keys(limits), 'startOccurrence', 'endOccurrence', ...Object.keys(structuredFieldDefaults)];
+  return Object.keys(fields).every(key => allowed.includes(key))
+    && Object.entries(extraLimits).every(([key, max]) => fields[key] === undefined || typeof fields[key] === 'string' && fields[key].length <= max)
+    && (fields.format === undefined || ['online', 'in_person', 'hybrid'].includes(String(fields.format)))
+    && (fields.capacityKind === undefined || ['unlimited', 'limited'].includes(String(fields.capacityKind)))
+    && (fields.admission === undefined || ['open', 'invite_only'].includes(String(fields.admission)))
+    && (fields.waitlist === undefined || typeof fields.waitlist === 'boolean')
+    && (fields.deadlineOccurrence === undefined || ['reject', 'earlier', 'later'].includes(String(fields.deadlineOccurrence)))
     && Object.entries(limits).every(([key, max]) => typeof fields[key] === 'string' && fields[key].length <= max)
     && ['reject', 'earlier', 'later'].includes(String(fields.startOccurrence)) && ['reject', 'earlier', 'later'].includes(String(fields.endOccurrence));
 }
@@ -81,7 +94,7 @@ export function publishingDraftStore(storage: StoragePort | null, projectRoot: P
 
 export function termsFromFields(fields: PublishingFields): { ok: true; terms: AudienceTerms } | { ok: false; message: string } {
   if (!fields.title.trim()) return fail('Give the event a title visitors will recognize.');
-  if (!fields.venue.trim()) return fail('Add the public place or meeting point.');
+  if (fields.format !== 'online' && !fields.venue.trim()) return fail('Add the public place or meeting point.');
   const instant = (value: string, occurrence: TimeDisambiguation) => {
     const match = /^(.*T\d{2}:\d{2}:\d{2})\.(\d{1,3})$/.exec(value);
     const result = localDateTimeToUtc(match?.[1] ?? value, fields.timeZone, occurrence);
@@ -98,8 +111,34 @@ export function termsFromFields(fields: PublishingFields): { ok: true; terms: Au
   }
   if (!start.ok || !end.ok) return fail('Check the event dates.');
   if (end.utcMilliseconds <= start.utcMilliseconds) return fail('The event must end after it starts.');
-  return { ok: true, terms: { title: fields.title, description: fields.description, startsAt: start.utcMilliseconds, endsAt: end.utcMilliseconds,
-    timeZone: fields.timeZone, venue: fields.venue, instructions: fields.instructions, conditions: fields.conditions } };
+  const terms: AudienceTerms = { title: fields.title, description: fields.description, startsAt: start.utcMilliseconds, endsAt: end.utcMilliseconds,
+    timeZone: fields.timeZone, venue: fields.format === 'online' ? 'Online' : fields.venue, instructions: fields.instructions, conditions: fields.conditions };
+  if (fields.format) {
+    const physical = fields.format !== 'online', online = fields.format !== 'in_person';
+    if (physical && (!/^[A-Za-z]{2}$/.test(fields.countryCode ?? '') || !fields.country?.trim() || !fields.city?.trim())) return fail('Choose the country and add the city so visitors can find this event.');
+    if (online && !fields.onlineUrl?.trim() && !fields.onlineInstructions?.trim()) return fail('Add a public online link or explain how to join online.');
+    if (online && fields.onlineUrl?.trim()) {
+      try { const url = new URL(fields.onlineUrl.trim()); if (url.protocol !== 'https:' || url.username || url.password || [...url.searchParams.keys(), ...new URLSearchParams(url.hash.replace(/^#\??/, '')).keys()].some(key => /^(?:password|passwd|pwd|passcode|access_token|auth_token|token|secret)$/i.test(key))) return fail('Use a public HTTPS link without passwords or access tokens. Put safe joining steps in the instructions.'); }
+      catch { return fail('Enter a complete public online link, starting with https://.'); }
+    }
+    let deadline: number | null = null;
+    if (fields.deadlineLocal) {
+      const parsed = instant(fields.deadlineLocal, fields.deadlineOccurrence ?? 'reject');
+      if (!parsed.ok) return fail('Choose a valid registration deadline in the event time zone. If the clock repeats, choose the first or second occurrence.');
+      deadline = parsed.utcMilliseconds;
+      if (deadline > end.utcMilliseconds) return fail('Registration must close at or before the event ends.');
+    }
+    if (fields.capacityKind === 'limited' && (!/^[1-9][0-9]*$/.test(fields.capacityLimit ?? '') || !Number.isSafeInteger(Number(fields.capacityLimit)) || Number(fields.capacityLimit) > 512)) return fail('Enter a whole capacity between 1 and 512.');
+    const invited = (fields.invitedAccounts ?? '').split(/[\s,;]+/).filter(Boolean);
+    if (fields.admission === 'invite_only' && (!invited.length || invited.some(value => !isAccountAddress(value)))) return fail('Add the invited wallet addresses, one per line. Each must be a complete 0x address.');
+    const invitedAccounts = [...new Set(invited.map(value => value.toLowerCase()))] as AccountAddress[];
+    if (invitedAccounts.length > 512) return fail('Use at most 512 invited wallet addresses.');
+    Object.assign(terms, { termsVersion: 2, format: fields.format,
+      location: physical ? { countryCode: fields.countryCode!.toUpperCase(), country: fields.country!.trim(), city: fields.city!.trim(), venue: fields.venue } : null,
+      online: online ? { url: fields.onlineUrl?.trim() ?? '', instructions: fields.onlineInstructions ?? '' } : null,
+      registration: { deadline, capacity: fields.capacityKind === 'limited' ? { kind: 'limited', limit: Number(fields.capacityLimit) } : { kind: 'unlimited' }, waitlist: fields.capacityKind === 'limited' && Boolean(fields.waitlist), admission: fields.admission ?? 'open', invitedAccounts: fields.admission === 'invite_only' ? invitedAccounts : [] } });
+  }
+  return { ok: true, terms };
 }
 
 export function publishingLifetime(endsAt: number, now: number): number {
@@ -121,7 +160,10 @@ export function validPublishingCommand(value: unknown): value is PublishingComma
     operationId: operation.id, createdAt: operation.createdAt, projectRoot: command.projectRoot, predecessorReleaseKey: null,
     terms: command.terms, audienceHash: (() => { try { return audienceHash(command.terms as AudienceTerms); } catch { return ''; } })(), source }).valid;
   return operation.kind === 'replace_event' && !('terms' in command) && isPublicEntityKey(command.releaseKey) && isPublicEntityKey(command.audienceHash)
-    && ['open', 'closed', 'cancelled', 'ended'].includes(String(command.status));
+    && ['open', 'closed', 'cancelled', 'ended'].includes(String(command.status))
+    && (command.admissions === undefined || Array.isArray(command.admissions) && command.admissions.length <= 512
+      && command.admissions.every(item => item && typeof item === 'object' && Object.keys(item).sort().join(',') === 'attendanceKey,attendee,releaseKey' && isAccountAddress(item.attendee) && isPublicEntityKey(item.attendanceKey) && isPublicEntityKey(item.releaseKey))
+      && new Set(command.admissions.map(item => item.attendee.toLowerCase())).size === command.admissions.length);
 }
 
 /** A completed old request must never replace newer or half-edited visitor details. */
@@ -171,6 +213,22 @@ function readySource(event: EventAggregate, now: number): SourcePlanRef | null {
   return activeSource(project);
 }
 
+export interface PublishingPreparations {
+  title: string; placeReference: string; timeZone: string;
+  requirements: { id: string; title: string; start: number; end: number }[];
+}
+
+/** Show only the exact immutable plan selected by this review, never an edited recipe. */
+export function publishingPreparations(event: EventAggregate, selected: SourcePlanRef, now = Date.now()): PublishingPreparations | null {
+  const current = readySource(event, now), project = event.sourceProject, proposal = project?.proposal;
+  if (!current || !sameSource(current, selected) || !project || !proposal || project.root.key !== selected.projectRoot
+    || proposal.key !== selected.proposalKey || proposal.payload.projectRoot !== selected.projectRoot
+    || proposal.payload.proposalHash !== selected.proposalHash || proposal.payload.plan.projectRoot !== selected.projectRoot) return null;
+  const variant = proposal.payload.plan.variant;
+  return { title: variant.title, placeReference: variant.venueId, timeZone: variant.timeZone,
+    requirements: variant.requirements.map(item => ({ id: item.id, title: item.title, start: item.interval.start, end: item.interval.end })) };
+}
+
 export function preparePublishingReview(event: EventAggregate, session: AppSession, kind: PublishingKind, draft: PublishingDraft | null, now = Date.now()): PreparedReview {
   const access = organizerAccess(event, session, now) ?? currentEnvelope(event, kind === 'publish');
   if (access) return fail(access);
@@ -186,10 +244,16 @@ export function preparePublishingReview(event: EventAggregate, session: AppSessi
     if (draft.baselineReleaseKey !== (event.release?.key ?? null)) return fail('The published event changed after this draft was started. Compare your draft with the latest version before publishing.');
     const parsed = termsFromFields(draft.fields); if (!parsed.ok) return parsed;
     terms = parsed.terms;
+    if (terms.registration?.capacity.kind === 'limited' && terms.registration.capacity.limit < (current?.payload.admissions?.length ?? 0)) return fail('Release reserved places before reducing capacity below the current reservations. Your event draft is kept.');
     changed = event.release ? audienceChanges(event.release.payload.terms, terms) : [];
     if (event.release && changed.length === 0) return fail('The visitor details have not changed. Use the agreed plan action to restore or reopen registration without asking visitors to confirm again.');
   }
   if (!terms) return fail('The current visitor details could not be read. Refresh before continuing.');
+  if (kind === 'publish') {
+    const guard = eventPublicationDeadlineGuard(event, terms, now);
+    if (guard === 'reopen_required') return fail('Existing attendees need to accept these changes. Choose a later registration deadline, up to the event end, before publishing changed terms.');
+    if (guard === 'unverified') return fail('Refresh the complete registration list before changing details after the deadline, or choose a future registration deadline so earlier visitors can confirm again.');
+  }
   if ((kind === 'publish' || kind === 'repair') && terms.endsAt <= Math.max(now, event.snapshot.blockTimestamp)) return fail('The event has already ended. Choose a future end time to publish visitor details.');
   if (kind === 'end' && event.snapshot.blockTimestamp < terms.endsAt) return fail('The scheduled end has not arrived yet. You can close registration or cancel the event now.');
   if (kind === 'close' && current?.payload.status === 'closed') return fail('Registration is already closed.');
@@ -230,6 +294,10 @@ export function validatePublishingReview(review: PublishingReview, event: EventA
   } else if (!state || !sameSource(state.source, command.source)) return 'The published source changed. Review the current event before changing its status.';
   const terms = 'terms' in command ? command.terms : event.release?.payload.terms;
   if (!terms || canonicalJson(terms) !== canonicalJson(review.terms)) return 'The visitor details no longer match this review.';
+  if ('terms' in command) {
+    const guard = eventPublicationDeadlineGuard(event, terms, now);
+    if (guard !== 'ready') return guard === 'reopen_required' ? 'Existing attendees need to accept these changes. Choose a later registration deadline, up to the event end, before publishing changed terms.' : 'The complete registration list could not be verified. Refresh it or choose a future registration deadline before publishing these changes.';
+  }
   if (!('terms' in command) && (!event.release || command.releaseKey !== event.release.key || command.audienceHash !== event.release.payload.audienceHash))
     return 'The public event version changed. Review the current details before continuing.';
   if (opening && terms.endsAt <= Math.max(now, event.snapshot.blockTimestamp)) return 'The event has already ended. No new registration can open.';

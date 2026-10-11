@@ -2,7 +2,7 @@ import type { AppRuntime } from '../../app/context';
 import type { AppSession } from '../../app/session';
 import type { StorageIssue } from '../../app/storage';
 import { createProjectDrafts, draftScope, makeDraft, type SavedProjectDraft } from './drafts';
-import { validateEditorDraft } from './editor';
+import { validateEditorDraft } from './editor/model';
 
 type DraftSession = Pick<AppSession, 'mode' | 'actor' | 'activeDraftId'>;
 type ProjectDraftStore = ReturnType<typeof createProjectDrafts>;
@@ -133,7 +133,7 @@ export function openNewProjectDraft(runtime: AppRuntime, session: DraftSession =
 }
 
 /** Save only in the live account's scope. Public authority is never stored here. */
-export function saveNewProjectDraft(runtime: AppRuntime, draft: SavedProjectDraft): NewProjectDraftState['status'] {
+export function saveNewProjectDraft(runtime: AppRuntime, draft: SavedProjectDraft, expected?: SavedProjectDraft): NewProjectDraftState['status'] {
   const session = runtime.session.getSnapshot();
   if (draft.scope !== draftScope(session.mode, session.actor)) throw new TypeError('Reconnect the account that owns this draft before editing it.');
   const handles = handleStore(runtime), remembered = handles.get();
@@ -141,12 +141,29 @@ export function saveNewProjectDraft(runtime: AppRuntime, draft: SavedProjectDraf
   const handle = handles.save({ id: draft.id, scope: draft.scope,
     originScope });
   const destination = createProjectDrafts(runtime, draft.scope);
-  const saved = originScope && !handle.persisted ? destination.retainInMemory(draft, handle.issue) : destination.upsert(draft);
+  const saved = originScope && !handle.persisted ? destination.retainInMemory(draft, handle.issue) : destination.upsert(draft, expected);
   if (originScope && handle.persisted && saved.persisted) {
     const removed = createProjectDrafts(runtime, originScope).remove(draft.id);
     if (removed.persisted) handles.save({ id: draft.id, scope: draft.scope, originScope: null });
   }
   return { persisted: saved.persisted && handle.persisted, issue: saved.issue ?? handle.issue };
+}
+
+/** Deletes browser draft text only; no repository or published entity is mutated. */
+export function deleteProjectDraft(runtime: AppRuntime, draft: SavedProjectDraft) {
+  const session = runtime.session.getSnapshot();
+  if (draft.scope !== draftScope(session.mode, session.actor)) throw new TypeError('Reconnect the account that owns this draft before deleting it.');
+  const visitorStore = draft.scope.startsWith('public:0x') ? createProjectDrafts(runtime, 'public:visitor') : null;
+  const hasVisitorBackup = Boolean(visitorStore?.hasStored(draft.id) || visitorStore?.get(draft.id));
+  const result = createProjectDrafts(runtime, draft.scope).deleteDraft(draft);
+  if (!result.persisted) return result;
+  const remembered = handleStore(runtime).get();
+  if (hasVisitorBackup || remembered?.id === draft.id && remembered.originScope) {
+    const cleanup = (visitorStore ?? createProjectDrafts(runtime, remembered!.originScope!)).remove(draft.id);
+    if (!cleanup.persisted) return { ...cleanup, deleted: true };
+  }
+  if (session.activeDraftId === draft.id) runtime.session.selectDraft(null);
+  return result;
 }
 
 /** Explicitly start another draft; the previous account's draft remains intact. */

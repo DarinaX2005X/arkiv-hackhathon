@@ -1,7 +1,7 @@
 import type { AppRuntime } from './context';
 import type { ProjectRecipe } from '../domain/types';
 import { createProjectDrafts, draftScope, makeDraft, type SavedProjectDraft } from '../features/projects/drafts';
-import { recipeToEditorDraft } from '../features/projects/editor';
+import { recipeToEditorDraft } from '../features/projects/editor/model';
 
 /** A public draft copies only editable recipe fields; publication still requires review and a wallet. */
 export function copyRecipeToPublicDraft(runtime: AppRuntime, source: ProjectRecipe | SavedProjectDraft) {

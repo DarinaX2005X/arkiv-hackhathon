@@ -1,0 +1,112 @@
+/* Stable material aliases. Contexts below always reset the complete palette.
+   A custom light panel must opt into .pf-surface-light or data-surface="light".
+   --surface-work is always opaque ivory; --surface-control follows the context. */
+:root {
+  --canvas: #0d2d26;
+  --surface-dark: #0d2d26;
+  --surface-dark-raised: #173c31;
+  --surface-dark-light: #244c3d;
+  --surface-work: #fcfdf9;
+  --text-on-dark: #f7faf3;
+  --text-on-dark-secondary: #c3d3c8;
+  --action-on-dark: #d8edb7;
+  --on-action-on-dark: #183b2b;
+  --text-on-light: #172b23;
+  --text-on-light-secondary: #53675c;
+  --action-on-light: #1d5a43;
+  --on-action-on-light: #ffffff;
+  --surface-strong: var(--surface-dark);
+  --on-strong: var(--text-on-dark);
+  --on-strong-secondary: var(--text-on-dark-secondary);
+  --danger-action: #a33831;
+  --on-danger-action: #ffffff;
+}
+
+:root,
+.pf-surface-dark,
+[data-surface='dark'],
+.pf-action-surface {
+  color-scheme: dark;
+  --text-primary: var(--text-on-dark);
+  --text-secondary: var(--text-on-dark-secondary);
+  --brand-ink: var(--text-on-dark);
+  --surface-soft: #173c31;
+  --surface-inset: #11332a;
+  --surface-hover: #285342;
+  --surface-control: #173c31;
+  --surface-raised: #244c3d;
+  --border-control: #91ad9c;
+  --border-quiet: #3e6253;
+  --edge-light: #527361;
+  --action: var(--action-on-dark);
+  --action-hover: #e7f6d0;
+  --on-action: var(--on-action-on-dark);
+  --selected-surface: #315a43;
+  --selected-text: #f7faf3;
+  --success-text: #d8edb7;
+  --success-surface: #244c3d;
+  --warning-text: #ffe1a3;
+  --warning-surface: #493d23;
+  --danger-text: #ffc0b4;
+  --danger-surface: #512e2a;
+  --focus: #e7f6d0;
+  --shadow-inset: inset 0 1px 2px rgb(0 15 10 / 12%);
+  color: var(--text-primary);
+}
+
+.pf-surface-light,
+[data-surface='light'],
+:where(.pf-sheet:not(.pf-sheet--quiet)),
+:where(.pf-dialog),
+:where(.pf-menu),
+:where(.pf-account-menu-panel),
+/* The independently built reader shares materials, without a public entry link. */
+:where(.pf-desk-open:not(.pf-desk-open--compact)),
+:where(.pf-desk-open--compact[open]),
+:where(.guided-practice) {
+  color-scheme: light;
+  --text-primary: var(--text-on-light);
+  --text-secondary: var(--text-on-light-secondary);
+  --brand-ink: #183b2b;
+  --surface-soft: #eff4eb;
+  --surface-inset: #e6eee2;
+  --surface-hover: #e0eadb;
+  --surface-control: #ffffff;
+  --surface-raised: #ffffff;
+  --border-control: #788e7e;
+  --border-quiet: #cfdacc;
+  --edge-light: #ffffff;
+  --action: var(--action-on-light);
+  --action-hover: #124731;
+  --on-action: var(--on-action-on-light);
+  --selected-surface: #deecd4;
+  --selected-text: #214a37;
+  --success-text: #245c46;
+  --success-surface: #e1ecdf;
+  --warning-text: #705000;
+  --warning-surface: #fff0bc;
+  --danger-text: #a33831;
+  --danger-surface: #fbe5df;
+  --focus: #1d5a43;
+  --shadow-inset: inset 0 1px 2px rgb(8 27 20 / 5%);
+  color: var(--text-primary);
+}
+
+.pf-surface-light, [data-surface='light'] { background: var(--surface-work); }
+.pf-surface-dark, [data-surface='dark'] { background: var(--surface-dark); }
+.pf-sheet.pf-surface-dark, .pf-sheet[data-surface='dark'] { background: var(--surface-dark); }
+
+@media print {
+  :root, .pf-surface-dark, [data-surface='dark'], .pf-action-surface {
+    color-scheme: light;
+    --text-primary: #172b23;
+    --text-secondary: #53675c;
+    --brand-ink: #183b2b;
+    --surface-soft: #eff4eb;
+    --surface-inset: #e6eee2;
+    --action: #1d5a43;
+    --on-action: #ffffff;
+    color: var(--text-primary);
+    background: #ffffff;
+  }
+}

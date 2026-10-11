@@ -19,7 +19,7 @@ import type { RawEntity } from '../__tests__/arkiv-fixture';
 
 import { stringToHex } from 'viem';
 import { createEventRepository } from './repository';
-import type { EventPayload, EventRecord, EventRelease, EventState, AttendanceState, AudienceTerms } from '../../domain/events';
+import type { EventAdmission, EventPayload, EventRecord, EventRelease, EventState, AttendanceState, AudienceTerms } from '../../domain/events';
 import { audienceHash, attendanceStatus, eventAvailability } from '../../domain/events';
 import { unwrap } from '../arkiv/errors';
 
@@ -169,6 +169,197 @@ function attendanceCommand(f: ReturnType<typeof harness>, release: EventRecord<E
   return f.command('replace_attendance', { projectRoot: KEYS.project, releaseKey: release.key,
     audienceHash: release.payload.audienceHash, decision, expectedHeads, lifetimeSeconds: LIFETIME }, id, STRANGER);
 }
+
+function structuredTerms(changes: Partial<AudienceTerms> = {}): AudienceTerms {
+  return { ...terms, termsVersion: 2, format: 'in_person', location: { countryCode: 'GB', country: 'United Kingdom', city: 'Oxford', venue: terms.venue },
+    online: null, registration: { deadline: NOW + 60_000, capacity: { kind: 'limited', limit: 1 }, waitlist: true, admission: 'open', invitedAccounts: [] }, ...changes };
+}
+async function publishStructured(f: ReturnType<typeof harness>, next = structuredTerms()) {
+  const mutation = unwrap(await f.repository.publishEvent(f.command('publish_event', {
+    projectRoot: KEYS.project, terms: next, source: f.source, expectedHeads: [], lifetimeSeconds: LIFETIME,
+  }, 'structured-publish')));
+  if (mutation.value.state.status !== 'unique' || !mutation.value.release) throw new Error('fixture');
+  return { event: mutation.value, state: mutation.value.state.entity, release: mutation.value.release };
+}
+function admissionCommand(f: ReturnType<typeof harness>, state: EventRecord<EventState>, admissions: EventAdmission[], id: string) {
+  return f.command('replace_event', { projectRoot: KEYS.project, releaseKey: state.payload.releaseKey, audienceHash: state.payload.audienceHash,
+    source: state.payload.source, status: state.payload.status, expectedHeads: [state.key], lifetimeSeconds: LIFETIME, admissions }, id, COORDINATOR);
+}
+const admissionFor = (record: EventRecord<AttendanceState>): EventAdmission => ({ attendee: record.payload.attendee, attendanceKey: record.key, releaseKey: record.payload.releaseKey });
+
+describe('native structured-event admissions', () => {
+  it('guards closed-deadline material edits for unlimited attendees before writing and allows deliberate reopening', async () => {
+    const f = harness(); const next = structuredTerms(); next.registration = { ...next.registration!, capacity: { kind: 'unlimited' }, waitlist: false, deadline: NOW + 10_000 };
+    const { state, release } = await publishStructured(f, next); f.control.account = STRANGER;
+    unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release)));
+    while (f.rpc.timestamp < NOW + 10_000) { f.nextBlock(); f.saveSnapshot(); }
+    f.control.account = COORDINATOR; const sends = f.control.sends;
+    const changed = { ...next, description: 'New instructions that need fresh consent' };
+    const blocked = await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project, terms: changed, source: f.source,
+      expectedHeads: [state.key], lifetimeSeconds: LIFETIME }, 'closed-deadline-edit'));
+    expect(blocked.ok).toBe(false); expect(!blocked.ok && blocked.error.diagnostic).toContain('later registration deadline');
+    expect(f.control.sends).toBe(sends);
+    changed.registration = { ...changed.registration!, deadline: next.endsAt };
+    const reopened = unwrap(await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project, terms: changed, source: f.source,
+      expectedHeads: [state.key], lifetimeSeconds: LIFETIME }, 'explicit-reopening'))).value;
+    expect(reopened.release!.payload.terms.registration!.deadline).toBe(next.endsAt);
+    expect(reopened.release!.payload.reconfirmationAccounts).toEqual([]);
+  });
+
+  it('derives immutable deadline-reconfirmation wallets only from the exact owner-held predecessor roster', async () => {
+    const f = harness(); const next = structuredTerms(); next.registration!.deadline = NOW + 10_000;
+    const result = unwrap(await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project, terms: next, source: f.source,
+      expectedHeads: [], lifetimeSeconds: LIFETIME, reconfirmationAccounts: [STRANGER] }, 'cannot-forge-carryover'))).value;
+    expect(result.release!.payload.reconfirmationAccounts).toEqual([]);
+    if (result.state.status !== 'unique') throw new Error('fixture');
+    f.control.account = STRANGER;
+    const first = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, result.release!))).value;
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, result.state.entity, [admissionFor(first)], 'admit'))).value;
+    while (f.rpc.timestamp < NOW + 10_000) { f.nextBlock(); f.saveSnapshot(); }
+    const changed = unwrap(await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project,
+      terms: { ...next, description: 'Changed venue instructions' }, source: f.source, expectedHeads: [admitted.key], lifetimeSeconds: LIFETIME }, 'changed-after-deadline'))).value;
+    expect(changed.release!.payload.reconfirmationAccounts).toEqual([STRANGER]);
+    f.control.account = STRANGER;
+    const current = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, changed.release!, [first.key as PublicEntityKey], 'going', 'late-reconfirmation'))).value;
+    let event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: current }, event, f.rpc.timestamp)).toBe('pending');
+    f.control.account = COORDINATOR;
+    if (changed.state.status !== 'unique') throw new Error('fixture');
+    unwrap(await f.repository.replaceEvent(admissionCommand(f, changed.state.entity, [admissionFor(current)], 'confirm-changed-release')));
+    event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: current }, event, f.rpc.timestamp)).toBe('going');
+  });
+  it('supports withdrawal then rejoining before the owner releases the old reservation', async () => {
+    const f = harness(); const { state, release } = await publishStructured(f); f.control.account = STRANGER;
+    const first = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(first)], 'admit'))).value;
+    f.control.account = STRANGER;
+    const withdrawal = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release, [first.key as PublicEntityKey], 'withdrawn', 'withdraw'))).value;
+    const rejoined = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release, [withdrawal.key as PublicEntityKey], 'going', 'rejoin'))).value;
+    let event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(event.roster?.diagnostics).toEqual([]);
+    expect(attendanceStatus({ status: 'unique', entity: rejoined }, event, f.rpc.timestamp)).toBe('pending');
+    expect(event.state.status === 'unique' && event.state.entity.payload.admissions).toEqual([admissionFor(first)]);
+    f.control.account = COORDINATOR;
+    unwrap(await f.repository.replaceEvent(admissionCommand(f, admitted, [admissionFor(rejoined)], 'confirm-rejoin')));
+    event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: rejoined }, event, f.rpc.timestamp)).toBe('going');
+  });
+  it('records a request first, grants a place only with an explicit owner transition, and rejects duplicate going', async () => {
+    const f = harness(); const { state, release } = await publishStructured(f); f.control.account = STRANGER;
+    const request = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release)));
+    let event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: request.value }, event, f.rpc.timestamp)).toBe('pending');
+    const sends = f.control.sends;
+    const duplicate = await f.repository.replaceAttendance(attendanceCommand(f, release, [request.value.key as PublicEntityKey], 'going', 'repeat-going'));
+    expect(duplicate.ok).toBe(false); expect(f.control.sends).toBe(sends);
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(request.value)], 'admit')));
+    expect(admitted.value.payload.admissions).toEqual([admissionFor(request.value)]);
+    event = unwrap(await createEventRepository({ request: f.read, now: () => f.rpc.timestamp }).loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: request.value }, event, f.rpc.timestamp)).toBe('going');
+  });
+
+  it('requires explicit waiting-list consent and never promotes when another attendee withdraws', async () => {
+    const f = harness(); const { state, release } = await publishStructured(f); f.control.account = STRANGER;
+    const first = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(first)], 'admit'))).value;
+    f.control.account = PUBLISHER;
+    const fields = { projectRoot: KEYS.project, releaseKey: release.key, audienceHash: release.payload.audienceHash, decision: 'going' as const,
+      expectedHeads: [] as PublicEntityKey[], lifetimeSeconds: LIFETIME };
+    const refused = await f.repository.replaceAttendance(f.command('replace_attendance', fields, 'not-waiting', PUBLISHER));
+    expect(refused.ok).toBe(false);
+    const waiting = unwrap(await f.repository.replaceAttendance(f.command('replace_attendance', { ...fields, joinWaitlist: true }, 'waiting', PUBLISHER))).value;
+    let event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: waiting }, event, f.rpc.timestamp)).toBe('waitlisted');
+    f.control.account = STRANGER;
+    const withdrawal = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release, [first.key as PublicEntityKey], 'withdrawn', 'withdraw'))).value;
+    event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: withdrawal }, event, f.rpc.timestamp)).toBe('withdrawn');
+    expect(attendanceStatus({ status: 'unique', entity: waiting }, event, f.rpc.timestamp)).toBe('waitlisted');
+    f.control.account = COORDINATOR;
+    // One deliberate owner batch may release the old reservation and promote a verified waiter.
+    unwrap(await f.repository.replaceEvent(admissionCommand(f, admitted, [admissionFor(waiting)], 'release-and-promote')));
+    event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: waiting }, event, f.rpc.timestamp)).toBe('going');
+  });
+
+  it('rejects a request mined at or after the deadline despite an earlier signed payload time', async () => {
+    const f = harness(); const next = structuredTerms(); next.registration!.deadline = NOW + 5_000;
+    const { state, release } = await publishStructured(f, next); f.control.account = STRANGER;
+    const request = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    expect(request.payload.createdAt).toBe(NOW); expect(f.rpc.timestamp).toBe(NOW + 6_000);
+    const event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: request }, event, f.rpc.timestamp)).toBe('registration_closed');
+    f.control.account = COORDINATOR; const sends = f.control.sends;
+    const result = await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(request)], 'late-admit'));
+    expect(result.ok).toBe(false); expect(f.control.sends).toBe(sends);
+  });
+
+  it('enforces public invitation eligibility before signing and requires owner admission for invited unlimited requests', async () => {
+    const f = harness(); const next = structuredTerms(); next.registration = { ...next.registration!, capacity: { kind: 'unlimited' },
+      waitlist: false, admission: 'invite_only', invitedAccounts: [STRANGER] };
+    const { state, release } = await publishStructured(f, next); f.control.account = PUBLISHER;
+    const fields = { projectRoot: KEYS.project, releaseKey: release.key, audienceHash: release.payload.audienceHash, decision: 'going' as const,
+      expectedHeads: [], lifetimeSeconds: LIFETIME };
+    const denied = await f.repository.replaceAttendance(f.command('replace_attendance', fields, 'uninvited', PUBLISHER));
+    expect(denied.ok).toBe(false); expect(f.control.sends).toBe(2);
+    f.control.account = STRANGER;
+    const request = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    let event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: request }, event, f.rpc.timestamp)).toBe('pending');
+    f.control.account = COORDINATOR; unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(request)], 'invite-admit')));
+    event = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: request }, event, f.rpc.timestamp)).toBe('going');
+  });
+
+  it('lets the owner release a missing reservation without any source or roster query, but cannot add one', async () => {
+    const f = harness(); const { state, release } = await publishStructured(f); f.control.account = STRANGER;
+    const request = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(request)], 'admit'))).value;
+    f.rpc.remove(request.key as PublicEntityKey); f.rpc.remove(KEYS.book); f.saveSnapshot();
+    const broken = unwrap(await f.repository.loadEvent(KEYS.project)); expect(eventAvailability(broken, f.rpc.timestamp)).toBe('unverified');
+    const released = unwrap(await f.repository.replaceEvent(admissionCommand(f, admitted, [], 'release-missing'))).value;
+    expect(released.payload.admissions).toEqual([]);
+    const sends = f.control.sends;
+    const result = await f.repository.replaceEvent(admissionCommand(f, released, [admissionFor(request)], 'cannot-readmit'));
+    expect(result.ok).toBe(false); expect(f.control.sends).toBe(sends);
+  });
+
+  it('rejects lower capacity before any publication write and carries reserved places across a material release', async () => {
+    const f = harness(); const next = structuredTerms(); next.registration!.capacity = { kind: 'limited', limit: 2 };
+    const { state, release } = await publishStructured(f, next); f.control.account = STRANGER;
+    const first = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, release))).value;
+    f.control.account = PUBLISHER;
+    const second = unwrap(await f.repository.replaceAttendance(f.command('replace_attendance', {
+      projectRoot: KEYS.project, releaseKey: release.key, audienceHash: release.payload.audienceHash, decision: 'going' as const,
+      expectedHeads: [], lifetimeSeconds: LIFETIME }, 'second-request', PUBLISHER))).value;
+    f.control.account = COORDINATOR;
+    const admitted = unwrap(await f.repository.replaceEvent(admissionCommand(f, state, [admissionFor(first), admissionFor(second)], 'admit-both'))).value;
+    const reduced = structuredTerms(); const sends = f.control.sends;
+    const bad = await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project, terms: reduced, source: f.source,
+      expectedHeads: [admitted.key], lifetimeSeconds: LIFETIME }, 'invalid-cap-reduction'));
+    expect(bad.ok).toBe(false); expect(f.control.sends).toBe(sends);
+    const freed = unwrap(await f.repository.replaceEvent(admissionCommand(f, admitted, [admissionFor(first)], 'release-one'))).value;
+    const changed = unwrap(await f.repository.publishEvent(f.command('publish_event', { projectRoot: KEYS.project, terms: reduced, source: f.source,
+      expectedHeads: [freed.key], lifetimeSeconds: LIFETIME }, 'valid-cap-reduction'))).value;
+    expect(changed.state.status === 'unique' && changed.state.entity.payload.admissions).toEqual([admissionFor(first)]);
+    expect(attendanceStatus({ status: 'unique', entity: first }, changed, f.rpc.timestamp, release)).toBe('needs_review');
+    f.control.account = STRANGER;
+    const reconfirmed = unwrap(await f.repository.replaceAttendance(attendanceCommand(f, changed.release!, [first.key as PublicEntityKey], 'going', 'review-new-terms'))).value;
+    const pending = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: reconfirmed }, pending, f.rpc.timestamp)).toBe('pending');
+    f.control.account = COORDINATOR;
+    if (changed.state.status !== 'unique') throw new Error('fixture');
+    unwrap(await f.repository.replaceEvent(admissionCommand(f, changed.state.entity, [admissionFor(reconfirmed)], 'confirm-current-release')));
+    const final = unwrap(await f.repository.loadEvent(KEYS.project));
+    expect(attendanceStatus({ status: 'unique', entity: reconfirmed }, final, f.rpc.timestamp)).toBe('going');
+  });
+});
 
 describe('event publication and registration through the frozen native journal', () => {
   it('publishes independently readable immutable terms and an authored current state without changing the core source', async () => {

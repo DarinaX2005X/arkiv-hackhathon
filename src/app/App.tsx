@@ -1,15 +1,16 @@
-import { useEffect, type ComponentType, type ReactNode } from 'react';
+import { Component, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { AppProvider, useApp, useAppSession, type AppRuntime } from './context';
 import { parseRoute, routeHref, type Route } from './routes';
-import { BrandMark, Button, EmptyState, Notice } from '../ui';
+import { BrandMark, Button, EmptyState, ErrorState, LoadingState, Notice } from '../ui';
 import { workDestination } from '../features/account/account';
 
 export interface RouteViewProps { route: Route }
 export type RouteRegistry = Partial<Record<Route['name'], ComponentType<RouteViewProps>>>;
 
 const navigation = [
+  { name: 'events', label: 'events' }, { name: 'my-events', label: 'myEvents' },
   { name: 'workspace', label: 'projects' }, { name: 'contributions', label: 'contributions' },
-  { name: 'requests', label: 'requests' }, { name: 'events', label: 'events' }, { name: 'my-events', label: 'myEvents' }, { name: 'help', label: 'help' },
+  { name: 'requests', label: 'requests' }, { name: 'help', label: 'help' },
 ] as const;
 
 /** Native hash navigation remains usable on static hosts. It never owns the app runtime. */
@@ -33,9 +34,8 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
   const state = useAppSession();
   const t = copy.text.bind(copy, 'shell');
   const route = parseRoute(state.destination);
-  const visibleNavigation = route.name === 'home' ? navigation.filter(item => ['events', 'workspace', 'help'].includes(item.name))
-    : ['events', 'event', 'my-events'].includes(route.name) ? navigation.filter(item => ['events', 'my-events', 'help'].includes(item.name))
-      : navigation.filter(item => item.name !== 'my-events');
+  const visibleNavigation = route.name === 'home'
+    ? navigation.filter(item => ['events', 'workspace', 'help'].includes(item.name)) : navigation;
   const needsRecovery = state.storageIssue !== null && ['invalid_json', 'unsupported_version', 'invalid_payload', 'too_large', 'recovery_required'].includes(state.storageIssue.code);
   const exportRecovery = () => {
     const original = session.exportRecovery();
@@ -48,17 +48,14 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
   };
   return <>
     <a className="pf-skip" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>{t('skip')}</a>
-    <header className="pf-app-header">
+    <header className={`pf-app-header${route.name === 'home' ? ' pf-app-header--public' : ''}`}>
       <a className="pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><span className="pf-wordmark">{t('brand')}</span></a>
       <nav aria-label={t('navigation')} className="pf-app-navigation">
-        {visibleNavigation.map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') || (route.name === 'event' && item.name === 'events') ? 'page' : undefined}>{t(item.label)}</a>)}
+        {visibleNavigation.map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (['project', 'new-project'].includes(route.name) && item.name === 'workspace') || (route.name === 'event' && item.name === 'events') ? 'page' : undefined}>{t(item.label)}</a>)}
       </nav>
       {account}
     </header>
-    {controls ?? (route.name !== 'home' && <div className="pf-mode-line" role="status">
-      <span>{state.mode === 'local' ? 'Saved on this device' : state.actor ? 'Shared project. Wallet connected.' : 'Browsing shared projects. Read-only until you connect a wallet.'}</span>
-      {state.mode === 'local' ? <span className="pf-secondary">No account needed</span> : !state.actor && <span className="pf-secondary">Connect a wallet when you are ready to publish or contribute</span>}
-    </div>)}
+    {controls}
     <main className={`pf-page pf-app-main${route.name === 'home' ? ' pf-app-main--home' : ''}`} id="main-content" tabIndex={-1}>
       {state.storageIssue && <Notice tone="warning" title={t(needsRecovery ? 'recoveryTitle' : 'storageTitle')}>
         <p>{t(needsRecovery ? 'recoveryBody' : 'storageBody')}</p>
@@ -75,7 +72,7 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
       </div>
       <div className="pf-footer-links" aria-label="Footer navigation">
         <div className="pf-footer-group"><strong>Take part</strong><a href={routeHref({ name: 'events' })}>Browse events</a><a href={routeHref({ name: 'my-events' })}>My events</a><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a></div>
-        <div className="pf-footer-group"><strong>Learn</strong><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>How public projects work</a><a href={routeHref({ name: 'help', topic: 'agreement', returnTo: state.destination })}>Agreements and ownership</a><a href="./desk.html">Open contributor view</a></div>
+        <div className="pf-footer-group"><strong>Learn</strong><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>Public records and your data</a><a href={routeHref({ name: 'help', topic: 'agreement', returnTo: state.destination })}>Agreements and ownership</a><a href={routeHref({ name: 'help', returnTo: state.destination })}>Help with Partfolk</a></div>
       </div>
       <div className="pf-footer-meta"><span>Drafts stay in this browser. Published project details and decisions are public.</span></div>
     </footer>
@@ -99,11 +96,26 @@ function FoundationView({ route }: RouteViewProps) {
   return <section className="pf-sheet"><h1>{t(keys[0])}</h1><EmptyState title={t(keys[0])}>{t(keys[1])}</EmptyState></section>;
 }
 
+/** A failed screen download leaves shell navigation and saved runtime state available. */
+export class ViewLoadBoundary extends Component<{ destination: string; failureTitle?: string; children: ReactNode }, { failed: boolean; destination: string }> {
+  state = { failed: false, destination: this.props.destination };
+  static getDerivedStateFromError() { return { failed: true }; }
+  static getDerivedStateFromProps(props: { destination: string }, state: { destination: string }) {
+    return props.destination === state.destination ? null : { failed: false, destination: props.destination };
+  }
+  render() {
+    return this.state.failed ? <ErrorState title={this.props.failureTitle ?? 'This page could not be opened'} description="Reload the page to try again. Work already saved on this device will be kept."
+      actions={<Button onClick={() => window.location.reload()}>Reload page</Button>} /> : this.props.children;
+  }
+}
+
 function RoutedApp({ routes, controls, account, guide }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
   const state = useAppSession();
   const route = parseRoute(state.destination);
   const View = routes[route.name] ?? FoundationView;
-  return <><HashNavigation /><AppShell controls={controls} account={account} guide={guide}><View route={route} /></AppShell></>;
+  return <><HashNavigation /><AppShell controls={controls} account={account} guide={guide}>
+    <ViewLoadBoundary destination={state.destination}><Suspense fallback={<LoadingState title="Opening this page" />}><View route={route} /></Suspense></ViewLoadBoundary>
+  </AppShell></>;
 }
 /** MAIN composes the feature registry; Desk may use only AppProvider/AppShell. */
 export function RootApp({ runtime, routes = {}, controls, account, guide }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
