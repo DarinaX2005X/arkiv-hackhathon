@@ -9,7 +9,7 @@ export type RouteRegistry = Partial<Record<Route['name'], ComponentType<RouteVie
 
 const navigation = [
   { name: 'workspace', label: 'projects' }, { name: 'contributions', label: 'contributions' },
-  { name: 'requests', label: 'requests' }, { name: 'help', label: 'help' },
+  { name: 'requests', label: 'requests' }, { name: 'events', label: 'events' }, { name: 'my-events', label: 'myEvents' }, { name: 'help', label: 'help' },
 ] as const;
 
 /** Native hash navigation remains usable on static hosts. It never owns the app runtime. */
@@ -33,6 +33,9 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
   const state = useAppSession();
   const t = copy.text.bind(copy, 'shell');
   const route = parseRoute(state.destination);
+  const visibleNavigation = route.name === 'home' ? navigation.filter(item => ['events', 'workspace', 'help'].includes(item.name))
+    : ['events', 'event', 'my-events'].includes(route.name) ? navigation.filter(item => ['events', 'my-events', 'help'].includes(item.name))
+      : navigation.filter(item => item.name !== 'my-events');
   const needsRecovery = state.storageIssue !== null && ['invalid_json', 'unsupported_version', 'invalid_payload', 'too_large', 'recovery_required'].includes(state.storageIssue.code);
   const exportRecovery = () => {
     const original = session.exportRecovery();
@@ -48,7 +51,7 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
     <header className="pf-app-header">
       <a className="pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><span className="pf-wordmark">{t('brand')}</span></a>
       <nav aria-label={t('navigation')} className="pf-app-navigation">
-        {(route.name === 'home' ? navigation.filter(item => item.name === 'workspace' || item.name === 'help') : navigation).map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') ? 'page' : undefined}>{t(item.label)}</a>)}
+        {visibleNavigation.map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (route.name === 'project' && item.name === 'workspace') || (route.name === 'event' && item.name === 'events') ? 'page' : undefined}>{t(item.label)}</a>)}
       </nav>
       {account}
     </header>
@@ -56,7 +59,7 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
       <span>{state.mode === 'local' ? 'Saved on this device' : state.actor ? 'Shared project. Wallet connected.' : 'Browsing shared projects. Read-only until you connect a wallet.'}</span>
       {state.mode === 'local' ? <span className="pf-secondary">No account needed</span> : !state.actor && <span className="pf-secondary">Connect a wallet when you are ready to publish or contribute</span>}
     </div>)}
-    <main className="pf-page pf-app-main" id="main-content" tabIndex={-1}>
+    <main className={`pf-page pf-app-main${route.name === 'home' ? ' pf-app-main--home' : ''}`} id="main-content" tabIndex={-1}>
       {state.storageIssue && <Notice tone="warning" title={t(needsRecovery ? 'recoveryTitle' : 'storageTitle')}>
         <p>{t(needsRecovery ? 'recoveryBody' : 'storageBody')}</p>
         {session.exportRecovery() !== null && <Button variant="secondary" onClick={exportRecovery}>{t('exportRecovery')}</Button>}
@@ -71,7 +74,7 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
         <p className="pf-secondary">People publish their own offers and decisions on Arkiv.</p>
       </div>
       <div className="pf-footer-links" aria-label="Footer navigation">
-        <div className="pf-footer-group"><strong>Your work</strong><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a><a href={routeHref({ name: 'requests' })}>Requests</a></div>
+        <div className="pf-footer-group"><strong>Take part</strong><a href={routeHref({ name: 'events' })}>Browse events</a><a href={routeHref({ name: 'my-events' })}>My events</a><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a></div>
         <div className="pf-footer-group"><strong>Learn</strong><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>How public projects work</a><a href={routeHref({ name: 'help', topic: 'agreement', returnTo: state.destination })}>Agreements and ownership</a><a href="./desk.html">Open contributor view</a></div>
       </div>
       <div className="pf-footer-meta"><span>Drafts stay in this browser. Published project details and decisions are public.</span></div>

@@ -20,6 +20,7 @@
 }
 .pf-app-main { display: grid; gap: 32px; min-height: 65vh; align-content: start; padding-block: 40px 80px; }
 .pf-app-main > * { min-width: 0; }
+.pf-app-main--home { padding-top: 20px; }
 .pf-foundation-intro { max-width: 850px; padding-block: 24px; }
 .pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(36px, 4.6vw, 64px); line-height: 1.03; font-weight: 500; color: var(--text-primary); }
 .pf-foundation-intro > p { max-width: 62ch; }
@@ -72,6 +73,7 @@
 .pf-workspace-other-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
 .pf-workspace-other-paths a { display: inline-flex; min-height: 44px; align-items: center; }
 .project-open-by-id > form { margin-top: 12px; }
+.pf-organizer-event > p { margin-block: 8px 24px; }
 
 .pf-app-footer {
   display: grid;
@@ -138,6 +140,7 @@
   .pf-app-navigation a { padding-inline: 12px; }
   .pf-mode-line { flex-direction: column; gap: 4px; margin-inline: var(--page-gutter); padding: 12px 0; }
   .pf-app-main { gap: 24px; padding-block: 28px 48px; }
+  .pf-app-main--home { padding-top: 16px; }
   .pf-tour { padding: 20px 16px; }
   .pf-workspace-bar { width: calc(100% - var(--page-gutter) * 2); }
   .pf-workspace-controls > summary { align-items: flex-start; padding-block: 10px; }

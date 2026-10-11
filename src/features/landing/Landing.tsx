@@ -35,26 +35,28 @@ function ExhibitionScene({ original, replacement }: { original: CoveragePreview;
   const [moment, setMoment] = useState<IllustrationMoment>('agreed');
   const current = moments.find(item => item.id === moment)!;
   const preview = moment === 'replacement' && replacement ? replacement : original;
-  const rows = preview.rows.filter(row => ['venue', 'boards', 'installation', 'transport', 'hosting'].includes(row.id));
-  return <section className="pf-landing-scene" aria-labelledby="landing-scene-title">
-    <div className="pf-landing-scene-heading"><h2 id="landing-scene-title">{copy.sceneTitle}</h2><p>{copy.illustration}</p></div>
+  const owner = (id: string) => preview.rows.find(row => row.id === id)?.contributions.map(item => item.owner).join(' + ');
+  const stateLabel = (id: string) => moment === 'replacement' ? copy.waiting
+    : moment === 'withdrawn' ? id === 'transport' ? copy.withdrawn : copy.earlierAgreement : copy.accepted;
+  return <figure className={`pf-landing-scene pf-landing-scene--${moment}`} aria-label={copy.sceneTitle}>
+    <div className="pf-landing-scene-visual">
+      <ExhibitionArt boardCount={preview.rows.find(row => row.id === 'boards')?.quantity ?? 0} moment={moment} />
+      <div className="pf-scene-ownership" role="group" aria-label="Contributions in the illustration">
+        <div className="pf-scene-owner pf-scene-owner--venue"><strong>The room</strong><span>{owner('venue')}</span><span className="pf-scene-owner-state">{stateLabel('venue')}</span></div>
+        <div className="pf-scene-owner pf-scene-owner--boards"><strong>Six display boards</strong><span>{owner('boards')}</span><span className="pf-scene-owner-state">{stateLabel('boards')}</span></div>
+        <div className="pf-scene-owner pf-scene-owner--transport"><strong>The artworks’ ride</strong><span>{owner('transport')}</span><span className="pf-scene-owner-state">{stateLabel('transport')}</span></div>
+      </div>
+    </div>
+    <div className="pf-landing-scene-result" aria-live="polite" aria-atomic="true">
+      <span className="pf-scene-result-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d={moment === 'agreed' ? 'm6 12 4 4 8-9' : moment === 'withdrawn' ? 'M12 5v9m0 4v1' : 'M5 12h14m-5-5 5 5-5 5'} /></svg></span>
+      <div><h2>{current.title}</h2><p>{current.body}</p></div>
+    </div>
     <div className="pf-landing-moments" role="group" aria-label={copy.sceneControl}>
       {moments.map(item => <button type="button" key={item.id} aria-pressed={moment === item.id}
         disabled={item.id === 'replacement' && !replacement} onClick={() => setMoment(item.id)}>{item.label}</button>)}
     </div>
-    <div className={`pf-landing-stage pf-landing-stage--${moment}`}>
-      <div className="pf-landing-scene-art"><ExhibitionArt boardCount={preview.rows.find(row => row.id === 'boards')?.quantity ?? 0} moment={moment} /></div>
-      <div className="pf-landing-decisions" aria-live="polite" aria-atomic="true">
-        <h3>{current.title}</h3>
-        <p className="pf-landing-version">{current.version}</p>
-        <dl>{rows.map(row => <div key={row.id} className={row.id === 'transport' && moment === 'withdrawn' ? 'pf-landing-decision--withdrawn' : undefined}>
-          <dt>{row.title}</dt><dd><span>{row.contributions.map(contribution => contribution.owner).join(' + ')}</span>
-            <span className="pf-landing-decision-state">{moment === 'replacement' ? copy.waiting : moment === 'withdrawn' ? row.id === 'transport' ? copy.withdrawn : copy.earlierAgreement : copy.accepted}</span></dd>
-        </div>)}</dl>
-        <p>{current.body}</p>
-      </div>
-    </div>
-  </section>;
+    <figcaption>{copy.sceneTitle}. {copy.illustration}</figcaption>
+  </figure>;
 }
 
 export function LandingPage({ returningDraft, onCreateProject, deskUrl = './desk.html' }: LandingPageProps) {
@@ -70,21 +72,20 @@ export function LandingPage({ returningDraft, onCreateProject, deskUrl = './desk
     <section className="pf-landing-hero" aria-labelledby="landing-title">
       <div className="pf-landing-opening">
         <h1 id="landing-title">{copy.heading}</h1>
-        <div className="pf-landing-intro">
-          <p className="pf-landing-description">{copy.description}</p>
-          <p className="pf-landing-arkiv-intro">{copy.arkivIntro}</p>
-          <div className="pf-landing-entry">{createLink}<Button variant="quiet" onClick={scrollToSteps}>{copy.seeHow}</Button></div>
-          <p className="pf-landing-draft-note">{copy.draftNote}</p>
-          {returningDraft && <div className="pf-landing-return"><Link href={routeHref(returningDraft.route)} onClick={returningDraft.onContinue}>{copy.continueProject}</Link><span>{returningDraft.title || copy.untitledDraft}</span></div>}
-        </div>
+        <p className="pf-landing-description">{copy.description}</p>
+        <div className="pf-landing-entry">{createLink}<Button variant="quiet" onClick={scrollToSteps}>{copy.seeHow}</Button></div>
+        <p className="pf-landing-arkiv-intro">{copy.arkivIntro}</p>
+        <Link className="pf-landing-attendee-entry" href={routeHref({ name: 'events' })}>{copy.browseEvents}<span aria-hidden="true">↗</span></Link>
       </div>
       {original ? <ExhibitionScene original={original} replacement={replacement} /> : <p>{copy.sampleUnavailable}</p>}
     </section>
 
+    {returningDraft && <aside className="pf-landing-return" aria-label="Your saved draft"><span>Pick up where you left off <strong>{returningDraft.title || copy.untitledDraft}</strong></span><Link href={routeHref(returningDraft.route)} onClick={returningDraft.onContinue}>{copy.continueProject}</Link></aside>}
+
     <section className="pf-landing-how" aria-labelledby="landing-how-title">
       <div className="pf-landing-section-heading"><h2 id="landing-how-title" tabIndex={-1}>{copy.howTitle}</h2><p>{copy.howIntro}</p></div>
-      <ol className="pf-landing-steps">{steps.map(step => <li key={step.kind}>
-        <ProcessArt kind={step.kind} /><div><h3>{step.title}</h3><p>{step.action}</p><p className="pf-landing-step-result">{step.result}</p></div>
+      <ol className="pf-landing-steps" role="list">{steps.map((step, index) => <li key={step.kind}>
+        <div className="pf-landing-step-art"><ProcessArt kind={step.kind} /></div><div className="pf-landing-step-copy"><h3><span className="pf-landing-step-number" aria-hidden="true">{index + 1}</span>{step.title}</h3><p>{step.action}</p><p className="pf-landing-step-result">{step.result}</p></div>
       </li>)}</ol>
     </section>
 
@@ -93,21 +94,37 @@ export function LandingPage({ returningDraft, onCreateProject, deskUrl = './desk
         <Link className="pf-button pf-button--secondary" href={routeHref({ name: 'demo' })}>{copy.tryExample}</Link><p className="pf-landing-practice-note">{copy.practiceNote}</p>
       </div>
       <div className="pf-landing-change-sheet">
+        <div className="pf-landing-change-title"><h3>A new way to make it work</h3><span>Illustrated example</span></div>
         <table><caption>{copy.repairCaption}</caption><thead><tr><th scope="col">The work</th><th scope="col">{copy.repairBefore}</th><th scope="col">{copy.repairAfter}</th></tr></thead>
           <tbody>{['transport', 'installation'].map(id => <tr key={id}><th scope="row">{original?.rows.find(row => row.id === id)?.title ?? id}</th>
             <td>{original?.rows.find(row => row.id === id)?.contributions.map(item => item.owner).join(' + ') ?? 'See example'}</td>
             <td>{replacement?.rows.find(row => row.id === id)?.contributions.map(item => item.owner).join(' + ') ?? 'See example'}</td></tr>)}</tbody>
         </table>
-        <p>{copy.repairFresh}</p>
+        <div className="pf-landing-change-agreement"><strong>Everyone reviews again</strong><p>{copy.repairFresh}</p></div>
       </div>
     </section>
 
     <section className="pf-landing-independent" aria-labelledby="landing-independent-title">
       <div className="pf-landing-independent-title"><h2 id="landing-independent-title">{copy.arkivTitle}</h2><p>{copy.arkivBody}</p></div>
-      <div className="pf-landing-independent-detail"><p>{copy.arkivConsequence}</p><Link href={deskUrl}>{copy.deskAction}</Link><Link href={helpHref('technical', { name: 'home' })}>{copy.dataAction}</Link><p className="pf-landing-data-note">{copy.arkivBoundary}</p></div>
+      <div className="pf-landing-independent-detail">
+        <div className="pf-landing-record-diagram" role="group" aria-label="Independent Partfolk clients read the same owner-authored records on Arkiv">
+          <div className="pf-record-client"><strong>Your event workspace</strong><span>The organizer proposes</span></div>
+          <div className="pf-record-source"><strong>Arkiv</strong><span>Owner-authored offers and decisions</span></div>
+          <div className="pf-record-client"><strong>A contributor’s own client</strong><span>The owner decides</span></div>
+        </div>
+        <p>{copy.arkivConsequence}</p>
+        <div className="pf-landing-independent-links"><Link href={deskUrl}>{copy.deskAction}</Link><Link href={helpHref('technical', { name: 'home' })}>{copy.dataAction}</Link></div>
+        <p className="pf-landing-data-note">{copy.arkivBoundary}</p>
+      </div>
     </section>
 
-    <section className="pf-landing-next" aria-labelledby="landing-next-title"><div><h2 id="landing-next-title">{copy.finalTitle}</h2><p>{copy.finalBody}</p></div><div className="pf-landing-next-actions">{createLink}<Link href={routeHref({ name: 'contributions' })}>{copy.ownersAction}</Link></div></section>
+    <section className="pf-landing-next" aria-labelledby="landing-next-title">
+      <div className="pf-landing-next-organizer"><h2 id="landing-next-title">{copy.finalTitle}</h2><p>{copy.finalBody}</p>{createLink}<p className="pf-landing-draft-note">{copy.draftNote}</p></div>
+      <div className="pf-landing-next-other">
+        <div><h3>{copy.contributorTitle}</h3><p>{copy.contributorBody}</p><Link href={routeHref({ name: 'contributions' })}>{copy.ownersAction}</Link></div>
+        <div><h3>{copy.attendeeTitle}</h3><p>{copy.attendeeBody}</p><Link href={routeHref({ name: 'events' })}>{copy.browseEvents}</Link></div>
+      </div>
+    </section>
   </div>;
 }
 

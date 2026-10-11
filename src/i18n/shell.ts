@@ -4,6 +4,7 @@ export const shellCopy = defineCatalog({
   brand: 'Partfolk', tagline: 'Everyone brings a part.',
   skip: 'Skip to main content', navigation: 'Main navigation', projects: 'My projects',
   contributions: 'My contributions', requests: 'Requests', help: 'Help',
+  events: 'Events', myEvents: 'My events',
   localMode: 'Local work. Nothing published.', publicMode: 'Public project view',
   disconnected: 'Wallet not connected',
   heading: 'Bring people, places and equipment into one workable plan.',

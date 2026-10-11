@@ -49,7 +49,7 @@ export function HelpPage({ topic, returnTo, deskUrl = './desk.html', sourceLinks
         <div className="pf-help-answer-actions">
           {selected.id === 'getting-started' && <>{createLink}<Link href={routeHref({ name: 'workspace' })}>Open my projects</Link></>}
           {selected.id === 'account' && <><Link href={routeHref({ name: 'sign-in', returnTo: routePath(returnRoute) })}>{copy.signInAction}</Link>{accountLink}</>}
-          {selected.id === 'attending' && <Link href={routeHref({ name: 'events' })}>{copy.eventsAction}</Link>}
+          {selected.id === 'attending' && <><Link href={routeHref({ name: 'events' })}>{copy.eventsAction}</Link><Link href={routeHref({ name: 'my-events' })}>Open my events</Link></>}
           {selected.id === 'practice' && <><Link href={routeHref({ name: 'demo' })}>{copy.exampleAction}</Link>{createLink}</>}
           {selected.id === 'offers' && <Link href={routeHref(helpContributionRoute(returnRoute))}>{copy.contributionsAction}</Link>}
           {selected.id === 'agreement' && <Link href={routeHref({ name: 'requests' })}>{copy.requestsAction}</Link>}

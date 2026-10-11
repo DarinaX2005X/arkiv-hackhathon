@@ -65,6 +65,7 @@ export const helpTopics = [
       'Choose Join event when registration is open. Sign in with your wallet if needed; Partfolk keeps the event you selected. Review Your public registration and explicitly confirm it. A wallet connection by itself does not register you.',
       'Your registration links your wallet to the public event. It does not ask for your name, phone number or email. Join only if you intend this wallet’s participation to be public.',
       'You’re registered appears after a fresh read confirms your registration. If a request is interrupted, use Check original request before trying again. Free open registration does not sell a ticket, reserve a limited seat or verify that someone physically attended.',
+      'Open My events to return to your registrations with the same wallet, including on another device. Review changes to the date, place or participation terms before confirming again. You can cancel your own participation from the event page; the organizer cannot cancel on your behalf.',
       'If a required contribution is withdrawn, new registrations pause while the organizers update their plan. An unavailable or expired record is different from an event being cancelled; check the current event status before travelling.',
     ],
   },

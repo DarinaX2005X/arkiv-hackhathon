@@ -1,0 +1,11 @@
+.pf-publishing-heading { display: grid; gap: var(--space-3); max-width: 68ch; }
+.pf-publishing-heading p, .pf-publishing-lifecycle > p { color: var(--text-secondary); }
+.pf-publishing-lifecycle { display: grid; gap: var(--space-4); padding-top: var(--space-4); }
+.pf-publishing-review { padding: var(--space-6); box-shadow: var(--shadow-surface); }
+.pf-publishing-review .pf-event-facts > div { grid-template-columns: minmax(8rem, .45fr) minmax(0, 1fr); gap: var(--space-4); }
+.pf-event-publishing > form { min-width: 0; }
+.pf-event-publishing .pf-actions { flex-wrap: wrap; align-items: flex-start; }
+@media (max-width: 600px) {
+  .pf-publishing-review { padding: var(--space-4); }
+  .pf-publishing-review .pf-event-facts > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+}

@@ -19,11 +19,11 @@ import { HistoryPanel } from './HistoryPanel';
 import { ProjectPlan } from './ProjectPlan';
 
 export interface ProjectPanelProps { project: ProjectAggregate; onRefresh: () => Promise<void> }
-export interface ProjectSlots { agreementView?: ComponentType<ProjectPanelProps>; runbookView?: ComponentType<ProjectPanelProps> }
+export interface ProjectSlots { agreementView?: ComponentType<ProjectPanelProps>; runbookView?: ComponentType<ProjectPanelProps>; organizerView?: ComponentType<ProjectPanelProps> }
 export interface ProjectActions { onShareRecipe?: (recipe: ProjectRecipe) => void }
 export interface ProjectPageProps extends ProjectSlots, ProjectActions { projectRoot: EntityKey; tab?: ProjectTab; practice?: boolean; guidance?: ReactNode }
 
-export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreement, runbookView: Runbook, practice = false, guidance, onShareRecipe }: ProjectPageProps) {
+export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreement, runbookView: Runbook, organizerView: Organizer, practice = false, guidance, onShareRecipe }: ProjectPageProps) {
   const runtime = useApp(), { project, loading, error, refresh } = useProject(projectRoot);
   const session = useAppSession();
   const editorScope = draftScope(session.mode, session.actor);
@@ -40,6 +40,9 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
   const displayDraft = (draft.changed || unsavedChanges) && (tab === 'needs' || tab === 'plans');
   const recipeToShare = unsavedChanges ? editedRecipe : state?.recipe ?? null;
   const planArea = tab === 'needs' || tab === 'plans';
+  const ownsPublicProject = !practice && isPublicEntityKey(projectRoot) && session.mode === 'public'
+    && session.actor?.kind === 'wallet' && project.root.payload.coordinator.kind === 'wallet'
+    && session.actor.address.toLowerCase() === project.root.payload.coordinator.address.toLowerCase();
   const planTab: ProjectTab = planArea ? tab : project.proposal ? 'plans' : 'needs';
   const navigation: { tab: ProjectTab; label: string; current: boolean }[] = [
     { tab: planTab, label: 'Plan', current: planArea },
@@ -77,6 +80,7 @@ export function ProjectPage({ projectRoot, tab = 'needs', agreementView: Agreeme
     {shareMessage && <Notice role="status">{shareMessage}</Notice>}
     {guidance}
     <nav className="project-tabs" aria-label="Project journey">{navigation.map(item => <a key={item.label} href={routeHref({ name: 'project', projectRoot, tab: item.tab })} aria-current={item.current ? 'page' : undefined}>{item.label}</a>)}</nav>
+    {planArea && ownsPublicProject && Organizer && <details className="pf-sheet pf-organizer-event"><summary>Event page and registration</summary><p className="pf-secondary">Publish the details guests need, manage registration and keep event details current when plans change.</p><Organizer project={project} onRefresh={refresh} /></details>}
     {tab === 'needs' && <NeedsPanel key={`${projectRoot}:${editorScope}`} project={project} onRefresh={refresh} onDraftChange={() => setDraftRevision(value => value + 1)} />}
     {tab === 'plans' && <><div className="project-context-action"><p>Use the saved needs and available offers to find a plan everyone can take on.</p><Link href={routeHref({ name: 'project', projectRoot, tab: 'needs' })}>Edit project needs</Link></div><PlansPanel key={projectRoot} project={project} onRefresh={refresh} autoSolve={practice} /></>}
     {tab === 'history' && <HistoryPanel project={project} onRefresh={refresh} />}

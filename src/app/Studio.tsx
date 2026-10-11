@@ -4,6 +4,7 @@ import { useAppSession } from './context';
 import { parseRoute, routeHref, routePath, safeReturnPath } from './routes';
 import { createStudioWorkspaces, LOCAL_COORDINATOR, type StudioWorkspaces, type WorkspaceKind } from './workspaces';
 import { injectedProvider } from './network';
+import { isPublicEntityKey } from './ids';
 import { copyRecipeToPublicDraft } from './projectSharing';
 import type { StoragePort } from './storage';
 import { makeSmallWorksFixture, SMALL_WORKS_PROJECT_ROOT } from '../domain/fixtures';
@@ -11,13 +12,15 @@ import type { Actor, ProjectRecipe, RecipeTemplate } from '../domain/types';
 import { Button, Dialog, Link, LoadingState, Notice, Select } from '../ui';
 import { LandingRoute } from '../features/landing';
 import { HelpRoute } from '../features/help';
-import { NewProjectRoute, ProjectPage, WorkspaceRoute, createProjectDrafts, draftScope, makeDraft, templateToEditorDraft, type SavedProjectDraft } from '../features/projects';
+import { NewProjectRoute, ProjectPage, WorkspaceRoute, createProjectDrafts, draftScope, makeDraft, templateToEditorDraft, type ProjectPanelProps, type SavedProjectDraft } from '../features/projects';
 import { ContributionsPage, ProjectAgreementPanel, RequestsPage, type ContributionTemplate } from '../features/contributions';
 import { ExecutionWorkspace } from '../features/execution';
 import { GuidedPractice } from '../features/practice/GuidedPractice';
 import { AccountCommands, AccountPage, SignInPage, workDestination } from '../features/account';
 import { selectNewProjectDraft } from '../features/projects/draft-session';
 import { WorkspaceTour, workspaceTour } from '../features/onboarding';
+import { EventCatalog, EventDetail, MyEvents } from '../features/events';
+import { EventPublishingPanel } from '../features/events/publishing';
 
 const sampleRoles = [
   ['coordinator', 'Exhibition coordinator'], ['library', 'Library (exhibition space)'],
@@ -110,7 +113,11 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     void manager.select('local', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
   };
   const Runbook = (props: Parameters<typeof ExecutionWorkspace>[0]) => <ExecutionWorkspace {...props} onReuse={reuse} />;
-  const slots = { agreementView: ProjectAgreementPanel, runbookView: Runbook };
+  const Organizer = ({ project, onRefresh }: ProjectPanelProps) => {
+    const session = useAppSession();
+    return isPublicEntityKey(project.root.key) ? <EventPublishingPanel projectRoot={project.root.key} repository={manager.events} session={session} storage={manager.storage} onRefresh={onRefresh} /> : null;
+  };
+  const slots = { agreementView: ProjectAgreementPanel, runbookView: Runbook, organizerView: Organizer };
   const Project = ({ route }: RouteViewProps) => route.name === 'project' ? <ProjectPage key={route.projectRoot} projectRoot={route.projectRoot} tab={route.tab} practice={route.projectRoot === SMALL_WORKS_PROJECT_ROOT} guidance={route.projectRoot === SMALL_WORKS_PROJECT_ROOT ? <PracticeGuidance /> : undefined} onShareRecipe={share} {...slots} /> : null;
   const Contributions = (props: RouteViewProps) => {
     const session = useAppSession();
@@ -118,8 +125,15 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     return <ContributionsPage key={`${practice}:${session.actor?.kind === 'local' ? session.actor.id : session.actor?.address ?? 'visitor'}`} {...props}
       projectRoot={props.route.name === 'contributions' ? props.route.projectRoot ?? (practice ? SMALL_WORKS_PROJECT_ROOT : undefined) : undefined} template={practice ? practiceTemplate(session.actor) : undefined} />;
   };
+  const Events = () => <EventCatalog repository={manager.events} />;
+  const Event = ({ route }: RouteViewProps) => {
+    const session = useAppSession();
+    return route.name === 'event' ? <EventDetail key={route.projectRoot} projectRoot={route.projectRoot} repository={manager.events} session={session} storage={manager.storage} /> : null;
+  };
+  const Attendance = () => <MyEvents repository={manager.events} session={useAppSession()} storage={manager.storage} />;
   return {
-    home: props => <LandingRoute {...props} onCreateProject={startProject} />, help: Help, workspace: WorkspaceRoute, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
+    home: props => <LandingRoute {...props} onCreateProject={startProject} />, help: Help, workspace: props => <WorkspaceRoute {...props} eventsAvailable />, 'new-project': () => <NewProjectRoute onShareDraft={share} />,
+    events: Events, event: Event, 'my-events': Attendance,
     'sign-in': props => <SignInPage {...props} binding={manager.publicBinding} />,
     account: props => <AccountPage {...props} binding={manager.publicBinding} />,
     onboarding: props => <AccountPage {...props} binding={manager.publicBinding} />,

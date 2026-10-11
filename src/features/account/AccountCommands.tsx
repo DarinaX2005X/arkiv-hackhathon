@@ -29,6 +29,7 @@ export function AccountCommands({ manager }: { manager: StudioWorkspaces }) {
       <summary id="account-commands">{actor ? label || 'Account' : 'Your work'}</summary>
       <div className="pf-account-menu-panel">
         <div className="pf-account-menu-identity"><strong>{actor?.kind === 'wallet' ? label || 'Connected wallet' : 'Browsing as a guest'}</strong>{actor?.kind === 'wallet' && <span className="pf-account-address">{actor.address.slice(0, 10)}…{actor.address.slice(-6)}</span>}</div>
+        <Link href={routeHref({ name: 'my-events' })}>My events</Link>
         <Link href={routeHref({ name: 'workspace' })}>My projects</Link>
         <Link href={routeHref({ name: 'contributions' })}>My contributions</Link>
         <Link href={routeHref({ name: 'account', returnTo })}>Account and settings</Link>

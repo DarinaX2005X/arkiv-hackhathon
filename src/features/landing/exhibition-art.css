@@ -1,0 +1,60 @@
+.pf-exhibition-art { display: block; width: 100%; height: auto; overflow: visible; pointer-events: none; }
+.pf-art-shadow { fill: var(--brand-ink); opacity: .09; }
+.pf-art-contact { fill: var(--brand-ink); opacity: .16; filter: var(--pf-art-contact-filter); }
+.pf-art-room-base { fill: var(--surface-inset); }
+.pf-art-floor { fill: var(--pf-art-ivory); }
+.pf-art-floor-seam { fill: none; stroke: var(--border-quiet); stroke-width: 1; opacity: .4; }
+.pf-art-wall-left { fill: var(--pf-art-ivory); }
+.pf-art-wall-right { fill: var(--pf-art-wall); }
+.pf-art-wall-rim { fill: var(--art-cream); }
+.pf-art-window-edge { fill: var(--surface-inset); }
+.pf-art-window { fill: var(--surface-strong); }
+.pf-art-window-bar { fill: none; stroke: var(--art-cream); stroke-width: 4; }
+.pf-art-sunlight { fill: var(--surface-work); opacity: .65; }
+.pf-art-door { fill: color-mix(in srgb, var(--surface-inset) 82%, var(--brand-ink)); }
+.pf-art-board-side { fill: color-mix(in srgb, var(--surface-inset) 78%, var(--border-control)); }
+.pf-art-door-inset { fill: var(--surface-strong); }
+.pf-art-door-light { fill: color-mix(in srgb, var(--surface-strong) 85%, var(--art-cream)); }
+.pf-art-door-handle { fill: none; stroke: var(--art-sand); stroke-width: 3; stroke-linecap: round; }
+.pf-art-wall-frame { fill: var(--art-clay); }
+.pf-art-cream, .pf-art-board-top { fill: var(--art-cream); }
+.pf-art-clay { fill: var(--pf-art-clay); }
+.pf-art-ink, .pf-art-board-foot, .pf-art-board-leg { fill: var(--brand-ink); }
+.pf-art-board { fill: var(--pf-art-ivory); stroke: var(--border-quiet); stroke-width: .8; }
+.pf-art-board-highlight { fill: none; stroke: var(--surface-work); stroke-width: 2; stroke-linecap: round; }
+.pf-art-picture { fill: var(--surface-soft); }
+.pf-art-picture-sand { fill: var(--art-sand); }
+.pf-art-pin, .pf-art-caption { fill: var(--text-secondary); opacity: .55; }
+.pf-art-tool-front { fill: var(--art-clay); }
+.pf-art-tool-side { fill: color-mix(in srgb, var(--art-clay) 76%, var(--brand-ink)); }
+.pf-art-tool-handle { fill: none; stroke: var(--brand-ink); stroke-width: 4; stroke-linejoin: round; }
+.pf-art-path { fill: none; stroke: var(--action); opacity: .65; stroke-width: 2.5; stroke-dasharray: 7 8; stroke-linecap: round; }
+.pf-art-trolley, .pf-art-trolley-edge { fill: var(--text-secondary); }
+.pf-art-frame-side { fill: color-mix(in srgb, var(--art-clay) 65%, var(--brand-ink)); }
+.pf-art-frame { fill: var(--art-clay); }
+.pf-art-wheel, .pf-art-hair, .pf-art-shoe { fill: var(--brand-ink); }
+.pf-art-wheel-hub { fill: var(--art-sand); }
+.pf-art-trousers { fill: color-mix(in srgb, var(--brand-ink) 78%, var(--art-sand)); }
+.pf-art-face, .pf-art-hand { fill: var(--pf-art-sand); }
+.pf-art-neck { fill: color-mix(in srgb, var(--art-sand) 75%, var(--art-clay)); }
+.pf-art-person--clay .pf-art-coat, .pf-art-person--clay .pf-art-sleeve { fill: var(--pf-art-clay); }
+.pf-art-person--clay .pf-art-coat-side { fill: color-mix(in srgb, var(--art-clay) 78%, var(--brand-ink)); }
+.pf-art-person--forest .pf-art-coat, .pf-art-person--forest .pf-art-sleeve { fill: var(--pf-art-forest); }
+.pf-art-person--forest .pf-art-coat-side { fill: var(--surface-strong); }
+.pf-art-cast-shadow { fill: var(--brand-ink); opacity: .065; }
+.pf-art-skirting { fill: var(--surface-inset); }
+.pf-art-window-light { fill: var(--action); }
+.pf-art-window-sill { fill: var(--surface-work); }
+.pf-art-light-mullion { fill: none; stroke: var(--surface-work); stroke-width: 4; opacity: .65; }
+.pf-art-tool-top { fill: color-mix(in srgb, var(--art-clay) 75%, var(--art-cream)); }
+.pf-art-tool-seam { fill: none; stroke: var(--brand-ink); stroke-width: 1; opacity: .35; }
+.pf-art-trolley-rail { fill: none; stroke: var(--text-secondary); stroke-width: 4; stroke-linejoin: round; }
+.pf-art-frame-highlight { fill: none; stroke: var(--art-sand); stroke-width: 1.5; }
+.pf-art-strap { fill: var(--text-secondary); }
+.pf-art-paper-core { fill: var(--border-control); }
+.pf-art-paper-edge { fill: var(--surface-inset); }
+.pf-art-tape { fill: var(--art-clay); }
+.pf-art-tape-top, .pf-art-cap { fill: var(--art-sand); }
+.pf-art-coat-seam { fill: none; stroke: var(--art-cream); stroke-width: 1; opacity: .22; }
+.pf-art-transport--withdrawn .pf-art-path { stroke: var(--danger-text); stroke-dasharray: 4 10; }
+.pf-art-missing-transport { fill: none; stroke: var(--danger-text); stroke-width: 1.8; stroke-dasharray: 4 5; opacity: .75; }

@@ -1,4 +1,5 @@
 import { LocalRepository } from '../data/local';
+import { createEventRepository } from '../data/events';
 import { SMALL_WORKS_COORDINATOR, SMALL_WORKS_NOW, SMALL_WORKS_PROJECT_ROOT, smallWorksRecords } from '../domain/fixtures';
 import type { Actor } from '../domain/types';
 import type { InjectedWalletProvider } from '../data/wallet';
@@ -41,6 +42,7 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
   let practice = newPracticeRuntime();
   const local = createAppRuntime({ repository: localRepository, storage, namespace: 'partfolk:studio:local', now });
   const publicBinding = createPublicRuntime({ storage, namespace: 'partfolk:studio:public', provider, request, now });
+  const events = createEventRepository({ request: publicBinding.request, controller: publicBinding.controller, now });
   const returnStore = createDraftStore({ storage, key: 'partfolk:studio:account-return', kind: 'account-return', validate: isReturnContext, now });
   const savedReturn = returnStore.load();
   let accountReturn: ReturnContext | null = savedReturn.status === 'ready' ? savedReturn.value : null;
@@ -82,7 +84,7 @@ export function createStudioWorkspaces({ storage, provider, request, now = Date.
     }
   };
   return {
-    runtimes, publicBinding, practiceRepository, localRepository,
+    runtimes, publicBinding, events, storage, practiceRepository, localRepository,
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     select,
