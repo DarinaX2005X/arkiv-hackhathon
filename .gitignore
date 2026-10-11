@@ -6,8 +6,7 @@ dist-desk/
 !.env.example
 .local/
 .vercel/
-.vibemachina/runtime/
-.vibemachina/BRIEF.md
+.vibemachina/
 coverage/
 *.log
 .DS_Store
