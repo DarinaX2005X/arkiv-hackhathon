@@ -16,7 +16,14 @@ function staleProject<T extends { snapshot: Snapshot }>(project: T, reason: 'rpc
   } };
 }
 
-/** Polls reads only. A pending request is shared by timer, focus and manual refresh. */
+function confidenceExpiresAt(snapshot: Snapshot): number {
+  const verifiedAt = snapshot.mode === 'public' && snapshot.source === 'arkiv'
+    ? Math.min(snapshot.fetchedAt, snapshot.blockTimestamp) : snapshot.fetchedAt;
+  return verifiedAt + MAX_FRESH_AGE_MS;
+}
+
+/** Current views only. Historical snapshots are verified separately, without this polling controller.
+ * A pending read is shared by timer, focus and manual refresh; no write is performed. */
 export function createProjectReader<T extends { snapshot: Snapshot } = ProjectAggregate>(load: (signal: AbortSignal) => Promise<Result<T>>, now = Date.now) {
   let state: ProjectReadState<T> = { project: null, loading: false, error: null };
   const listeners = new Set<() => void>();
@@ -27,14 +34,14 @@ export function createProjectReader<T extends { snapshot: Snapshot } = ProjectAg
   const update = (next: ProjectReadState<T>) => { state = next; for (const listener of listeners) listener(); };
   const expireOldRead = () => {
     if (!state.project || state.project.snapshot.freshness !== 'fresh') return;
-    const age = now() - state.project.snapshot.fetchedAt;
-    if (age > MAX_FRESH_AGE_MS || age < 0) update({ ...state, project: staleProject(state.project, 'stale_snapshot') });
+    const time = now(), snapshot = state.project.snapshot;
+    if (time > confidenceExpiresAt(snapshot) || time < snapshot.fetchedAt) update({ ...state, project: staleProject(state.project, 'stale_snapshot') });
   };
   const scheduleExpiry = () => {
     if (expiryTimer !== null) clearTimeout(expiryTimer);
     expiryTimer = null;
     if (!active || !publicReads || !state.project || state.project.snapshot.freshness !== 'fresh') return;
-    expiryTimer = setTimeout(() => { expiryTimer = null; expireOldRead(); }, Math.max(1, state.project.snapshot.fetchedAt + MAX_FRESH_AGE_MS + 1 - now()));
+    expiryTimer = setTimeout(() => { expiryTimer = null; expireOldRead(); }, Math.max(1, confidenceExpiresAt(state.project.snapshot) + 1 - now()));
   };
   const refresh = (): Promise<void> => {
     if (!active) return Promise.resolve();

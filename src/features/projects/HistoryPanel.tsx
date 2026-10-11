@@ -4,6 +4,7 @@ import { useRepositoryAction } from '../../app/actions';
 import { routeHref } from '../../app/routes';
 import { formatDateTime } from '../../app/time';
 import { finalizePlan } from '../../domain/validation';
+import { completedWorkContext } from '../../domain/execution';
 import { rankPlan } from '../../domain/solver';
 import type { EntityRecord, ProjectAggregate, Proposal } from '../../domain/types';
 import type { PublishPlanCommand } from '../../data/types';
@@ -20,7 +21,7 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
   const [selected, setSelected] = useState<EntityRecord<Proposal> | null>(null), [error, setError] = useState<string | null>(null);
   const records = project.proposal && !project.proposalHistory.some(record => record.key === project.proposal!.key) ? [...project.proposalHistory, project.proposal] : project.proposalHistory;
   const restored = useMemo(() => { if (!selected) return null; try { return restoreTerms(project, selected); } catch { return null; } }, [project, selected]);
-  const input = planningInput(project), finalized = restored && input ? finalizePlan(restored, input.publishers, project.snapshot) : null;
+  const input = planningInput(project), finalized = restored && input ? finalizePlan(restored, input.publishers, project.snapshot, completedWorkContext(project)) : null;
   const authority = authorityFor(session.actor, session.mode, session.chainId), owner = ownsProject(project, session.actor);
   const open = project.state.status === 'unique' && project.state.entity.payload.lifecycle !== 'closed' && project.activation.status === 'unique';
   const waiting = action.state.status === 'submitting' || action.state.status === 'needs-verification';

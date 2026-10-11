@@ -2,6 +2,7 @@ import { ExpirationTime } from '@arkiv-network/sdk';
 import { key } from '@arkiv-network/sdk/attr';
 import { eq } from '@arkiv-network/sdk/query';
 import { canonicalJson, hashCanonical } from '../../domain/canonical';
+import { completedWorkContext } from '../../domain/execution';
 import { activeSource, validateExactGrant } from '../../domain/readiness';
 import { prepareAttestation, prepareCloseProject } from '../../domain/operations';
 import { independentlyValidatePlan, validateBookCapacity, validateRecipe } from '../../domain/validation';
@@ -329,7 +330,8 @@ export class ArkivWriter {
         const decision = book.decisions.filter(item => item.projectRoot === grant.projectRoot && item.activationKey === grant.activationKey);
         assertArkiv(decision.length === 1 && decision[0]!.status === 'accepted', 'invalid_input', 'missing_decision', 'Every new grant needs its matching accepted decision.');
         valid(independentlyValidatePlan(project.proposal.payload.plan,
-          project.publishers.map(item => item.root.key === command.publisherRoot ? candidate : item), context.snapshot.blockTimestamp).reasons,
+          project.publishers.map(item => item.root.key === command.publisherRoot ? candidate : item), context.snapshot.blockTimestamp,
+          [], completedWorkContext(project)).reasons,
         'The accepted plan is no longer feasible against current books.');
       }
     }
@@ -362,7 +364,8 @@ export class ArkivWriter {
       'stale_heads', 'activation_mismatch', 'A new proposal must name the current exact agreement as its predecessor. Restoring old terms requires a new proposal.');
     assertArkiv(proposal.plan.requiredApprovers.every(root => project.state.status === 'unique' && project.state.entity.payload.publisherRoots.includes(root)),
       'invalid_input', 'missing_root', 'Admit every required publisher before proposing this plan.');
-    valid(independentlyValidatePlan(proposal.plan, project.publishers, context.snapshot.blockTimestamp).reasons, 'The proposal is not feasible against current authored books.');
+    valid(independentlyValidatePlan(proposal.plan, project.publishers, context.snapshot.blockTimestamp,
+      [], completedWorkContext(project)).reasons, 'The proposal is not feasible against current authored books.');
     await this.finish(context);
   }
   private async proposalStep(command: PublishProposalCommand): Promise<VerifiedStep> {
@@ -386,7 +389,8 @@ export class ArkivWriter {
         'invalid_input', 'proposal_mismatch', 'This proposal is unavailable or does not match the requested project and hash.');
       assertArkiv(equal(proposal.payload.plan.predecessor, this.predecessor(project)), 'stale_heads', 'activation_mismatch', 'The proposal no longer descends from the current activation. Publish a new revision.');
       assertArkiv(proposal.payload.plan.requiredApprovers.every(root => project.state.status === 'unique' && project.state.entity.payload.publisherRoots.includes(root)), 'invalid_input', 'missing_root', 'A required approver is no longer admitted.');
-      valid(independentlyValidatePlan(proposal.payload.plan, project.publishers, context.snapshot.blockTimestamp).reasons, 'The proposal is no longer feasible.');
+      valid(independentlyValidatePlan(proposal.payload.plan, project.publishers, context.snapshot.blockTimestamp,
+        [], completedWorkContext(project)).reasons, 'The proposal is no longer feasible.');
       await this.finish(context);
     }, command.expectedActivationHeads);
   }
@@ -402,8 +406,10 @@ export class ArkivWriter {
       const publisher = await this.reader.publisher(context, link.publisherRoot);
       if (link.linkKind === 'offer') {
         this.owned(publisher.root, command.operation);
-        assertArkiv(publisher.book.status === 'unique' && link.offerIds.every(id => publisher.book.status === 'unique' && publisher.book.entity.payload.offers.some(offer => offer.id === id)),
-          'invalid_input', 'missing_offer', 'Every shared offer must exist in the current owned book.');
+        assertArkiv(publisher.book.status === 'unique' && link.offerIds.every(id => publisher.book.status === 'unique'
+          && publisher.book.entity.payload.offers.some(offer => offer.id === id
+            && (offer.projectScope.length === 0 || offer.projectScope.includes(link.projectRoot)))),
+          'invalid_input', 'missing_offer', 'Every shared offer must exist in the current owned book and allow this project.');
       } else {
         this.owned(project.root, command.operation); const source = activeSource(project);
         assertArkiv(source && project.proposal && equal(source, { projectRoot: link.projectRoot, activationKey: link.activationKey,

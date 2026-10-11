@@ -4,8 +4,9 @@ import {
 } from './canonical';
 import {
   capacityConflicts, checkConditions, deriveRequiredApprovers, independentlyValidatePlan,
-  offerFits, validateSolverInput,
+  completedWorkReservations, occupiedAllocations, offerFits, solverCompletedWorkContext, validateSolverInput,
 } from './validation';
+import type { FinalizedPlanResult } from './validation';
 import { PROTOCOL } from './types';
 import type {
   Actor, Allocation, BookState, Condition, DomainReason, EntityKey, EntityRecord, Offer, PlanCandidate, PlanDocument,
@@ -119,11 +120,13 @@ function allChoices(publishers: PublisherAggregate[], step: () => void, checkpoi
 }
 
 /** Finite integer search. Every emitted candidate passes the independent evaluator. */
-export function solve(input: SolverInput, pins: SolverPin[] = [], budget: SolverBudget = { maxNodes: 100000, maxCandidates: 20 }): SolverResult {
-  return solveInternal(input, pins, budget, true);
+export function solve(input: SolverInput, pins: SolverPin[] = [], budget: SolverBudget = { maxNodes: 100000, maxCandidates: 20 },
+  preparePlan?: (plan: PlanDocument) => FinalizedPlanResult): SolverResult {
+  return solveInternal(input, pins, budget, true, preparePlan);
 }
 
-function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudget, explain: boolean): SolverResult {
+function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudget, explain: boolean,
+  preparePlan?: (plan: PlanDocument) => FinalizedPlanResult): SolverResult {
   // Validation and preprocessing are part of the elapsed budget, too. Synchronous
   // domain helpers cannot be interrupted, so check both sides of every such call.
   const start = Date.now();
@@ -187,6 +190,10 @@ function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudg
     }
     if (duplicatePins) return { status: 'impossible', candidates: [], reasons: [{ code: 'pin_conflict' }], nodesVisited, exhausted: false, optimality: 'proven' };
     const now = input.snapshot.blockTimestamp;
+    const completedContext = solverCompletedWorkContext(input);
+    // Equipment continuations need the final named transfer duties to distinguish
+    // retained stock from a new use. Evaluate those fully after the runbook exists.
+    const occupiedWork = work(() => completedWorkReservations(input.projectRoot, completedContext).reservations.filter(item => item.kind !== 'equipment'));
     const choices = allChoices(input.publishers, step, checkpoint);
     const variants = work(() => [...input.recipe.variants].sort((a, b) => { checkpoint(); return compareText(a.id, b.id); }));
     for (const variant of variants) {
@@ -262,8 +269,16 @@ function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudg
             for (const reason of conditionReasons) { step(); addReason({ ...reason, params: { ...reason.params, variantId: variant.id } }); }
             return;
           }
-          const plan = work(() => assemblePlan(input, variant, allocations, choices));
-          const validation = work(() => independentlyValidatePlan(plan, input.publishers, now, pins));
+          let plan = work(() => assemblePlan(input, variant, allocations, choices));
+          if (preparePlan) {
+            const prepared = work(() => preparePlan(plan));
+            if (!prepared.ok) {
+              for (const reason of prepared.reasons) { step(); addReason(reason); }
+              return;
+            }
+            plan = prepared.value.plan;
+          }
+          const validation = work(() => independentlyValidatePlan(plan, input.publishers, now, pins, completedContext));
           if (!validation.valid) {
             for (const reason of validation.reasons) { step(); addReason(reason); }
             return;
@@ -297,7 +312,8 @@ function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudg
             step();
             if (remaining - amount > tail) continue;
             if (amount > 0) allocations.push(work(() => makeAllocation(requirement, choice, amount)));
-            const conflicts = amount > 0 ? work(() => capacityConflicts(allocations, input.publishers, input.projectRoot, now)) : [];
+            const conflicts = amount > 0 ? work(() => capacityConflicts(allocations, input.publishers, input.projectRoot, now,
+              occupiedAllocations(allocations, occupiedWork))) : [];
             if (conflicts.length === 0) assign(choiceIndex + 1, remaining - amount);
             else for (const reason of conflicts) {
               step();
@@ -341,7 +357,7 @@ function solveInternal(input: SolverInput, pins: SolverPin[], budget: SolverBudg
         const remainingTime = budget.maxMilliseconds === undefined ? undefined : budget.maxMilliseconds - (Date.now() - start);
         if (remainingBudget <= 0 || (remainingTime !== undefined && remainingTime <= 0)) throw stopped;
         const result = solveInternal({ ...input, recipe: { ...input.recipe, variants: [variant] }, publishers: [...input.publishers, hypothetical] }, pins,
-          { maxNodes: Math.min(remainingBudget, 2000), maxCandidates: 1, ...(remainingTime === undefined ? {} : { maxMilliseconds: remainingTime }) }, false);
+          { maxNodes: Math.min(remainingBudget, 2000), maxCandidates: 1, ...(remainingTime === undefined ? {} : { maxMilliseconds: remainingTime }) }, false, preparePlan);
         nodesVisited += result.nodesVisited;
         checkpoint();
         if (result.exhausted) throw stopped;

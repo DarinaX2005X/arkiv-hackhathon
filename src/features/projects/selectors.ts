@@ -2,6 +2,7 @@ import type { Actor, Allocation, EntityKey, EntityRecord, PlanCandidate, PlanDoc
 import { activeSource, deriveDraftStatus, deriveReadiness, sameActor } from '../../domain/readiness';
 import { canonicalJson, hashCanonical, hashPlan, hashRequirements } from '../../domain/canonical';
 import { independentlyValidatePlan } from '../../domain/validation';
+import { completedWorkContext } from '../../domain/execution';
 import type { PublishPlanCommand, ReplaceProjectCommand, WriteAuthority } from '../../data/types';
 import { formatDateTime } from '../../app/time';
 
@@ -18,7 +19,8 @@ export function planningInput(project: ProjectAggregate, recipe?: ProjectRecipe)
   const state = project.state.entity.payload;
   return { projectRoot: project.root.key, recipe: recipe ?? state.recipe,
     publishers: project.publishers.filter(publisher => state.publisherRoots.includes(publisher.root.key)),
-    snapshot: project.snapshot, predecessor: project.proposal, predecessorSource: activeSource(project), completedWork: state.completedWork };
+    snapshot: project.snapshot, predecessor: project.proposal, predecessorSource: activeSource(project),
+    completedWork: completedWorkContext(project).completedWork.slice(), proposalHistory: project.proposalHistory };
 }
 export function planningFingerprint(input: SolverInput, pins: SolverPin[]): string {
   return hashCanonical({ projectRoot: input.projectRoot, recipe: input.recipe, pins, predecessor: input.predecessorSource,
@@ -89,7 +91,7 @@ export function publishPlanInput(project: ProjectAggregate, candidate: PlanCandi
   if (project.state.status !== 'unique' || project.state.entity.payload.lifecycle === 'closed') throw new Error('An open project with one current state is required.');
   if (project.activation.status === 'conflict' || project.activation.status === 'unverified') throw new Error('The current agreement needs verification before publication.');
   const input = planningInput(project);
-  if (!input || !independentlyValidatePlan(candidate.plan, input.publishers, project.snapshot.blockTimestamp).valid) throw new Error('The selected plan no longer matches current offers.');
+  if (!input || !independentlyValidatePlan(candidate.plan, input.publishers, project.snapshot.blockTimestamp, [], completedWorkContext(project)).valid) throw new Error('The selected plan no longer matches current offers or completed work.');
   const sourceRecipe = options?.sourceRecipe ?? project.state.entity.payload.recipe;
   const selectedVariant = sourceRecipe.variants.find(variant => variant.id === candidate.plan.variant.id);
   if (!selectedVariant || canonicalJson(selectedVariant) !== canonicalJson(candidate.plan.variant)

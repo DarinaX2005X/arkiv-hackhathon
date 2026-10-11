@@ -4,6 +4,7 @@ import { prepareDecision } from '../../domain/operations';
 import { activeSource, deriveReadiness, lastAcceptedDuty, sameActor, sameSource } from '../../domain/readiness';
 import { solve } from '../../domain/solver';
 import { finalizePlan } from '../../domain/validation';
+import { completedWorkContext } from '../../domain/execution';
 import { PROTOCOL } from '../../domain/types';
 import type { Actor, BookState, EntityKey, PlanDocument, ProjectAggregate, Proposal, PublisherAggregate, SolverPin } from '../../domain/types';
 import { createLocalOperationIntent, LocalRepository } from '../../data/local';
@@ -175,7 +176,7 @@ async function publish(repository: LocalRepository, repair: boolean, now: () => 
   { maxNodes: 100_000, maxCandidates: 32, maxMilliseconds: 5_000 });
   const candidate = solved.candidates.find(item => item.plan.variant.id === 'sunday');
   ensure(candidate, 'These saved offers no longer make the sample plan work. Review them in the full project.');
-  const finalized = finalizePlan(withEquipmentTransfers(candidate.plan), project.publishers, project.snapshot);
+  const finalized = finalizePlan(withEquipmentTransfers(candidate.plan), project.publishers, project.snapshot, completedWorkContext(project));
   ensure(finalized.ok, 'The complete sample plan could not be checked. Review the offers in the full project.');
   const time = now(), operation = operationId(repair ? 'repair' : 'plan', time);
   const proposal: Proposal = { protocol: PROTOCOL, schemaVersion: 1, entityType: 'proposal', operationId: operation, createdAt: time,

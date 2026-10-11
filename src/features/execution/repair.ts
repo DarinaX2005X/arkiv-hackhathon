@@ -1,9 +1,9 @@
 import { hashCanonical, hashPlan } from '../../domain/canonical';
-import { remainingWork } from '../../domain/execution';
+import { completedWorkContext, remainingWork } from '../../domain/execution';
 import { activeSource, sameSource } from '../../domain/readiness';
-import { solve, rankPlan, compareRank } from '../../domain/solver';
+import { solve } from '../../domain/solver';
 import { finalizePlan } from '../../domain/validation';
-import type { DomainReason, PlanCandidate, ProjectAggregate, SolverBudget, SolverInput, SolverPin, SolverResult } from '../../domain/types';
+import type { PlanCandidate, ProjectAggregate, SolverBudget, SolverInput, SolverPin, SolverResult } from '../../domain/types';
 import { createPlanningController } from '../projects/planning';
 import { planningFingerprint, STATE_LIFETIME_SECONDS } from '../projects/selectors';
 import type { ReplaceProjectCommand, WriteAuthority } from '../../data/types';
@@ -19,43 +19,36 @@ export function repairInput(project: ProjectAggregate): SolverInput | null {
   return {
     projectRoot: project.root.key, recipe: { ...state.recipe, outcome: remainder.plan.outcome, instructions: remainder.plan.instructions, variants: [remainder.plan.variant] },
     publishers: project.publishers.filter(publisher => state.publisherRoots.includes(publisher.root.key) && !withdrawn.has(publisher.root.key)),
-    snapshot: project.snapshot, predecessor: project.proposal, predecessorSource: source, completedWork: remainder.completedWork,
+    snapshot: project.snapshot, predecessor: project.proposal, predecessorSource: source,
+    proposalHistory: project.proposalHistory, completedWork: remainder.completedWork,
   };
 }
 /** Keep named transfer duties. The solver cannot invent a receiver or silently drop a return. */
 export function solveRepair(project: ProjectAggregate, input: SolverInput, pins: SolverPin[], budget: SolverBudget): SolverResult {
-  const result = solve(input, pins, budget), remainder = remainingWork(project);
-  if (!remainder) return { ...result, status: 'unverified', candidates: [], reasons: [{ code: 'missing_proposal' }] };
+  const remainder = remainingWork(project);
+  if (!remainder) return { status: 'unverified', candidates: [], reasons: [{ code: 'missing_proposal' }], nodesVisited: 0, exhausted: false, optimality: 'not_proven' };
   const transferDuties = remainder.plan.runbook.filter(duty => duty.kind !== 'task');
   const taskRequirements = new Set(remainder.plan.runbook.filter(duty => duty.kind === 'task').flatMap(duty => duty.allocationIds)
     .map(id => remainder.plan.allocations.find(allocation => allocation.id === id)?.requirementId));
-  const reasons: DomainReason[] = [...result.reasons];
-  const candidates: PlanCandidate[] = [];
-  for (const candidate of result.candidates) {
-    const plan = structuredClone(candidate.plan);
+  const context = completedWorkContext(project);
+  // Validate the actual remaining runbook during search. In particular, equipment
+  // retained solely for a return must not be mistaken for another completed use.
+  const result = solve(input, pins, budget, plan => {
     plan.runbook = plan.runbook.filter(duty => duty.allocationIds.some(id => taskRequirements.has(plan.allocations.find(allocation => allocation.id === id)?.requirementId)));
-    let missingTransfer = false;
     for (const duty of transferDuties) {
       const ids = duty.allocationIds.flatMap(id => {
         const prior = remainder.plan.allocations.find(allocation => allocation.id === id);
         return prior ? plan.allocations.filter(allocation => allocation.requirementId === prior.requirementId && allocation.publisherRoot === prior.publisherRoot
           && allocation.resourceId === prior.resourceId && allocation.unit === prior.unit).map(allocation => allocation.id) : [];
       });
-      if (!ids.length) { missingTransfer = true; reasons.push({ code: 'attestation_mismatch', obligationId: duty.id, resourceId: duty.resourceId }); break; }
+      if (!ids.length) return { ok: false, reasons: [{ code: 'attestation_mismatch', obligationId: duty.id, resourceId: duty.resourceId }] };
       plan.runbook.push({ ...structuredClone(duty), allocationIds: [...new Set(ids)] });
     }
-    if (missingTransfer) continue;
     const present = new Set(plan.runbook.map(duty => duty.id));
     for (const duty of plan.runbook) duty.dependsOn = duty.dependsOn.filter(id => present.has(id));
-    const finalized = finalizePlan(plan, project.publishers, project.snapshot);
-    if (!finalized.ok) { reasons.push(...finalized.reasons); continue; }
-    candidates.push({ plan: finalized.value.plan, proposalHash: finalized.value.proposalHash, rank: rankPlan(finalized.value.plan, input.predecessor?.payload.plan ?? null) });
-  }
-  candidates.sort((a, b) => compareRank(a.rank, b.rank));
-  const filteredEveryCandidate = result.candidates.length > 0 && candidates.length === 0;
-  if (filteredEveryCandidate) reasons.push({ code: 'search_exhausted' });
-  return { ...result, candidates, reasons, status: candidates.length ? 'found' : filteredEveryCandidate ? 'exhausted' : result.status,
-    exhausted: result.exhausted || filteredEveryCandidate, optimality: transferDuties.length ? 'not_proven' : result.optimality };
+    return finalizePlan(plan, project.publishers, project.snapshot, context);
+  });
+  return { ...result, optimality: transferDuties.length ? 'not_proven' : result.optimality };
 }
 export function createRepairController(evaluate: (project: ProjectAggregate, input: SolverInput, pins: SolverPin[], budget: SolverBudget) => SolverResult | Promise<SolverResult> = solveRepair) {
   let project: ProjectAggregate | null = null;

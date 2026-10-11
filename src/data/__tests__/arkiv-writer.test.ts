@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ENTITY_EVENTS_ABI } from '@arkiv-network/sdk';
 import { encodeAbiParameters, encodeEventTopics, parseAbiParameters, toHex } from 'viem';
 import type { Hex } from 'viem';
-import { hashPlan } from '../../domain/canonical';
+import { hashPlan, hashRequirements } from '../../domain/canonical';
 import { prepareAttestation, prepareCloseProject, prepareDecision } from '../../domain/operations';
+import { independentlyValidatePlan } from '../../domain/validation';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { AccountAddress, EntityPayload, PublicEntityKey } from '../../domain/types';
 import type { OperationKind, ReplaceBookCommand, WriteAuthority } from '../types';
@@ -146,6 +147,32 @@ describe('writer preflight and facade error boundaries', () => {
     expect(await f.repository.replaceBook(f.replacement())).toMatchObject({ ok: false, error: { code: 'unauthorized' } });
     expect(f.control.sends).toBe(0); expect(f.store.list()).toHaveLength(0);
   });
+  it.each([[], [KEYS.project], [entityKey(999), KEYS.project]].map(projectScope => ({ projectScope })))('publishes an owned offer link when its project is allowed by scope %j', async ({ projectScope }) => {
+    const f = harness(); f.book.offers[0]!.projectScope = projectScope;
+    f.rpc.update(KEYS.book, f.book); f.saveSnapshot();
+    const command = f.command('publish_project_link', { link: f.offerLink, lifetimeSeconds: LIFETIME });
+    expect(await f.repository.publishProjectLink(command)).toMatchObject({ ok: true });
+    expect(f.control.sentTypes).toEqual([['project_link']]);
+  });
+  it('rejects an offer link before unsigned preparation if any named offer excludes the project', async () => {
+    const f = harness();
+    f.book.offers.push({ ...structuredClone(f.book.offers[0]!), id: 'scoped-elsewhere', projectScope: [entityKey(999)] });
+    f.rpc.update(KEYS.book, f.book); f.saveSnapshot();
+    const command = f.command('publish_project_link', {
+      link: { ...f.offerLink, offerIds: ['host', 'scoped-elsewhere'] }, lifetimeSeconds: LIFETIME,
+    });
+    expect(await f.repository.publishProjectLink(command)).toMatchObject({ ok: false,
+      error: { code: 'invalid_input', reasons: [{ code: 'missing_offer' }] } });
+    expect(f.control.sends).toBe(0); expect(f.control.reads).not.toContain('eth_estimateGas');
+    expect(f.store.list()).toHaveLength(0);
+  });
+  it('does not let a foreign wallet publish an offer link even when its project scope matches', async () => {
+    const f = harness(STRANGER);
+    const command = f.command('publish_project_link', { link: f.offerLink, lifetimeSeconds: LIFETIME });
+    expect(await f.repository.publishProjectLink(command)).toMatchObject({ ok: false, error: { code: 'unauthorized' } });
+    expect(f.control.sends).toBe(0); expect(f.control.reads).not.toContain('eth_estimateGas');
+    expect(f.store.list()).toHaveLength(0);
+  });
   it('rejects wrong chain and local authority before asking the public writer', async () => {
     const f = harness(); const command = f.replacement();
     (command.operation.authority as { chainId: number }).chainId = 1;
@@ -168,6 +195,15 @@ describe('writer preflight and facade error boundaries', () => {
     expect(f.control.sends).toBe(0);
     expect(f.store.list()[0]?.admission).toBeNull();
   });
+  it('does not prepare or admit a write against a stalled current head', async () => {
+    const f = harness();
+    const repository = createArkivRepository({ request: f.read, controller: f.controller, now: () => NOW + 7 * 86_400_000 });
+    expect(await repository.replaceBook(f.replacement())).toMatchObject({ ok: false,
+      error: { code: 'unverified', reasons: [{ code: 'stale_snapshot' }] } });
+    expect(f.control.sends).toBe(0);
+    expect(f.control.reads).not.toContain('eth_estimateGas');
+    expect(f.store.list()).toHaveLength(0);
+  });
   it('requires explicit empty-book recovery and refuses copied grants under a missing scope', async () => {
     const f = harness(); f.rpc.remove(KEYS.book); f.saveSnapshot();
     const { operation: _operation, ...fields } = f.replacement();
@@ -185,6 +221,46 @@ describe('writer preflight and facade error boundaries', () => {
       proposalHash: f.proposal.proposalHash, expectedActivationHeads: [KEYS.activation], lifetimeSeconds: LIFETIME });
     expect(await f.repository.activateProposal(activation)).toMatchObject({ ok: false, error: { code: 'stale_heads' } });
     expect(f.control.sends).toBe(0);
+  });
+  it.each(['proposal', 'activation', 'acceptance'] as const)('rejects %s that reuses capacity already occupied by completed predecessor work', async action => {
+    const f = harness(action === 'acceptance' ? PUBLISHER : COORDINATOR);
+    f.book.attestations.push({ ...f.source, kind: 'task_report', id: 'completed-welcome', operationId: 'report-welcome',
+      obligationId: 'welcome', author: KEYS.publisher, recordedAt: NOW, status: 'done', note: '' });
+    f.state.completedWork = [{ source: f.source, obligationId: 'welcome', attestationIds: ['completed-welcome'],
+      recordedAt: NOW, evidenceAvailability: 'available' }];
+    const plan = structuredClone(f.plan); plan.predecessor = f.source;
+    plan.variant.requirements[0] = { ...plan.variant.requirements[0]!, id: 'remaining-hosting', title: 'Host another group' };
+    plan.allocations[0] = { ...plan.allocations[0]!, id: 'remaining-allocation', requirementId: 'remaining-hosting' };
+    plan.runbook[0] = { ...plan.runbook[0]!, id: 'remaining-task', title: 'Host another group', allocationIds: ['remaining-allocation'] };
+    const proposal = { ...f.proposal, operationId: 'overlapping-proposal', plan, proposalHash: hashPlan(plan),
+      requirementsHash: hashRequirements(KEYS.project, plan.variant.requirements), changeExplanation: 'Add remaining work.' };
+    const proposalKey = entityKey(92), activationKey = entityKey(93);
+    f.rpc.put(rawEntity(proposalKey, proposal, COORDINATOR, { createdAt: toHex(92) }));
+    if (action === 'acceptance') {
+      f.rpc.remove(KEYS.activation);
+      f.rpc.put(rawEntity(activationKey, { ...f.activation, proposalKey, proposalHash: proposal.proposalHash,
+        predecessorActivationKeys: [KEYS.activation] }, COORDINATOR, { createdAt: toHex(93) }));
+    }
+    f.rpc.update(KEYS.book, f.book); f.rpc.update(KEYS.state, f.state); f.saveSnapshot();
+    const loaded = await f.repository.loadProject(KEYS.project);
+    if (!loaded.ok) throw new Error('Expected a readable completed-work fixture.');
+    // The current allocations alone fit; only independently verified completed history closes this bypass.
+    expect(independentlyValidatePlan(plan, loaded.value.publishers, NOW).valid).toBe(true);
+    const result = action === 'proposal'
+      ? await f.repository.publishProposal(f.command('publish_proposal', { projectRoot: KEYS.project, proposal, lifetimeSeconds: LIFETIME }))
+      : action === 'activation'
+        ? await f.repository.activateProposal(f.command('activate_proposal', { projectRoot: KEYS.project, proposalKey,
+          proposalHash: proposal.proposalHash, expectedActivationHeads: [KEYS.activation], lifetimeSeconds: LIFETIME }))
+        : await f.repository.replaceBook(f.command('replace_book', { publisherRoot: KEYS.publisher, expectedHeads: [KEYS.book],
+          book: { ...f.book, predecessorKeys: [KEYS.book],
+            decisions: [{ ...f.book.decisions[0]!, activationKey, proposalKey, proposalHash: proposal.proposalHash, operationId: 'accept-overlap', decidedAt: NOW }],
+            grants: [{ ...f.book.grants[0]!, activationKey, proposalKey, proposalHash: proposal.proposalHash,
+              id: 'overlapping-grant', operationId: 'accept-overlap', acceptedAt: NOW, allocations: plan.allocations, offers: plan.offers }] },
+          lifetimeSeconds: LIFETIME }));
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_input',
+      reasons: expect.arrayContaining([expect.objectContaining({ code: 'capacity_exceeded', resourceId: 'self', params: { capacity: 1, required: 2 } })]) } });
+    expect(f.control.sends).toBe(0); expect(f.control.reads).not.toContain('eth_estimateGas');
+    expect(f.store.list()).toHaveLength(0);
   });
 });
 
@@ -325,6 +401,18 @@ describe('writer confirmation and resumable operations', () => {
     expect(saved.transactionHash).not.toBeNull(); expect(saved.steps[0]!.status).toBe('submitted');
     f.control.hideReceipts = false;
     expect(await f.repository.replaceBook(command)).toMatchObject({ ok: true });
+    expect(f.control.sends).toBe(1);
+  });
+  it('reconciles an old known receipt without treating its historical block as a current head', async () => {
+    const f = harness(); const command = f.replacement(); f.control.hideReceipts = true;
+    expect(await f.repository.replaceBook(command)).toMatchObject({ ok: false, error: { code: 'unverified' } });
+    const saved = f.controller.getOperation(command.operation.id)!;
+    expect(saved.steps[0]!.status).toBe('submitted');
+    f.control.hideReceipts = false;
+    f.rpc.timestamp = NOW + 7 * 86_400_000;
+    expect(await f.repository.reconcile(saved)).toMatchObject({ ok: true,
+      value: { status: 'pending', operation: { steps: [{ status: 'confirmed' }] } } });
+    expect(f.store.list()[0]?.receipt?.blockNumber).toBe('101');
     expect(f.control.sends).toBe(1);
   });
   it('never reports not_sent when a caller has send evidence but its local sidecar is missing', async () => {

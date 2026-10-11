@@ -1,5 +1,5 @@
 import { canonicalJson, hashCanonical, hashPlan } from './canonical';
-import { deriveExecution, transferStatementHash } from './execution';
+import { completedWorkContext, deriveExecution, transferStatementHash } from './execution';
 import { activeSource, deriveReadiness, lastAcceptedDuty, sameActor, sameSource, sourcePlanRef, validateCurrentEntity } from './readiness';
 import { deriveRequiredApprovers, independentlyValidatePlan, validateBookCapacity, validateBookState } from './validation';
 import type {
@@ -247,7 +247,7 @@ export function prepareDecision(project: ProjectAggregate, publisherRoot: Entity
   const blocked = input.status === 'accepted' ? currentReasons : currentReasons.filter(r => authorityCodes.includes(r.code));
   if (blocked.length) return { ok: false, reasons: blocked };
   if (input.status === 'accepted') {
-    const validity = independentlyValidatePlan(proposal.payload.plan, project.publishers.filter(p => required.includes(p.root.key)), project.snapshot.blockTimestamp);
+    const validity = independentlyValidatePlan(proposal.payload.plan, project.publishers.filter(p => required.includes(p.root.key)), project.snapshot.blockTimestamp, [], completedWorkContext(project));
     if (!validity.valid) return { ok: false, reasons: validity.reasons };
     if (!Number.isSafeInteger(input.validUntil) || input.validUntil! <= project.snapshot.blockTimestamp
       || input.validUntil! < lastAcceptedDuty(proposal.payload.plan, publisherRoot)) return failure({ code: 'grant_expired', publisherRoot });

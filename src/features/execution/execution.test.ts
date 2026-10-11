@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { hashPlan, hashRequirements } from '../../domain/canonical';
 import { makeSmallWorksProject, makeSmallWorksFixture, localRecord, SMALL_WORKS_COORDINATOR } from '../../domain/fixtures';
 import { activeSource, deriveReadiness } from '../../domain/readiness';
-import { deriveExecution, reuseRecipe } from '../../domain/execution';
+import { completedWorkContext, deriveExecution, reuseRecipe } from '../../domain/execution';
 import { prepareDecision } from '../../domain/operations';
 import { solve } from '../../domain/solver';
-import { finalizePlan } from '../../domain/validation';
+import { finalizePlan, independentlyValidatePlan } from '../../domain/validation';
 import type { EntityKey, ProjectAggregate, SolverResult } from '../../domain/types';
 import type { ReplaceBookCommand, WriteAuthority } from '../../data/types';
 import { templateToEditorDraft } from '../projects/editor';
@@ -127,6 +127,63 @@ describe('remaining-work repair', () => {
     }
     return project;
   }
+  it('cannot fill Willow’s unfinished installation by assigning the already-completed Cedar slot again', () => {
+    const project = fixture(); agree(project);
+    const installation = project.proposal!.payload.plan.runbook.find(duty => duty.kind === 'task'
+      && duty.publisherRoot === 'local:cedar' && duty.title === 'Install the displays')!;
+    progress(project, 'local:cedar', installation.id, { kind: 'task_report', status: 'done', note: 'My section is complete.' }, 'cedar-complete');
+    const willow = project.publishers.find(publisher => publisher.root.key === 'local:willow')!;
+    const withdrawal = prepareDecision(project, willow.root.key, willow.root.payload.publisher,
+      { status: 'withdrawn', now: project.snapshot.fetchedAt, operationId: 'willow-withdraws' });
+    if (!withdrawal.ok) throw new Error(JSON.stringify(withdrawal.reasons));
+    willow.book = { status: 'unique', entity: localRecord('local:willow-withdrawn', withdrawal.value.book, willow.root.payload.publisher) };
+    const input = repairInput(project)!;
+    expect(input.recipe.variants[0]!.requirements.find(requirement => requirement.id === 'installation')?.quantity).toBe(1);
+    const result = solveRepair(project, input, [], budget);
+    expect(result.status).toBe('impossible'); expect(result.candidates).toEqual([]);
+    expect(result.reasons).toContainEqual(expect.objectContaining({ code: 'capacity_exceeded', publisherRoot: 'local:cedar', resourceId: 'self' }));
+
+    // A hand-crafted caller must not bypass the rule by supplying the old solver's
+    // structurally valid answer without its recorded completed-work input.
+    const unsafe = solve({ ...input, completedWork: [] }, [], budget).candidates[0]!;
+    expect(unsafe.plan.allocations.find(allocation => allocation.requirementId === 'installation')?.publisherRoot).toBe('local:cedar');
+    expect(independentlyValidatePlan(unsafe.plan, project.publishers, project.snapshot.blockTimestamp, [], completedWorkContext(project)).valid).toBe(false);
+
+    const replacement = makeSmallWorksFixture({ juniper: true }).publishers.find(publisher => publisher.root.key === 'local:juniper')!;
+    project.publishers.push(replacement);
+    if (project.state.status !== 'unique') throw new Error('fixture');
+    project.state.entity.payload.publisherRoots.push(replacement.root.key);
+    const repaired = solveRepair(project, repairInput(project)!, [], budget).candidates[0]!;
+    expect(repaired.plan.allocations.find(allocation => allocation.requirementId === 'installation')?.publisherRoot).toBe('local:juniper');
+    expect(repairInput(project)!.completedWork.some(work => work.obligationId === installation.id)).toBe(true);
+    const prior = project.proposal!;
+    project.proposalHistory.push(prior);
+    project.state.entity.payload.completedWork = deriveExecution(project).completed;
+    project.proposal = localRecord('local:replacement-after-completion', { ...prior.payload, plan: repaired.plan,
+      proposalHash: repaired.proposalHash, requirementsHash: hashRequirements(project.root.key, repaired.plan.variant.requirements) }, SMALL_WORKS_COORDINATOR);
+    if (project.activation.status !== 'unique') throw new Error('fixture');
+    project.activation.entity = localRecord('local:new-completed-activation', { ...project.activation.entity.payload,
+      proposalKey: project.proposal.key, proposalHash: repaired.proposalHash, predecessorActivationKeys: [project.activation.entity.key] }, SMALL_WORKS_COORDINATOR);
+    const readiness = deriveReadiness(project, project.snapshot.fetchedAt);
+    expect(readiness.status).toBe('awaiting_approval'); expect(readiness.acceptedApprovers).toEqual([]);
+    agree(project);
+    expect(deriveReadiness(project, project.snapshot.fetchedAt).status).toBe('ready');
+  });
+  it('retains an equipment reservation solely for its return after its use is completed', () => {
+    const project = fixture(true); agree(project);
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 6 }, 'boards-given');
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:boards-given', quantity: 6 }, 'boards-received');
+    const boardsTask = project.proposal!.payload.plan.runbook.find(duty => duty.kind === 'task'
+      && duty.allocationIds.some(id => project.proposal!.payload.plan.allocations.find(allocation => allocation.id === id)?.resourceId === 'boards'))!;
+    progress(project, 'local:makerspace', boardsTask.id, { kind: 'task_report', status: 'done', note: 'Boards used.' }, 'boards-used');
+    const result = solveRepair(project, repairInput(project)!, [], budget);
+    expect(result.status).toBe('found');
+    const candidate = result.candidates[0]!;
+    expect(candidate.plan.runbook.some(duty => duty.id === 'return-boards')).toBe(true);
+    expect(candidate.plan.runbook.some(duty => duty.id === boardsTask.id)).toBe(false);
+    expect(independentlyValidatePlan(candidate.plan, project.publishers, project.snapshot.blockTimestamp, [], completedWorkContext(project)).valid).toBe(true);
+    expect(deriveExecution(project).outstandingCustodyHolds.map(hold => hold.quantity)).toEqual([6]);
+  });
   it('finds Cedar transport, Juniper installation, Willow unchanged and resets all agreement', () => {
     const project = withdrawn(true), input = repairInput(project)!;
     const result = solveRepair(project, input, [], budget), candidate = result.candidates[0]!;

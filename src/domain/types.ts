@@ -209,6 +209,8 @@ export interface SolverInput {
   snapshot: Snapshot; predecessor: EntityRecord<Proposal> | null;
   predecessorSource: SourcePlanRef | null;
   completedWork: CompletedWork[];
+  /** Authenticated source plans for completed obligations retained across repairs. */
+  proposalHistory?: EntityRecord<Proposal>[];
 }
 export interface SolverPin { requirementId: string; publisherRoot: EntityKey; offerId: string; quantity?: number }
 export interface SolverBudget { maxNodes: number; maxCandidates: number; maxMilliseconds?: number }

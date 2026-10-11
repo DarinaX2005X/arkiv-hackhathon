@@ -56,6 +56,42 @@ describe('strict Arkiv reader through the real SDK and a readonly RPC provider',
     expect(rpc.calls.every(call => ['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'arkiv_query'].includes(call.method))).toBe(true);
   });
 
+  it('rejects a stalled latest head before querying instead of reviving expired consent as current Ready', async () => {
+    const { rpc } = readyFixture();
+    const instance = new ArkivReader({ request: rpc.request, now: () => NOW + 7 * 86_400_000 });
+    await rejected(instance.loadProject(KEYS.project), 'stale_snapshot');
+    expect(rpc.queries).toHaveLength(0);
+  });
+
+  it('marks a current snapshot stale when its block ages out during the complete walk', async () => {
+    const { rpc } = readyFixture(); let now = NOW + 55_000;
+    const instance = new ArkivReader({ request: rpc.request, now: () => now });
+    rpc.queryOverride = () => { now = NOW + 60_001; return undefined; };
+    const project = await instance.loadProject(KEYS.project);
+    expect(project.snapshot).toMatchObject({ blockTimestamp: NOW, fetchedAt: NOW + 55_000,
+      completeness: 'complete', freshness: 'stale', reasons: [{ code: 'stale_snapshot' }] });
+    expect(deriveReadiness(project, now).status).toBe('unverified');
+    expect(rpc.queries.length).toBeGreaterThan(5);
+  });
+
+  it('keeps a recent current head fresh without replacing its canonical timestamp with retrieval time', async () => {
+    const { rpc } = readyFixture(); const now = NOW + 60_000;
+    const project = await new ArkivReader({ request: rpc.request, now: () => now }).loadProject(KEYS.project);
+    expect(project.snapshot).toMatchObject({ blockTimestamp: NOW, fetchedAt: now, freshness: 'fresh', reasons: [] });
+    expect(deriveReadiness(project, now).status).toBe('ready');
+  });
+
+  it('still verifies an explicitly requested historical block using its own consent time', async () => {
+    const { rpc } = readyFixture();
+    const original = await reader(rpc).loadProject(KEYS.project);
+    const now = NOW + 7 * 86_400_000;
+    const project = await new ArkivReader({ request: rpc.request, now: () => now }).loadProject(KEYS.project,
+      { snapshot: { ...original.snapshot, fetchedAt: now } });
+    expect(project.snapshot).toMatchObject({ blockNumber: '100', blockTimestamp: NOW, fetchedAt: now, freshness: 'fresh', reasons: [] });
+    expect(deriveReadiness(project, now).status).toBe('ready');
+    expect(rpc.queries.every(query => query.options.atBlock === '0x64')).toBe(true);
+  });
+
   it.each<[string, (row: RawEntity) => void, DomainReason['code']]>([
     ['foreign root creator', row => { row.creator = STRANGER; row.owner = STRANGER; }, 'foreign_author'],
     ['transferred owner', row => { row.owner = STRANGER; }, 'owner_changed'],
@@ -300,6 +336,25 @@ describe('fresh independent public discovery', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]!.status).toBe('current');
     expect(codes(result.diagnostics)).toContain('foreign_author');
+  });
+
+  it.each([[], [KEYS.project], [entityKey(999), KEYS.project]].map(projectScope => ({ projectScope })))('keeps an offer link current when its project is allowed by scope %j', async ({ projectScope }) => {
+    const { rpc, book } = readyFixture();
+    book.offers[0]!.projectScope = projectScope;
+    rpc.update(KEYS.book, book);
+    const result = await reader(rpc).links('offer', KEYS.project);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: 'current', diagnostics: [] });
+  });
+
+  it('marks an offer link historical when any named offer no longer allows the linked project', async () => {
+    const { rpc, book, offerLink } = readyFixture();
+    book.offers.push({ ...structuredClone(book.offers[0]!), id: 'scoped-elsewhere', projectScope: [entityKey(999)] });
+    rpc.update(KEYS.book, book);
+    rpc.update(KEYS.offerLink, { ...offerLink, offerIds: ['host', 'scoped-elsewhere'] });
+    const result = await reader(rpc).links('offer', KEYS.project);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ status: 'historical', diagnostics: [{ code: 'missing_offer' }] });
   });
 
   it('marks consumed activation request links historical and never turns them into agreement', async () => {

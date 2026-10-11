@@ -1,6 +1,7 @@
 import { canonicalConditions, canonicalJson, hashCanonical, hashOffer, hashPlan, normalizedPlan } from './canonical';
 import { activeSource, sameSource, sourcePlanRef, validateCurrentEntity } from './readiness';
 import { deriveRequiredApprovers } from './validation';
+import type { CompletedWorkContext } from './validation';
 import type {
   Attestation, CompletedWork, ContentHash, DomainReason, ExecutionVerdict, PlanDifference,
   PlanDocument, ProjectAggregate, PublisherAggregate, RecipeTemplate, Snapshot, SourcePlanRef,
@@ -162,6 +163,13 @@ export function deriveExecution(project: ProjectAggregate): ExecutionVerdict {
       ? p.book.entity.payload.custodyHolds.filter(h => h.projectRoot === project.root.key && h.status === 'outstanding') : []),
     reasons: source || prior.length ? [{ code: 'evidence_unavailable' }] : [],
     evidenceAvailability: source || prior.length ? 'unavailable' : 'available' };
+}
+
+/** Recompute the retained facts before evaluating the capacity of a new version. */
+export function completedWorkContext(project: ProjectAggregate): CompletedWorkContext {
+  return { completedWork: deriveExecution(project).completed,
+    proposals: [...(project.proposal ? [project.proposal] : []), ...project.proposalHistory],
+    snapshot: project.snapshot, coordinator: project.root.payload.coordinator };
 }
 
 export function planDiff(before: PlanDocument, after: PlanDocument): PlanDifference {

@@ -58,8 +58,11 @@ export class ArkivReader {
       const timestamp = Number(block.timestamp * 1_000n);
       assertArkiv(block.number === blockNumber && block.hash !== null && Number.isSafeInteger(timestamp),
         'unverified', 'incomplete_snapshot', 'The provider did not return a canonical block.');
+      const fetchedAt = this.now();
+      assertArkiv(fetchedAt - timestamp <= MAX_CONFIDENCE_AGE_MS, 'unverified', 'stale_snapshot',
+        'The latest Arkiv block is too old to verify current availability or agreement.');
       snapshot = { mode: 'public', source: 'arkiv', chainId: TIRAMISU_CHAIN_ID, blockNumber: blockNumber.toString() as `${bigint}`,
-        blockHash: block.hash, blockTimestamp: timestamp, fetchedAt: this.now(), completeness: 'complete', freshness: 'fresh', reasons: [] };
+        blockHash: block.hash, blockTimestamp: timestamp, fetchedAt, completeness: 'complete', freshness: 'fresh', reasons: [] };
     }
     return { snapshot, options, pages: 0, entities: 0, cache: new Map(), publishers: new Map() };
   }
@@ -71,9 +74,13 @@ export class ArkivReader {
     this.checkAbort(context.options);
     const block = await this.client.getBlock({ blockNumber: BigInt(context.snapshot.blockNumber!) });
     assertArkiv(block.hash === context.snapshot.blockHash, 'unverified', 'incomplete_snapshot', 'The chain changed while this snapshot was being read.');
-    if (this.now() - context.snapshot.fetchedAt > MAX_CONFIDENCE_AGE_MS) {
+    const now = this.now();
+    // Explicit snapshots also serve historical and receipt verification. Their block age
+    // does not limit historical truth; a current head must remain recent for the whole walk.
+    if (now - context.snapshot.fetchedAt > MAX_CONFIDENCE_AGE_MS
+      || (!context.options.snapshot && now - context.snapshot.blockTimestamp > MAX_CONFIDENCE_AGE_MS)) {
       context.snapshot.freshness = 'stale';
-      context.snapshot.reasons.push({ code: 'stale_snapshot' });
+      if (!context.snapshot.reasons.some(reason => reason.code === 'stale_snapshot')) context.snapshot.reasons.push({ code: 'stale_snapshot' });
     }
     return context.snapshot;
   }
@@ -303,7 +310,8 @@ export class ArkivReader {
           linkDiagnostics.push({ code: publisher.book.status === 'conflict' ? 'conflicting_heads' : 'missing_state' });
         } else if (link.payload.offerIds.some(id => {
           const book = publisher.book;
-          return book.status !== 'unique' || !book.entity.payload.offers.some(offer => offer.id === id);
+          return book.status !== 'unique' || !book.entity.payload.offers.some(offer => offer.id === id
+            && (offer.projectScope.length === 0 || offer.projectScope.includes(link.payload.projectRoot)));
         })) {
           status = 'historical'; linkDiagnostics.push({ code: 'missing_offer' });
         }

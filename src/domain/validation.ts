@@ -1,13 +1,31 @@
 import { canonicalConditions, canonicalJson, compareText, hashCanonical, hashOffer, hashPlan, hashRequirements, offerIdentity, resourceIdentity } from './canonical';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from './types';
+import { validateCurrentEntity } from './readiness';
 import type {
-  Allocation, Attestation, BookState, Condition, DomainReason, EntityKey, EntityPayload, Interval,
+  Actor, Allocation, Attestation, BookState, CompletedWork, Condition, DomainReason, EntityKey, EntityPayload, EntityRecord, Interval,
   ContentHash, Offer, PlanDocument, ProjectRecipe, PublisherAggregate, Requirement, Resource,
-  Snapshot, SolverInput, SolverPin, ValidationResult,
+  Proposal, ResourceKind, Snapshot, SolverInput, SolverPin, SourcePlanRef, ValidationResult,
 } from './types';
 
 export const MAX_PAYLOAD_BYTES = 120 * 1024;
 export const MAX_QUANTITY = 1_000_000;
+/** Runtime evidence for occupied work in preceding versions; never part of a public plan. */
+export interface CompletedWorkContext {
+  completedWork: readonly CompletedWork[];
+  proposals: readonly EntityRecord<Proposal>[];
+  snapshot?: Snapshot;
+  coordinator?: Actor;
+}
+export interface CompletedReservation {
+  source: SourcePlanRef;
+  allocation: Allocation;
+  kind: ResourceKind;
+}
+export function solverCompletedWorkContext(input: SolverInput): CompletedWorkContext {
+  return { completedWork: input.completedWork,
+    proposals: [...(input.predecessor ? [input.predecessor] : []), ...(input.proposalHistory ?? [])],
+    snapshot: input.snapshot, coordinator: input.predecessor?.provenance.creator };
+}
 type Check = (value: unknown, path: string, reasons: DomainReason[]) => void;
 type Shape = Record<string, Check>;
 const problem = (reasons: DomainReason[], path: string, code: DomainReason['code'] = 'invalid_schema'): void => { reasons.push({ code, path }); };
@@ -372,6 +390,71 @@ export function offerFits(offer: Offer, resource: Resource, requirement: Require
       : condition.kind === 'allowed_venues' ? condition.venueIds.includes(venueId) : true);
 }
 
+/** Resolve performed work to its original occupied interval, even across several revisions. */
+export function completedWorkReservations(projectRoot: EntityKey, context?: CompletedWorkContext, currentPlanHash?: ContentHash): {
+  reservations: CompletedReservation[]; reasons: DomainReason[];
+} {
+  const reservations: CompletedReservation[] = [], reasons: DomainReason[] = [];
+  const seen = new Set<string>();
+  for (const work of context?.completedWork ?? []) {
+    // Progress on this very plan is already represented by its allocations. Only
+    // work in a previous material version adds occupied capacity to a replacement.
+    if (work.source.projectRoot === projectRoot && work.source.proposalHash === currentPlanHash) continue;
+    const proposal = context?.proposals.find(item => item.key === work.source.proposalKey
+      && item.payload.proposalHash === work.source.proposalHash && item.payload.projectRoot === projectRoot);
+    const authentic = proposal && (context?.snapshot
+      ? validateCurrentEntity(proposal, context.snapshot, context.coordinator).valid
+      : validateEntityPayload(proposal.payload).valid);
+    if (work.source.projectRoot !== projectRoot || !proposal || !authentic || work.evidenceAvailability !== 'available'
+      || work.attestationIds.length === 0) {
+      reasons.push({ code: 'evidence_unavailable', obligationId: work.obligationId }); continue;
+    }
+    const obligation = proposal.payload.plan.runbook.find(item => item.id === work.obligationId);
+    if (!obligation) { reasons.push({ code: 'evidence_unavailable', obligationId: work.obligationId }); continue; }
+    // Physical transfers have their own custody accounting; they do not consume
+    // an additional set of the equipment already reserved for its use.
+    if (obligation.kind !== 'task') continue;
+    for (const id of obligation.allocationIds) {
+      const allocation = proposal.payload.plan.allocations.find(item => item.id === id);
+      const requirement = proposal.payload.plan.variant.requirements.find(item => item.id === allocation?.requirementId);
+      if (!allocation || !requirement) { reasons.push({ code: 'evidence_unavailable', obligationId: work.obligationId }); continue; }
+      const identity = canonicalJson([work.source.projectRoot, work.source.activationKey, work.source.proposalKey, id]);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      reservations.push({ source: work.source, kind: requirement.kind,
+        allocation: { ...allocation, interval: { ...obligation.interval } } });
+    }
+  }
+  return { reservations, reasons };
+}
+
+/** Historical work constrains overlapping new use, not a later non-overlapping shift. */
+export function occupiedAllocations(allocations: readonly Allocation[], reservations: readonly CompletedReservation[], plan?: PlanDocument): Allocation[] {
+  const occupied: Allocation[] = [];
+  for (const reservation of reservations) {
+    const prior = reservation.allocation;
+    const overlapping = allocations.filter(item => item.publisherRoot === prior.publisherRoot && item.resourceId === prior.resourceId
+      && item.interval.start < prior.interval.end && prior.interval.start < item.interval.end);
+    if (!overlapping.length) continue;
+    const boundaries = [...new Set([prior.interval.start, prior.interval.end,
+      ...overlapping.flatMap(item => [Math.max(prior.interval.start, item.interval.start), Math.min(prior.interval.end, item.interval.end)])])].sort((a, b) => a - b);
+    for (let index = 0; index + 1 < boundaries.length; index++) {
+      const start = boundaries[index]!, end = boundaries[index + 1]!;
+      const simultaneous = overlapping.filter(item => item.interval.start <= start && start < item.interval.end);
+      if (!simultaneous.length) continue;
+      // A retained allocation used solely to return these same items continues
+      // their original reservation. It is not another execution of the task.
+      const continuing = reservation.kind === 'equipment' && plan ? simultaneous.filter(item => item.requirementId === prior.requirementId
+        && item.unit === prior.unit && plan.runbook.some(duty => duty.allocationIds.includes(item.id))
+        && !plan.runbook.some(duty => duty.kind === 'task' && duty.allocationIds.includes(item.id)))
+        .reduce((total, item) => total + item.quantity, 0) : 0;
+      const quantity = Math.max(0, prior.quantity - continuing);
+      if (quantity > 0) occupied.push({ ...prior, quantity, interval: { start, end } });
+    }
+  }
+  return occupied;
+}
+
 interface Load { quantity: number; interval: Interval; projectRoot: EntityKey | null }
 function peakLoad(loads: readonly Load[], holds: number): number {
   const events: { at: number; delta: number }[] = [];
@@ -383,12 +466,13 @@ function peakLoad(loads: readonly Load[], holds: number): number {
 }
 
 /** Candidate allocations replace this publisher's previous project grant exactly once. */
-export function capacityConflicts(allocations: readonly Allocation[], publishers: readonly PublisherAggregate[], projectRoot: EntityKey | null, now: number): DomainReason[] {
+export function capacityConflicts(allocations: readonly Allocation[], publishers: readonly PublisherAggregate[], projectRoot: EntityKey | null, now: number,
+  occupied: readonly Allocation[] = []): DomainReason[] {
   const reasons: DomainReason[] = [];
   for (const publisher of publishers) {
     if (publisher.book.status !== 'unique') continue;
     const book = publisher.book.entity.payload;
-    const own = allocations.filter(entry => entry.publisherRoot === publisher.root.key);
+    const own = [...allocations, ...occupied].filter(entry => entry.publisherRoot === publisher.root.key);
     if (projectRoot !== null && own.length === 0) continue;
     const foreignGrants = book.grants.filter(grant => grant.projectRoot !== projectRoot && grant.validUntil > now);
     for (const resource of book.resources) {
@@ -518,10 +602,13 @@ function transferConservation(plan: PlanDocument, books: ReadonlyMap<EntityKey, 
   return reasons;
 }
 
-export function independentlyValidatePlan(plan: PlanDocument, publishers: readonly PublisherAggregate[], now: number, pins: readonly SolverPin[] = []): ValidationResult {
+export function independentlyValidatePlan(plan: PlanDocument, publishers: readonly PublisherAggregate[], now: number, pins: readonly SolverPin[] = [],
+  completedContext?: CompletedWorkContext): ValidationResult {
   const shape = validatePlanDocument(plan);
   if (!shape.valid) return shape;
   const reasons: DomainReason[] = [];
+  const completed = completedWorkReservations(plan.projectRoot, completedContext, hashPlan(plan));
+  reasons.push(...completed.reasons);
   const books = new Map<EntityKey, BookState>();
   unique(publishers, entry => entry.root.key, reasons, '$.publishers');
   for (const publisher of publishers) {
@@ -586,7 +673,8 @@ export function independentlyValidatePlan(plan: PlanDocument, publishers: readon
   for (const { offer } of usedOffers.values()) for (const condition of canonicalConditions(offer.conditions)) conditionsByContent.set(canonicalJson(condition), condition);
   if (!equal(canonicalConditions(plan.conditions), canonicalConditions([...conditionsByContent.values()]))) reasons.push({ code: 'condition_unsatisfied', path: '$.conditions' });
   reasons.push(...checkConditions(plan.conditions, [...usedOffers.values()], plan.variant.id, plan.variant.venueId));
-  reasons.push(...capacityConflicts(plan.allocations, publishers, plan.projectRoot, now));
+  reasons.push(...capacityConflicts(plan.allocations, publishers, plan.projectRoot, now,
+    occupiedAllocations(plan.allocations, completed.reservations, plan)));
   for (const pin of pins) {
     const amount = plan.allocations.filter(item => item.requirementId === pin.requirementId && item.publisherRoot === pin.publisherRoot && item.offerId === pin.offerId).reduce((sum, item) => sum + item.quantity, 0);
     if (pin.quantity === undefined ? amount < 1 : amount !== pin.quantity) reasons.push({ code: 'pin_conflict', requirementId: pin.requirementId, publisherRoot: pin.publisherRoot, offerId: pin.offerId });
@@ -599,7 +687,8 @@ export type FinalizedPlanResult =
   | { ok: false; reasons: DomainReason[] };
 
 /** Explicit transfer duties are entered by the organizer; their parties are never guessed. */
-export function finalizePlan(document: PlanDocument, publishers: readonly PublisherAggregate[], snapshot: Snapshot): FinalizedPlanResult {
+export function finalizePlan(document: PlanDocument, publishers: readonly PublisherAggregate[], snapshot: Snapshot,
+  completedContext?: CompletedWorkContext): FinalizedPlanResult {
   const plan = structuredClone(document);
   // Reservation time includes custody in transit. Required-use and task time stay explicit.
   for (const allocation of plan.allocations) {
@@ -614,7 +703,7 @@ export function finalizePlan(document: PlanDocument, publishers: readonly Publis
     };
   }
   plan.requiredApprovers = deriveRequiredApprovers(plan);
-  const validation = independentlyValidatePlan(plan, publishers, snapshot.blockTimestamp);
+  const validation = independentlyValidatePlan(plan, publishers, snapshot.blockTimestamp, [], completedContext);
   if (snapshot.completeness !== 'complete') validation.reasons.push({ code: 'incomplete_snapshot' });
   if (snapshot.freshness !== 'fresh') validation.reasons.push({ code: 'stale_snapshot' });
   if (plan.chainId !== snapshot.chainId) validation.reasons.push({ code: 'invalid_identity' });
@@ -643,5 +732,6 @@ export function validateSolverInput(input: SolverInput): ValidationResult {
   if (input.predecessor) result.reasons.push(...validateEntityPayload(input.predecessor.payload).reasons);
   if ((input.predecessor === null) !== (input.predecessorSource === null)) result.reasons.push({ code: 'proposal_mismatch' });
   if (input.predecessor && input.predecessorSource && (input.predecessor.key !== input.predecessorSource.proposalKey || input.predecessor.payload.proposalHash !== input.predecessorSource.proposalHash || input.projectRoot !== input.predecessorSource.projectRoot)) result.reasons.push({ code: 'proposal_mismatch' });
+  result.reasons.push(...completedWorkReservations(input.projectRoot, solverCompletedWorkContext(input)).reasons);
   return { valid: result.reasons.length === 0, reasons: result.reasons };
 }

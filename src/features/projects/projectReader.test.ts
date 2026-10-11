@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalSnapshot, makeSmallWorksProject, SMALL_WORKS_NOW } from '../../domain/fixtures';
-import type { ProjectAggregate } from '../../domain/types';
+import { TIRAMISU_CHAIN_ID, type ProjectAggregate } from '../../domain/types';
 import type { Result } from '../../data/types';
 import { createProjectReader, PROJECT_REFRESH_INTERVAL_MS, type FocusEvents } from './projectReader';
 
@@ -20,6 +20,10 @@ function deferred<T>() {
 }
 const fresh = () => makeSmallWorksProject({ now: Date.now() });
 const ok = (project = fresh()): Result<ProjectAggregate> => ({ ok: true, value: project });
+const publicRecord = (blockTimestamp: number) => ({
+  snapshot: { ...createLocalSnapshot(Date.now()), mode: 'public' as const, source: 'arkiv' as const,
+    chainId: TIRAMISU_CHAIN_ID, blockNumber: '100' as const, blockHash: `0x${'11'.repeat(32)}` as const, blockTimestamp },
+});
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(SMALL_WORKS_NOW); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
@@ -108,6 +112,36 @@ describe('project reads and freshness', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(reader.getSnapshot().project?.snapshot.freshness).toBe('stale');
     expect(reader.getSnapshot().project?.snapshot.reasons).toContainEqual({ code: 'stale_snapshot' });
+    reader.stop();
+  });
+
+  it('expires current public confidence from the block time while the next request hangs', async () => {
+    const blockTimestamp = Date.now() - 50_000;
+    const record = publicRecord(blockTimestamp);
+    const pending = deferred<Result<typeof record>>();
+    const load = vi.fn<() => Promise<Result<typeof record>>>().mockResolvedValueOnce({ ok: true, value: record }).mockReturnValue(pending.promise);
+    const reader = createProjectReader(load);
+    reader.start(true); await reader.refresh();
+    void reader.refresh();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reader.getSnapshot().project?.snapshot.freshness).toBe('fresh');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reader.getSnapshot().project?.snapshot).toMatchObject({ blockTimestamp, fetchedAt: SMALL_WORKS_NOW,
+      freshness: 'stale', reasons: [{ code: 'stale_snapshot' }] });
+    expect(reader.getSnapshot().loading).toBe(true);
+    reader.stop();
+  });
+
+  it('does not renew current confidence when repeated reads have new retrieval times but the same old block', async () => {
+    const blockTimestamp = Date.now();
+    const load = vi.fn(async () => ({ ok: true as const, value: publicRecord(blockTimestamp) }));
+    const reader = createProjectReader(load);
+    reader.start(true); await reader.refresh();
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(load).toHaveBeenCalledTimes(5);
+    expect(reader.getSnapshot().project?.snapshot).toMatchObject({ blockTimestamp, fetchedAt: SMALL_WORKS_NOW + 60_000, freshness: 'stale' });
+    await reader.refresh();
+    expect(reader.getSnapshot().project?.snapshot).toMatchObject({ fetchedAt: Date.now(), freshness: 'stale' });
     reader.stop();
   });
 

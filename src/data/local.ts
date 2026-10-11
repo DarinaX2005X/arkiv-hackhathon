@@ -1,6 +1,7 @@
 import { canonicalJson, hashCanonical, hashPlan } from '../domain/canonical';
 import { deriveReadiness, sameActor, validateExactGrant } from '../domain/readiness';
 import { independentlyValidatePlan, validateBookCapacity, validateEntityPayload, validateRecipe } from '../domain/validation';
+import { completedWorkContext } from '../domain/execution';
 import { PROTOCOL } from '../domain/types';
 import { createOperationIntent } from './operations';
 import type {
@@ -542,7 +543,7 @@ export class LocalRepository implements Repository {
       const publishers = project.publishers.map(publisher => publisher.root.key === root.key
         ? { ...publisher, book: { status: 'unique' as const, entity: { ...ctx.store.records[keys[0]!]!.entity, payload: command.book } as EntityRecord<BookState> } }
         : publisher);
-      const checked = independentlyValidatePlan(project.proposal.payload.plan, publishers, ctx.now); if (!checked.valid) validation(checked.reasons);
+      const checked = independentlyValidatePlan(project.proposal.payload.plan, publishers, ctx.now, [], completedWorkContext(project)); if (!checked.valid) validation(checked.reasons);
     }
     const book = this.create(ctx, command.book); this.consume(ctx, keys); return book;
   }
@@ -557,7 +558,7 @@ export class LocalRepository implements Repository {
       const admitted = project.state.entity.payload.publisherRoots;
       if (command.proposal.plan.requiredApprovers.some(key => !admitted.includes(key))) reject('invalid_input', 'scope_mismatch');
       if (canonicalJson(command.proposal.plan.predecessor) !== canonicalJson(this.predecessor(project))) reject('stale_heads', 'proposal_mismatch');
-      const checked = independentlyValidatePlan(command.proposal.plan, project.publishers, ctx.now); if (!checked.valid) validation(checked.reasons);
+      const checked = independentlyValidatePlan(command.proposal.plan, project.publishers, ctx.now, [], completedWorkContext(project)); if (!checked.valid) validation(checked.reasons);
       return this.create(ctx, command.proposal);
     });
   }
@@ -569,7 +570,7 @@ export class LocalRepository implements Repository {
       const proposal = this.get<Proposal>(ctx.store, command.proposalKey, 'proposal', ctx.now); this.owner(proposal, ctx.actor);
       if (proposal.payload.projectRoot !== command.projectRoot || proposal.payload.proposalHash !== command.proposalHash) reject('invalid_input', 'proposal_mismatch');
       if (canonicalJson(proposal.payload.plan.predecessor) !== canonicalJson(this.predecessor(project))) reject('stale_heads', 'proposal_mismatch');
-      const checked = independentlyValidatePlan(proposal.payload.plan, project.publishers, ctx.now); if (!checked.valid) validation(checked.reasons);
+      const checked = independentlyValidatePlan(proposal.payload.plan, project.publishers, ctx.now, [], completedWorkContext(project)); if (!checked.valid) validation(checked.reasons);
       const activation = this.create<PlanActivation>(ctx, { ...this.base(ctx), entityType: 'plan_activation', projectRoot: command.projectRoot,
         proposalKey: proposal.key, proposalHash: proposal.payload.proposalHash, predecessorActivationKeys: keys });
       this.consume(ctx, keys); return activation;

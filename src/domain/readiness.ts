@@ -1,5 +1,6 @@
 import { canonicalJson, hashPlan, hashRequirements } from './canonical';
 import { deriveRequiredApprovers, independentlyValidatePlan, validateBookState, validateEntityPayload } from './validation';
+import { completedWorkContext } from './execution';
 import type {
   Actor, AgreementHealth, DomainReason, EntityKey, EntityPayload, EntityRecord,
   Grant, PlanDocument, ProjectAggregate, Readiness, Snapshot, SourcePlanRef, ValidationResult,
@@ -222,7 +223,7 @@ export function deriveReadiness(project: ProjectAggregate, now = Date.now()): Re
     reasons.push(...grantReasons);
     if (!grantReasons.length) result.acceptedApprovers.push(publisherRoot);
   }
-  reasons.push(...independentlyValidatePlan(plan, project.publishers.filter(p => required.has(p.root.key)), snapshot.blockTimestamp).reasons);
+  reasons.push(...independentlyValidatePlan(plan, project.publishers.filter(p => required.has(p.root.key)), snapshot.blockTimestamp, [], completedWorkContext(project)).reasons);
   result.status = health(reasons, 'ready');
   if (result.status === 'unverified') result.evidenceAvailability = 'partial';
   return result;
