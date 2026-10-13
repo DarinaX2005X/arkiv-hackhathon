@@ -83,14 +83,14 @@ Publishing and registration require an injected Ethereum-compatible EOA wallet o
 
 <img src="docs/assets/exact-agreement.svg" alt="Small Works first assigns transport to Oak and installation to Cedar and Willow. When Oak withdraws, Cedar takes transport and Juniper joins Willow. Every required contributor must approve the revised version." width="960">
 
-1. **Find a workable arrangement.** Use **Practice as** to prepare Oak's transport offer in **My contributions**. As coordinator, admit the offer in **People**, then find and propose an arrangement in **Plan**, including equipment handover and return.
-2. **Agree to this version.** Switch to each required contributor and review the proposal. Their separate decisions must all match the exact plan before it becomes ready.
-3. **See what changes.** As Oak, withdraw the transport commitment. The old plan loses readiness, while its decisions remain attached to their original version.
-4. **Repair and agree again.** Share Juniper's installation offer, then find a replacement as coordinator. Juniper installs with Willow, freeing Cedar for transport. Every required owner reviews the new version.
+1. **Find a workable arrangement.** Choose **Add Oak and find a plan**. Oak transports the artworks; Cedar and Willow install. The proposal includes equipment delivery and return.
+2. **Agree to this version.** Choose **Play the group’s agreement**. Each fictional contributor records a separate local decision. The plan becomes ready when every required agreement matches.
+3. **See what changes.** Choose **Let Oak withdraw**. The old plan loses readiness, while its decisions remain attached to their original version.
+4. **Repair and agree again.** Choose **Add Juniper and update the plan**, then **Play fresh agreement**. Juniper installs with Willow, freeing Cedar for transport. Every required owner reviews the new version.
 
-The practice opens the full project, including people, history and the run sheet. Switch fictional roles to record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
+Choose **Explore the full project** to inspect people, history and the run sheet. Use **Practice as** to switch fictional roles, prepare offers, record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
 
-Practice uses local domain operations with fictional identities and a controlled clock. Its role selector simulates the separate owners. Progress survives reload; **Reset practice** resets only the example.
+Practice uses local domain operations with fictional identities and a controlled clock. Its agreement buttons and role selector simulate the separate owners. Progress survives reload; **Start the example again** resets only the example.
 
 **Make it yours:** choose **Create an event**, enter its purpose, date, time and time zone, then describe the place and contributions it needs. Unsent input is saved automatically while you work. Publishing requires your wallet and an explicit review. Earlier device-only projects remain available for recovery in **My projects**. Reusing a recipe starts a new public-project draft without copying anyone's approvals.
 
