@@ -12,7 +12,7 @@ import { hashCanonical } from '../../domain/canonical';
 import type { DiscoveryLink, ListResult, ProjectSummary, ReadOptions } from '../types';
 import { createArkivReadClient } from './client';
 import type { ArkivReadClient, RpcRequest } from './client';
-import { ArkivRepositoryError, assertArkiv, repositoryError } from './errors';
+import { ArkivRepositoryError, assertArkiv, readResponseTooLarge, repositoryError } from './errors';
 import { creatorOf, decodeEntity, ENTITY_SELECTION, NAMESPACE, publicAddress, publicKey, sameIdentity } from './envelope';
 
 export const REFRESH_INTERVAL_MS = 15_000;
@@ -20,7 +20,7 @@ export const MAX_CONFIDENCE_AGE_MS = 60_000;
 export interface ReaderPolicy { maxPages: number; maxEntities: number; maxPublishers: number; pageSize: number; cursorRestarts: number }
 export interface ReadContext {
   snapshot: Snapshot; options: ReadOptions; pages: number; entities: number;
-  cache: Map<string, EntityRecord>; publishers: Map<string, PublisherAggregate>;
+  client: ArkivReadClient; cache: Map<string, EntityRecord>; publishers: Map<string, PublisherAggregate>;
 }
 export interface ArkivReaderOptions { request?: RpcRequest; now?: () => number; policy?: Partial<ReaderPolicy> }
 const DEFAULT_POLICY: ReaderPolicy = { maxPages: 160, maxEntities: 4_000, maxPublishers: 50, pageSize: 100, cursorRestarts: 1 };
@@ -30,9 +30,11 @@ export class ArkivReader {
   readonly request: RpcRequest;
   readonly now: () => number;
   readonly policy: ReaderPolicy;
+  private readonly createScopedClient: (signal?: AbortSignal) => ArkivReadClient;
   constructor(options: ArkivReaderOptions = {}) {
     const boundary = createArkivReadClient(options.request);
     this.client = boundary.client; this.request = boundary.request; this.now = options.now ?? Date.now;
+    this.createScopedClient = boundary.createScopedClient;
     this.policy = { ...DEFAULT_POLICY, ...options.policy };
     assertArkiv(Object.values(this.policy).every(value => Number.isSafeInteger(value) && value >= 0)
       && this.policy.maxPages > 0 && this.policy.maxEntities > 0 && this.policy.maxPublishers > 0
@@ -42,19 +44,26 @@ export class ArkivReader {
 
   async context(options: ReadOptions = {}): Promise<ReadContext> {
     this.checkAbort(options);
-    assertArkiv(await this.client.getChainId() === TIRAMISU_CHAIN_ID, 'wrong_chain', 'invalid_identity', 'The RPC is not Arkiv Tiramisu.');
+    // Each traversal owns its SDK request closure; concurrent reads never share a mutable signal
+    // or viem's per-client in-flight header deduplication. The endpoint policy remains shared.
+    const client = this.createScopedClient(options.signal);
+    assertArkiv(await client.getChainId() === TIRAMISU_CHAIN_ID, 'wrong_chain', 'invalid_identity', 'The RPC is not Arkiv Tiramisu.');
+    this.checkAbort(options);
     let snapshot: Snapshot;
     if (options.snapshot) {
       snapshot = structuredClone(options.snapshot);
       assertArkiv(snapshot.mode === 'public' && snapshot.source === 'arkiv' && snapshot.chainId === TIRAMISU_CHAIN_ID
         && typeof snapshot.blockNumber === 'string' && /^\d+$/.test(snapshot.blockNumber)
         && snapshot.blockHash !== null, 'invalid_input', 'invalid_identity', 'A public snapshot with an exact block and hash is required.');
-      const block = await this.client.getBlock({ blockNumber: BigInt(snapshot.blockNumber) });
+      const block = await client.getBlock({ blockNumber: BigInt(snapshot.blockNumber) });
+      this.checkAbort(options);
       assertArkiv(block.hash === snapshot.blockHash && Number(block.timestamp * 1_000n) === snapshot.blockTimestamp,
         'unverified', 'incomplete_snapshot', 'The requested snapshot is no longer canonical.');
     } else {
-      const blockNumber = await this.client.getBlockNumber({ cacheTime: 0 });
-      const block = await this.client.getBlock({ blockNumber });
+      const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
+      this.checkAbort(options);
+      const block = await client.getBlock({ blockNumber });
+      this.checkAbort(options);
       const timestamp = Number(block.timestamp * 1_000n);
       assertArkiv(block.number === blockNumber && block.hash !== null && Number.isSafeInteger(timestamp),
         'unverified', 'incomplete_snapshot', 'The provider did not return a canonical block.');
@@ -64,7 +73,7 @@ export class ArkivReader {
       snapshot = { mode: 'public', source: 'arkiv', chainId: TIRAMISU_CHAIN_ID, blockNumber: blockNumber.toString() as `${bigint}`,
         blockHash: block.hash, blockTimestamp: timestamp, fetchedAt, completeness: 'complete', freshness: 'fresh', reasons: [] };
     }
-    return { snapshot, options, pages: 0, entities: 0, cache: new Map(), publishers: new Map() };
+    return { snapshot, options, client, pages: 0, entities: 0, cache: new Map(), publishers: new Map() };
   }
 
   checkAbort(options: ReadOptions): void {
@@ -72,7 +81,8 @@ export class ArkivReader {
   }
   async finish(context: ReadContext): Promise<Snapshot> {
     this.checkAbort(context.options);
-    const block = await this.client.getBlock({ blockNumber: BigInt(context.snapshot.blockNumber!) });
+    const block = await context.client.getBlock({ blockNumber: BigInt(context.snapshot.blockNumber!) });
+    this.checkAbort(context.options);
     assertArkiv(block.hash === context.snapshot.blockHash, 'unverified', 'incomplete_snapshot', 'The chain changed while this snapshot was being read.');
     const now = this.now();
     // Explicit snapshots also serve historical and receipt verification. Their block age
@@ -89,11 +99,12 @@ export class ArkivReader {
   async query(context: ReadContext, predicates: Expression[], creator?: AccountAddress,
     stopAfterTwo = false): Promise<Entity[]> {
     const block = BigInt(context.snapshot.blockNumber!);
-    for (let attempt = 0; ; attempt++) {
+    let pageSize = stopAfterTwo ? 2 : this.policy.pageSize, cursorRestarts = 0;
+    for (;;) {
       const rows: Entity[] = []; const seenKeys = new Set<string>(); const seenCursors = new Set<string>();
       try {
-        const builder = this.client.select(ENTITY_SELECTION).where(predicates).atBlock(block)
-          .limit(stopAfterTwo ? 2 : this.policy.pageSize);
+        const builder = context.client.select(ENTITY_SELECTION).where(predicates).atBlock(block)
+          .limit(pageSize);
         if (creator) builder.createdBy(creator);
         let next: (() => Promise<QueryResult<unknown>>) | undefined = () => builder.fetch();
         while (next) {
@@ -101,6 +112,7 @@ export class ArkivReader {
           assertArkiv(context.pages < this.policy.maxPages, 'incomplete', 'page_budget', 'The scoped read exceeded its page budget. No partial list is authoritative.');
           context.pages++;
           const page = await next();
+          this.checkAbort(context.options);
           assertArkiv(page.blockNumber === block, 'unverified', 'incomplete_snapshot', 'A query page belongs to a different block.');
           for (const unknownRow of page.entities) {
             const row = unknownRow as Entity;
@@ -118,8 +130,14 @@ export class ArkivReader {
         }
         return rows;
       } catch (error) {
-        if (!(error instanceof QueryError && error.kind === 'cursor' && attempt < this.policy.cursorRestarts)) throw error;
+        this.checkAbort(context.options);
+        if (readResponseTooLarge(error)) {
+          assertArkiv(pageSize > 1, 'incomplete', 'payload_too_large', 'A public record exceeds the reading service response limit. No partial list is current.');
+          pageSize = Math.max(1, Math.floor(pageSize / 2));
+        } else if (error instanceof QueryError && error.kind === 'cursor' && cursorRestarts < this.policy.cursorRestarts) cursorRestarts++;
+        else throw error;
         // Restart the entire scoped walk at this aggregate's original block, never mix snapshots.
+        // Failed pages and previously decoded rows stay charged to the aggregate's global budget.
       }
     }
   }

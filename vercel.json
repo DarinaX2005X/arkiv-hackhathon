@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "dist",
+  "functions": { "api/arkiv-read.*": { "maxDuration": 30 } },
+  "routes": [
+    { "src": "/(?:\\..*|node_modules(?:/.*)?|src(?:/.*)?|vercel\\.json|vibemachina\\.checkpoint\\.json|api/.*\\.(?:ts|js|mjs))", "status": 404 },
+    { "src": "/desk(?:\\.html|/)", "status": 308, "headers": { "Location": "/desk", "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/index\\.html", "status": 308, "headers": { "Location": "/", "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/404(?:\\.html)?", "dest": "/404.html", "status": 404, "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/desk", "dest": "/desk.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/(?:|demo|workspace|projects/new|contributions|requests|help|sign-in|account|onboarding|events|my-events)", "dest": "/index.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/events/0x[0-9a-fA-F]{64}", "dest": "/index.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/projects/(?:0x[0-9a-fA-F]{64}|local:[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127})(?:/(?:needs|plans|agreement|runbook|history|guests))?", "dest": "/index.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
+    { "src": "/assets/.*", "headers": { "Cache-Control": "public, max-age=31536000, immutable" }, "continue": true },
+    { "src": "/(?:version\\.json|places/.*)", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" }, "continue": true },
+    { "handle": "filesystem" },
+    { "src": "/(?:api(?:/.*)?|assets(?:/.*)?|fonts(?:/.*)?|places(?:/.*)?|.*\\.[^/]+)", "status": 404 },
+    { "src": "/.*", "status": 307, "headers": { "Location": "/404", "Cache-Control": "no-store" } }
+  ]
+}

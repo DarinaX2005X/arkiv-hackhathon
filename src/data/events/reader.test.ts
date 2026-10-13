@@ -93,6 +93,45 @@ async function rejects(task: Promise<unknown>, code: DomainReason['code']) {
 }
 
 describe('complete authenticated admission rosters', () => {
+  it('reuses the authenticated current inclusion block and still detects a final canonical change', async () => {
+    const f = structuredFixture();
+    const event = await reader(f.rpc).instance.loadEvent(KEYS.project);
+    expect(event.roster?.entries[0]?.inclusionTimestamp).toBe(NOW);
+    expect(f.rpc.calls.filter(call => call.method === 'eth_getBlockByNumber')).toHaveLength(2);
+    const changed = structuredFixture();
+    changed.rpc.blockOverride = call => call > 1 ? { hash: entityKey(1001) } : {};
+    await rejects(reader(changed.rpc).instance.loadEvent(KEYS.project), 'incomplete_snapshot');
+  });
+
+  it('stops roster fanout as soon as its consumer cancels', async () => {
+    const f = structuredFixture(), owner = new AbortController();
+    f.rpc.queryOverride = call => { if (call.query.includes("entity_type = str('attendance_state')")) owner.abort(); return undefined; };
+    await rejects(reader(f.rpc).instance.loadEvent(KEYS.project, { signal: owner.signal }), 'incomplete_snapshot');
+    expect(f.rpc.queries.at(-1)?.query).toContain("entity_type = str('attendance_state')");
+    expect(f.rpc.calls.filter(call => call.method === 'eth_getBlockByNumber')).toHaveLength(1);
+    expect(f.rpc.queries.some(call => call.query.includes("entity_type = str('book_state')"))).toBe(false);
+  });
+
+  it('forwards cancellation while authenticating a historical roster inclusion block', async () => {
+    const f = structuredFixture(), owner = new AbortController();
+    f.rpc.row(ATTENDANCE).createdAt = toHex(99);
+    let observed: AbortSignal | undefined, entered: () => void = () => {};
+    const held = new Promise<void>(resolve => { entered = resolve; });
+    const request: RpcRequest = async (args, options) => {
+      if (args.method !== 'eth_getBlockByNumber' || !Array.isArray(args.params) || args.params[0] !== toHex(99)) return f.rpc.request(args);
+      observed = options?.signal;
+      return new Promise((_resolve, reject) => {
+        observed?.addEventListener('abort', () => reject(new DOMException('Cancelled inclusion block', 'AbortError')), { once: true });
+        entered();
+      });
+    };
+    const result = new EventReader({ request, now: () => NOW }).loadEvent(KEYS.project, { signal: owner.signal }).then(() => null, repositoryError);
+    await held; expect(observed?.aborted).toBe(false);
+    owner.abort(); expect(observed?.aborted).toBe(true);
+    expect(await result).toMatchObject({ code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }] });
+    expect(f.rpc.queries.some(call => call.query.includes("entity_type = str('book_state')"))).toBe(false);
+  });
+
   it('paginates all claims at one block, authenticates each creator, and sorts same-block keys deterministically', async () => {
     const f = structuredFixture(); f.rpc.pageSize = 1;
     f.rpc.put(rawEvent(entityKey(90), { ...f.attendance, attendee: PUBLISHER, operationId: 'earlier-key' }, PUBLISHER, { createdAt: toHex(100) }));
@@ -156,6 +195,70 @@ describe('complete authenticated admission rosters', () => {
     expect((await reader(f.rpc).instance.listEvents({ format: 'online' })).items).toHaveLength(0);
     expect((await reader(f.rpc).instance.listEvents({ countryCode: 'DE' })).items).toHaveLength(0);
     expect((await reader(f.rpc).instance.listEvents({ deadlineBefore: NOW })).items).toHaveLength(0);
+  });
+});
+
+describe('event display read coordination', () => {
+  it('shares concurrent complete catalogs, isolates their data, then rereads expiry at the next head', async () => {
+    const f = fixture(); let now = NOW;
+    f.rpc.row(STATE).expiresAt = toHex(101);
+    const repository = new EventRepository({ request: f.rpc.request, now: () => now });
+    const [first, second] = await Promise.all([repository.listEvents(), repository.listEvents()]);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error('Both complete catalog consumers must succeed.');
+    expect(first.value.items).toHaveLength(1); expect(second.value).toEqual(first.value);
+    expect(second.value).not.toBe(first.value); expect(second.value.items[0]).not.toBe(first.value.items[0]);
+    expect(f.rpc.calls.filter(call => call.method === 'eth_chainId')).toHaveLength(1);
+    expect(f.rpc.calls.filter(call => call.method === 'eth_blockNumber')).toHaveLength(1);
+    now += 1_000; f.rpc.block = 101; f.rpc.timestamp = now; f.rpc.blockHash = entityKey(1001);
+    const refreshed = await repository.listEvents();
+    expect(refreshed).toMatchObject({ ok: true, value: { items: [], snapshot: { blockNumber: '101', freshness: 'fresh', completeness: 'complete' } } });
+    expect(first.value.items).toHaveLength(1);
+    expect(f.rpc.calls.filter(call => call.method === 'eth_blockNumber')).toHaveLength(2);
+  });
+
+  it('does not let one abandoned page cancel another consumer of the same event', async () => {
+    const f = fixture(), owner = new AbortController();
+    const repository = new EventRepository({ request: f.rpc.request, now: () => NOW });
+    const abandoned = repository.loadEvent(KEYS.project, { signal: owner.signal }), active = repository.loadEvent(KEYS.project);
+    owner.abort();
+    await expect(abandoned).resolves.toMatchObject({ ok: false, error: { code: 'unverified' } });
+    await expect(active).resolves.toMatchObject({ ok: true, value: { projectRoot: KEYS.project, snapshot: { completeness: 'complete' } } });
+    expect(f.rpc.calls.filter(call => call.method === 'eth_chainId')).toHaveLength(1);
+  });
+
+  it('keeps wallet identity and source policy separate across concurrent calls', async () => {
+    const f = fixture(), repository = new EventRepository({ request: f.rpc.request, now: () => NOW });
+    const [mine, other, envelope, complete] = await Promise.all([
+      repository.listMyEvents({ kind: 'wallet', address: STRANGER }), repository.listMyEvents({ kind: 'wallet', address: PUBLISHER }),
+      repository.loadEvent(KEYS.project, { includeSource: false }), repository.loadEvent(KEYS.project, { includeSource: true }),
+    ]);
+    expect(mine).toMatchObject({ ok: true, value: { items: [{ projectRoot: KEYS.project }] } });
+    expect(other).toMatchObject({ ok: true, value: { items: [] } });
+    expect(envelope).toMatchObject({ ok: true, value: { sourceProject: null } });
+    expect(complete.ok && complete.value.sourceProject?.root.key).toBe(KEYS.project);
+  });
+
+  it('keeps full snapshot confidence and catalog filters separate', async () => {
+    const f = fixture(), repository = new EventRepository({ request: f.rpc.request, now: () => NOW });
+    const first = await repository.loadEvent(KEYS.project);
+    if (!first.ok) throw new Error('Initial event should be readable.');
+    const [fresh, stale, found, missing] = await Promise.all([
+      repository.loadEvent(KEYS.project, { snapshot: first.value.snapshot }),
+      repository.loadEvent(KEYS.project, { snapshot: { ...first.value.snapshot, freshness: 'stale', reasons: [{ code: 'stale_snapshot' }] } }),
+      repository.listEvents({ search: 'workshop' }), repository.listEvents({ search: 'unrelated' }),
+    ]);
+    expect(fresh).toMatchObject({ ok: true, value: { snapshot: { freshness: 'fresh' } } });
+    expect(stale).toMatchObject({ ok: false, error: { reasons: [{ code: 'stale_snapshot' }] } });
+    expect(found).toMatchObject({ ok: true, value: { items: [{ projectRoot: KEYS.project }] } });
+    expect(missing).toMatchObject({ ok: true, value: { items: [] } });
+  });
+
+  it('stops catalog discovery before loading roots when the caller cancels after a page', async () => {
+    const f = fixture(), owner = new AbortController();
+    f.rpc.queryOverride = () => { owner.abort(); return undefined; };
+    await rejects(reader(f.rpc).instance.listEvents({}, { signal: owner.signal }), 'incomplete_snapshot');
+    expect(f.rpc.queries).toHaveLength(1);
   });
 });
 

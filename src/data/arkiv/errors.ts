@@ -14,11 +14,30 @@ export function assertArkiv(condition: unknown, code: RepositoryErrorCode, reaso
   if (!condition) throw new ArkivRepositoryError(code, reason, diagnostic);
 }
 
+/** Only an explicit response bound permits the page walker to reduce its page size. */
+export function readResponseTooLarge(error: unknown): boolean {
+  let current: unknown = error; const seen = new Set<unknown>();
+  for (let depth = 0; current && typeof current === 'object' && depth < 12 && !seen.has(current); depth++) {
+    seen.add(current);
+    const item = current as { name?: unknown; status?: unknown; statusCode?: unknown; headers?: unknown; cause?: unknown };
+    if (item.name === 'ResponseBodyTooLargeError') return true;
+    if ((item.status === 413 || item.statusCode === 413) && item.headers && typeof item.headers === 'object') {
+      const headers = item.headers as { get?: (name: string) => unknown };
+      const reason = typeof headers.get === 'function' ? headers.get('x-arkiv-read-error')
+        : Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-arkiv-read-error')?.[1];
+      if (reason === 'response_too_large') return true;
+    }
+    current = item.cause;
+  }
+  return false;
+}
+
 export function repositoryError(error: unknown): RepositoryError {
   if (error instanceof ArkivRepositoryError) return error.detail;
   let current: unknown = error;
   for (let depth = 0; current && depth < 12; depth++) {
     if (typeof current !== 'object') break;
+    if (current instanceof ArkivRepositoryError) return current.detail;
     if (current instanceof WalletOperationError) {
       const messages: Record<RepositoryErrorCode, string> = {
         invalid_input: 'The prepared transaction input is invalid.',
@@ -54,7 +73,14 @@ export function repositoryError(error: unknown): RepositoryError {
     if (item.kind === 'block' || item.code === -32006) return {
       code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }], retryable: false, diagnostic: 'The requested block is unavailable from this provider.' };
     if (item.status === 429 || item.statusCode === 429) return {
-      code: 'rate_limited', reasons: [{ code: 'rpc_error' }], retryable: true, diagnostic: 'The Arkiv provider rate limit was reached.' };
+      code: 'rate_limited', reasons: [{ code: 'rpc_error' }], retryable: true, diagnostic: 'The network needs a moment. Wait briefly, then refresh.' };
+    if (item.status === 401 || item.statusCode === 401 || item.status === 403 || item.statusCode === 403) return {
+      code: 'network', reasons: [{ code: 'rpc_error' }], retryable: false, diagnostic: 'The public reading service is unavailable. Try again later.' };
+    if ((typeof item.status === 'number' && item.status >= 400 && item.status < 500)
+      || (typeof item.statusCode === 'number' && item.statusCode >= 400 && item.statusCode < 500)
+      || ['parse', 'type', 'literal', 'limits'].includes(String(item.kind))
+      || (typeof item.code === 'number' && [-32600, -32601, -32602, -32001, -32002, -32003, -32004].includes(item.code))) return {
+      code: 'unverified', reasons: [{ code: 'rpc_error' }], retryable: false, diagnostic: 'This information could not be checked safely. Please try again later.' };
     current = item.cause;
   }
   // Never expose SDK errors: they may embed complete payloads or wallet request material.

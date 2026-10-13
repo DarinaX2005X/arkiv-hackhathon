@@ -1,0 +1,34 @@
+.pf-error-page { width: min(1100px, 100%); margin-inline: auto; display: grid; grid-template-columns: 1.05fr 1fr; align-items: center; gap: clamp(24px, 4vw, 64px); padding-block: clamp(36px, 6vw, 88px); }
+.pf-error-picture { position: relative; min-width: 0; }
+.pf-error-art { display: block; width: 100%; height: auto; overflow: visible; }
+.pf-error-number { position: absolute; inset: auto 0 -4px; text-align: center; color: var(--text-on-dark-secondary); font-size: clamp(30px, 5vw, 54px); font-weight: 500; letter-spacing: -.04em; line-height: 1; }
+.pf-error-content { display: grid; gap: 24px; min-width: 0; }
+.pf-error-content h1 { max-width: 13ch; color: var(--text-on-dark); font-size: clamp(34px, 4vw, 52px); }
+.pf-error-content > p { max-width: 39ch; color: var(--text-on-dark-secondary); font-size: 18px; line-height: 1.6; }
+.pf-error-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
+.pf-error-actions > .pf-button--primary { background: var(--action-on-dark); color: var(--on-action-on-dark); border-color: var(--action-on-dark); }
+.pf-error-actions > .pf-button--secondary { background: #f8faf3; color: #214c3c; border-color: #d5dfd1; }
+.pf-error-help { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.pf-error-help a, .pf-error-header a, .pf-error-footer a { color: var(--text-on-dark-secondary); }
+.pf-error-document { width: min(1280px, 100%); min-height: 100svh; margin-inline: auto; padding: 0 clamp(20px, 4vw, 48px); display: flex; flex-direction: column; }
+.pf-error-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 24px; }
+.pf-error-header nav { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; }
+.pf-error-header nav a { padding-block: 10px; text-decoration: none; }
+.pf-error-header .pf-error-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text-on-dark); font-size: 23px; font-weight: 600; text-decoration: none; }
+.pf-error-brand svg { width: 34px; height: 34px; }
+.pf-error-document main { flex: 1; display: grid; align-content: center; }
+.pf-error-document main:focus { outline: none; }
+.pf-error-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-block: 24px; color: var(--text-on-dark-secondary); font-size: 14px; }
+.pf-error-skip { position: absolute; top: 8px; left: 16px; padding: 12px 18px; border-radius: 10px; background: #fff; transform: translateY(-150%); z-index: 10; }
+.pf-error-skip:focus { transform: translateY(0); }
+@media (hover: hover) and (pointer: fine) { .pf-error-help a:hover, .pf-error-header nav a:hover, .pf-error-footer a:hover { color: var(--text-on-dark); } }
+@media (max-width: 760px) {
+  .pf-error-page { grid-template-columns: 1fr; padding-block: 16px 40px; gap: 40px; }
+  .pf-error-picture { width: min(420px, 100%); margin-inline: auto; }
+  .pf-error-content { justify-items: start; gap: 20px; }
+  .pf-error-content h1 { max-width: 18ch; }
+  .pf-error-content > p { font-size: 17px; }
+  .pf-error-header { flex-wrap: wrap; padding-block: 16px; }
+  .pf-error-header nav { gap: 8px 20px; }
+  .pf-error-footer { padding-block: 20px; }
+}

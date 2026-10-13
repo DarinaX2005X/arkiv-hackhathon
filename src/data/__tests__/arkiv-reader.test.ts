@@ -5,6 +5,7 @@ import { independentlyValidatePlan } from '../../domain/validation';
 import type { DomainReason, ProjectAggregate } from '../../domain/types';
 import { ArkivReader } from '../arkiv/reader';
 import type { ReaderPolicy } from '../arkiv/reader';
+import type { RpcRequest } from '../arkiv/client';
 import { ArkivRepositoryError, repositoryError } from '../arkiv/errors';
 import {
   BLOCK_HASH, COORDINATOR, KEYS, NOW, PUBLISHER, STRANGER, ReadRpcFixture,
@@ -28,7 +29,61 @@ function attribute(row: RawEntity, name: string) {
   return found;
 }
 
+function heldRead(rpc: ReadRpcFixture, matches: (args: Parameters<RpcRequest>[0]) => boolean) {
+  let started: () => void = () => {}, complete: () => Promise<void> = async () => {};
+  let observed: AbortSignal | undefined;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const request: RpcRequest = async (args, options) => {
+    if (!matches(args)) return rpc.request(args);
+    observed = options?.signal;
+    return new Promise((resolve, reject) => {
+      const abort = () => { observed?.removeEventListener('abort', abort); reject(new DOMException('Cancelled fixture read', 'AbortError')); };
+      observed?.addEventListener('abort', abort, { once: true });
+      complete = async () => {
+        observed?.removeEventListener('abort', abort);
+        try { resolve(await rpc.request(args)); } catch (error) { reject(error); }
+      };
+      started(); if (observed?.aborted) abort();
+    });
+  };
+  return { request, entered, release: () => complete(), signal: () => observed };
+}
+
 describe('strict Arkiv reader through the real SDK and a readonly RPC provider', () => {
+  it.each(['chain', 'head', 'initial header', 'explicit snapshot header', 'query page', 'final header'] as const)('forwards cancellation into a held %s request', async stage => {
+    const { rpc } = readyFixture(), owner = new AbortController(); let headers = 0;
+    const snapshot = stage === 'explicit snapshot header' ? (await reader(rpc).loadProject(KEYS.project)).snapshot : undefined;
+    const held = heldRead(rpc, args => {
+      if (args.method === 'eth_getBlockByNumber') headers++;
+      return stage === 'chain' ? args.method === 'eth_chainId' : stage === 'head' ? args.method === 'eth_blockNumber'
+        : stage === 'query page' ? args.method === 'arkiv_query'
+          : args.method === 'eth_getBlockByNumber' && headers === (stage === 'final header' ? 2 : 1);
+    });
+    const instance = new ArkivReader({ request: held.request, now: () => NOW });
+    const result = instance.loadProject(KEYS.project, { snapshot, signal: owner.signal }).then(() => null, repositoryError);
+    await held.entered;
+    expect(held.signal()?.aborted).toBe(false); owner.abort();
+    expect(held.signal()?.aborted).toBe(true);
+    expect(await result).toMatchObject({ code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }] });
+  });
+
+  it('lets a second traversal finish a shared pinned query after the first traversal cancels', async () => {
+    const { rpc } = readyFixture(), firstOwner = new AbortController(), secondOwner = new AbortController();
+    let queries = 0;
+    const held = heldRead(rpc, args => { if (args.method === 'arkiv_query') { queries++; return true; } return false; });
+    const instance = new ArkivReader({ request: held.request, now: () => NOW });
+    const firstContext = await instance.context({ signal: firstOwner.signal });
+    const secondContext = await instance.context({ signal: secondOwner.signal });
+    const first = instance.entity(firstContext, KEYS.project, 'project_root').then(() => null, repositoryError);
+    const second = instance.entity(secondContext, KEYS.project, 'project_root');
+    await held.entered; firstOwner.abort();
+    expect(await first).toMatchObject({ code: 'unverified' });
+    expect(held.signal()?.aborted).toBe(false); expect(queries).toBe(1);
+    await held.release(); expect((await second)?.key).toBe(KEYS.project);
+    await instance.finish(secondContext);
+    expect(secondContext.snapshot).toMatchObject({ freshness: 'fresh', completeness: 'complete' });
+  });
+
   it('returns the complete bounded book fork set so its owner can review every consumed head', async () => {
     const { rpc, book } = readyFixture(); rpc.pageSize = 1;
     rpc.put(rawEntity(entityKey(90), { ...book, operationId: 'fork-two' }, PUBLISHER));
@@ -229,6 +284,64 @@ describe('complete scoped pagination', () => {
     expect(listing.every(call => call.query.includes(`$creator = addr(${PUBLISHER})`))).toBe(true);
     expect(listing[1]!.options.cursor).toBeDefined();
     expect(result.snapshot.completeness).toBe('complete');
+  });
+
+  const responseBound = () => Object.assign(new Error('No partial response'), { status: 413,
+    headers: new Headers({ 'X-Arkiv-Read-Error': 'response_too_large' }) });
+
+  it('downshifts an oversized page by restarting the entire scope at the original block', async () => {
+    const rpc = ownRoots(); rpc.pageSize = 1; let removed = false;
+    rpc.queryOverride = call => {
+      if (call.options.cursor && Number(BigInt(call.options.limit)) > 25) {
+        if (!removed) { rpc.remove(entityKey(71)); removed = true; }
+        throw responseBound();
+      }
+      return undefined;
+    };
+    const result = await reader(rpc).listOwnPublishers({ kind: 'wallet', address: PUBLISHER });
+    expect(result.items.map(item => item.root.key)).toEqual([entityKey(72), entityKey(73)]);
+    const listing = rpc.queries.filter(call => call.query.includes("entity_type = str('publisher_root')"));
+    expect(listing.map(call => Number(BigInt(call.options.limit)))).toEqual([100, 100, 50, 50, 25, 25]);
+    expect(listing.filter(call => !call.options.cursor)).toHaveLength(3);
+    expect(rpc.queries.every(call => call.options.atBlock === '0x64')).toBe(true);
+    expect(result.snapshot).toMatchObject({ completeness: 'complete', freshness: 'fresh' });
+  });
+
+  it('bounds response-size downshifts and fails clearly when one record still exceeds the cap', async () => {
+    const rpc = ownRoots(); rpc.queryOverride = () => { throw responseBound(); };
+    await rejected(reader(rpc).listOwnPublishers({ kind: 'wallet', address: PUBLISHER }), 'payload_too_large');
+    expect(rpc.queries.map(call => Number(BigInt(call.options.limit)))).toEqual([100, 50, 25, 12, 6, 3, 1]);
+    expect(rpc.queries.every(call => !call.options.cursor && call.options.atBlock === '0x64')).toBe(true);
+  });
+
+  it('continues charging failed size attempts to the original aggregate page budget', async () => {
+    const rpc = ownRoots(); rpc.queryOverride = () => { throw responseBound(); };
+    await rejected(reader(rpc, { maxPages: 2 }).listOwnPublishers({ kind: 'wallet', address: PUBLISHER }), 'page_budget');
+    expect(rpc.queries).toHaveLength(2);
+  });
+
+  it('does not downshift an unrelated HTTP413 or accept a changed final canonical header', async () => {
+    const generic = ownRoots(); generic.queryOverride = () => { throw Object.assign(new Error('Request rejected'), { status: 413 }); };
+    await rejected(reader(generic).listOwnPublishers({ kind: 'wallet', address: PUBLISHER }), 'rpc_error', false);
+    expect(generic.queries).toHaveLength(1);
+    const changed = ownRoots();
+    changed.queryOverride = call => { if (Number(BigInt(call.options.limit)) > 25) throw responseBound(); return undefined; };
+    changed.blockOverride = call => call > 1 ? { hash: entityKey(1001) } : {};
+    await rejected(reader(changed).listOwnPublishers({ kind: 'wallet', address: PUBLISHER }), 'incomplete_snapshot');
+    expect(changed.queries.every(call => call.options.atBlock === '0x64')).toBe(true);
+  });
+
+  it('stops after the awaited head or page when the consumer cancels', async () => {
+    const { rpc } = readyFixture(), owner = new AbortController();
+    const instance = new ArkivReader({ now: () => NOW, request: async args => {
+      const result = await rpc.request(args); if (args.method === 'eth_blockNumber') owner.abort(); return result;
+    } });
+    await rejected(instance.loadProject(KEYS.project, { signal: owner.signal }), 'incomplete_snapshot', false);
+    expect(rpc.calls.map(call => call.method)).toEqual(['eth_chainId', 'eth_blockNumber']);
+    const listing = ownRoots(), pageOwner = new AbortController(); listing.pageSize = 1;
+    listing.queryOverride = () => { pageOwner.abort(); return undefined; };
+    await rejected(reader(listing).listOwnPublishers({ kind: 'wallet', address: PUBLISHER }, { signal: pageOwner.signal }), 'incomplete_snapshot');
+    expect(listing.queries).toHaveLength(1);
   });
 
   it('discards accumulated rows after a cursor error and restarts the entire same-block scope once', async () => {

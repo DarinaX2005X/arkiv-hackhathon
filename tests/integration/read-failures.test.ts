@@ -1,14 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createArkivRepository } from '../../src/data/arkiv';
 import { KEYS, NOW, readyFixture } from '../../src/data/__tests__/arkiv-fixture';
 import { deriveReadiness } from '../../src/domain/readiness';
 import { createProjectReader } from '../../src/features/projects/projectReader';
+import { READ_RATE_LIMIT_COOLDOWN_MS } from '../../src/data/arkiv/read-policy';
 
 describe('public query failures through the repository and current-view controller', () => {
   it('invalidates a previously Ready snapshot immediately on RPC 429 and restores it only after a complete new read', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
     const { rpc } = readyFixture();
-    const repository = createArkivRepository({ request: rpc.request, now: () => NOW });
-    const reader = createProjectReader(signal => repository.loadProject(KEYS.project, { signal }), () => NOW);
+    const repository = createArkivRepository({ request: rpc.request, now: Date.now });
+    const reader = createProjectReader(signal => repository.loadProject(KEYS.project, { signal }), Date.now);
     try {
       reader.start(false); await reader.refresh();
       const original = reader.getSnapshot().project!;
@@ -22,11 +24,17 @@ describe('public query failures through the repository and current-view controll
       expect(failed.project?.snapshot).toMatchObject({ completeness: 'incomplete', freshness: 'stale', reasons: [{ code: 'rpc_error' }] });
       expect(deriveReadiness(failed.project!, NOW).status).toBe('unverified');
       rpc.queryOverride = undefined;
+      const requests = rpc.calls.length;
+      await reader.refresh();
+      expect(rpc.calls).toHaveLength(requests);
+      expect(reader.getSnapshot().error?.code).toBe('rate_limited');
+      expect(reader.getSnapshot().project?.snapshot.freshness).toBe('stale');
+      vi.setSystemTime(NOW + READ_RATE_LIMIT_COOLDOWN_MS + 1);
       await reader.refresh();
       expect(reader.getSnapshot().error).toBeNull();
       expect(reader.getSnapshot().project?.snapshot).toMatchObject({ completeness: 'complete', freshness: 'fresh' });
-      expect(deriveReadiness(reader.getSnapshot().project!, NOW).status).toBe('ready');
-    } finally { reader.stop(); }
+      expect(deriveReadiness(reader.getSnapshot().project!, Date.now()).status).toBe('ready');
+    } finally { reader.stop(); vi.useRealTimers(); }
   });
 
   it('refuses an unavailable historical block without falling back to a different snapshot', async () => {

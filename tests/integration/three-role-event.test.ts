@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { toHex } from 'viem';
 import type { AppSession } from '../../src/app/session';
 import { createArkivRepository } from '../../src/data/arkiv';
 import type { RpcRequest } from '../../src/data/arkiv/client';
+import { READ_NETWORK_COOLDOWN_MS } from '../../src/data/arkiv/read-policy';
 import { createEventRepository } from '../../src/data/events';
 import { BrowserOperationStore, createOperationController, createOperationIntent, MemoryOperationStore } from '../../src/data/operations';
 import type { OperationKind, Result, WriteAuthority } from '../../src/data/types';
@@ -274,13 +275,25 @@ describe('organizer, contributor and attendee through independent production rep
       }
       return f.ledger.request(args);
     };
-    const unavailable = await f.freshEvents(outage).loadEvent(f.projectRoot);
-    expect(blockedSourceCalls).toBeGreaterThan(0);
-    expect(unavailable.ok ? deriveEventAvailability(unavailable.value, f.ledger.now()) : 'unverified').toBe('unverified');
-    blockedSourceCalls = 0;
-    const ownRead = unwrap(await readEventForWithdrawal(f.freshEvents(outage), f.projectRoot, actor(attendee)));
-    const withdrawal = prepared(prepareWithdrawal(ownRead, targetForWithdrawal(ownRead, session(attendee), f.ledger.now())!, session(attendee), f.ledger.now()));
-    const withdrew = unwrap(await f.client(attendee, outage).events.replaceAttendance(withdrawal));
+    let transportTime = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => transportTime);
+    const withdrew = await (async () => {
+      try {
+        const unavailable = await f.freshEvents(outage).loadEvent(f.projectRoot);
+        expect(blockedSourceCalls).toBe(2); // One initial read and one bounded transient retry.
+        expect(unavailable.ok ? deriveEventAvailability(unavailable.value, f.ledger.now()) : 'unverified').toBe('unverified');
+        const requests = f.ledger.calls.length;
+        expect(await readEventForWithdrawal(f.freshEvents(outage), f.projectRoot, actor(attendee)))
+          .toMatchObject({ ok: false, error: { code: 'network', retryable: true } });
+        expect(f.ledger.calls).toHaveLength(requests);
+        expect(blockedSourceCalls).toBe(2); // Source-free reads cannot bypass a provider-wide cooldown.
+        transportTime += READ_NETWORK_COOLDOWN_MS + 1;
+        blockedSourceCalls = 0;
+        const ownRead = unwrap(await readEventForWithdrawal(f.freshEvents(outage), f.projectRoot, actor(attendee)));
+        const withdrawal = prepared(prepareWithdrawal(ownRead, targetForWithdrawal(ownRead, session(attendee), f.ledger.now())!, session(attendee), f.ledger.now()));
+        return unwrap(await f.client(attendee, outage).events.replaceAttendance(withdrawal));
+      } finally { clock.mockRestore(); }
+    })();
     expect(withdrew.receipt.consumedKeys).toEqual([registrationKey]);
     expect(blockedSourceCalls).toBe(0);
     expect(myEventStatus(await myEvent(), f.ledger.now())).toBe('withdrawn');

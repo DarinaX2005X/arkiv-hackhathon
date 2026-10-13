@@ -1,0 +1,12 @@
+.env
+.env.*
+.local
+.vercel
+.vibemachina
+.git
+node_modules
+dist
+dist-desk
+coverage
+**/*.map
+**/*.log

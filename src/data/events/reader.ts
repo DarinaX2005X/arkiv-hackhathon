@@ -43,6 +43,7 @@ export class EventReader {
 
   async entity<T extends EventPayload>(context: ReadContext, entityKey: EntityKey,
     type: T['entityType'], creator?: AccountAddress): Promise<EventRecord<T> | null> {
+    this.core.checkAbort(context.options);
     const target = publicKey(entityKey);
     let cache = this.caches.get(context);
     if (!cache) { cache = new Map(); this.caches.set(context, cache); }
@@ -62,6 +63,7 @@ export class EventReader {
 
   async scope<T extends EventState | AttendanceState>(context: ReadContext, type: T['entityType'],
     projectRoot: EntityKey, creator: AccountAddress): Promise<EventScope<T>> {
+    this.core.checkAbort(context.options);
     const target = publicKey(projectRoot);
     // No schema or date filter: every authored head must participate in conflict detection.
     const rows = await this.core.query(context, [eq('project', EVENTS_NAMESPACE), eq('entity_type', type),
@@ -81,6 +83,7 @@ export class EventReader {
 
   async event(context: ReadContext, projectRoot: EntityKey,
     sourcePolicy: 'automatic' | 'required' | 'skip' = 'automatic', includeRoster = true): Promise<EventAggregate> {
+    this.core.checkAbort(context.options);
     const target = publicKey(projectRoot);
     const result: EventAggregate = { projectRoot: target, root: null, state: { status: 'missing', reason: 'not_found' },
       release: null, sourceProject: null, snapshot: context.snapshot, diagnostics: [] };
@@ -118,6 +121,7 @@ export class EventReader {
     // the exact block, authenticated entity cache and cumulative traversal budgets.
     const sourceContext: ReadContext = { ...context, snapshot: structuredClone(context.snapshot), publishers: new Map() };
     try {
+      this.core.checkAbort(context.options);
       result.sourceProject = await this.core.project(sourceContext, target);
       const traversal = [...sourceContext.snapshot.reasons, ...(result.sourceProject.proposalHistoryStatus?.reasons ?? [])].find(reason =>
         ['page_budget', 'cursor_error', 'incomplete_snapshot', 'stale_snapshot', 'rpc_error'].includes(reason.code));
@@ -129,6 +133,7 @@ export class EventReader {
 
   /** A complete pinned creator-authenticated request set; arbitrary namespaces are only discovery hints. */
   async roster(context: ReadContext, event: EventAggregate): Promise<EventRoster> {
+    this.core.checkAbort(context.options);
     const result: EventRoster = { entries: [], snapshot: context.snapshot, diagnostics: [] };
     const rows = await this.core.query(context, [eq('project', EVENTS_NAMESPACE), eq('entity_type', 'attendance_state'),
       eq('project_key', key(publicKey(event.projectRoot)))]);
@@ -139,6 +144,7 @@ export class EventReader {
     }
     const times = new Map<string, { timestamp: number; hash: string }>();
     for (const [attendee, records] of groups) {
+      this.core.checkAbort(context.options);
       const valid: EventRecord<AttendanceState>[] = []; const reasons: DomainReason[] = [];
       for (const row of records) {
         try {
@@ -152,8 +158,12 @@ export class EventReader {
       let registeredRelease: EventRecord<EventRelease> | null = null; let inclusionTimestamp: number | null = null;
       if (attendance.status === 'unique') {
         const record = attendance.entity; const blockNumber = record.provenance.createdAtBlock!;
-        if (!times.has(blockNumber)) {
-          const block = await this.core.client.getBlock({ blockNumber: BigInt(blockNumber) });
+        if (blockNumber === context.snapshot.blockNumber) {
+          // The context already authenticates this block; finish() checks it again after the walk.
+          inclusionTimestamp = context.snapshot.blockTimestamp;
+        } else if (!times.has(blockNumber)) {
+          const block = await context.client.getBlock({ blockNumber: BigInt(blockNumber) });
+          this.core.checkAbort(context.options);
           const timestamp = Number(block.timestamp * 1_000n);
           assertArkiv(block.number === BigInt(blockNumber) && block.hash !== null && Number.isSafeInteger(timestamp)
             && timestamp >= 0 && timestamp <= context.snapshot.blockTimestamp
@@ -161,7 +171,7 @@ export class EventReader {
           'unverified', 'incomplete_snapshot', 'The request inclusion block could not be authenticated.');
           times.set(blockNumber, { timestamp, hash: block.hash });
         }
-        inclusionTimestamp = times.get(blockNumber)!.timestamp;
+        inclusionTimestamp ??= times.get(blockNumber)!.timestamp;
         try {
           registeredRelease = await this.entity<EventRelease>(context, record.payload.releaseKey, 'event_release', creatorOf(event.root!));
           if (registeredRelease && (registeredRelease.payload.projectRoot !== event.projectRoot
@@ -171,7 +181,9 @@ export class EventReader {
       result.entries.push({ attendee, attendance, registeredRelease, inclusionTimestamp });
     }
     for (const [blockNumber, expected] of times) {
-      const block = await this.core.client.getBlock({ blockNumber: BigInt(blockNumber) });
+      this.core.checkAbort(context.options);
+      const block = await context.client.getBlock({ blockNumber: BigInt(blockNumber) });
+      this.core.checkAbort(context.options);
       assertArkiv(block.number === BigInt(blockNumber) && block.hash === expected.hash && Number(block.timestamp * 1_000n) === expected.timestamp,
         'unverified', 'incomplete_snapshot', 'A request inclusion block changed during roster verification.');
     }
@@ -230,6 +242,7 @@ export class EventReader {
     const items: EventAggregate[] = []; const diagnostics: DomainReason[] = []; const seen = new Set<string>();
     const search = (filters.search ?? '').trim().toLocaleLowerCase('en');
     for (const row of rows) {
+      this.core.checkAbort(context.options);
       try {
         const candidate = decodeEventEntity<EventState>(row, 'event_state', context.snapshot);
         const target = publicKey(candidate.payload.projectRoot);
@@ -262,6 +275,7 @@ export class EventReader {
     const rows = await this.core.query(context, [eq('project', EVENTS_NAMESPACE), eq('entity_type', 'attendance_state')], account);
     const roots = new Set<string>(); const diagnostics: DomainReason[] = [];
     for (const row of rows) {
+      this.core.checkAbort(context.options);
       try {
         const projection = row.attributes?.project_key;
         assertArkiv(projection?.type === 'key', 'unverified', 'projection_mismatch', 'An attendance record has no event identity projection.');
@@ -270,6 +284,7 @@ export class EventReader {
     }
     const items: MyEvent[] = [];
     for (const rootKey of roots) {
+      this.core.checkAbort(context.options);
       const projectRoot = publicKey(rootKey);
       const attendance = await this.scope<AttendanceState>(context, 'attendance_state', projectRoot, account);
       const item: MyEvent = { projectRoot, attendance, event: null, registeredRelease: null, diagnostics: [...scopeReasons(attendance)] };
