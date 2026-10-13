@@ -15,6 +15,7 @@
     { "src": "/events/0x[0-9a-fA-F]{64}", "dest": "/index.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
     { "src": "/projects/(?:0x[0-9a-fA-F]{64}|local:[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127})(?:/(?:needs|plans|agreement|runbook|history|guests))?", "dest": "/index.html", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
     { "src": "/assets/.*", "headers": { "Cache-Control": "public, max-age=31536000, immutable" }, "continue": true },
+    { "src": "/media/partfolk-demo-[0-9a-f]{8}\\.(?:mp4|jpg)", "headers": { "Cache-Control": "public, max-age=31536000, immutable" }, "continue": true },
     { "src": "/(?:version\\.json|places/.*)", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" }, "continue": true },
     { "handle": "filesystem" },
     { "src": "/(?:api(?:/.*)?|assets(?:/.*)?|fonts(?:/.*)?|places(?:/.*)?|.*\\.[^/]+)", "status": 404 },

@@ -5,6 +5,7 @@ import { Link } from '../../ui';
 import { selectNewProjectDraft } from '../projects/draft-session';
 import { helpHref } from '../help/navigation';
 import { landingCopy as copy } from './catalog';
+import { DemoVideo } from './DemoVideo';
 import { EventScene } from './EventScene';
 import { OwnershipScene } from './OwnershipScene';
 import { ProcessArt } from './ProcessArt';
@@ -32,6 +33,7 @@ export function LandingPage({ onCreateProject }: LandingPageProps) {
           {browse('pf-button pf-button--primary')}
           {create('pf-button pf-button--secondary')}
         </div>
+        <DemoVideo />
         <p className="pf-landing-arkiv-intro">{copy.arkivIntro}</p>
       </div>
       <EventScene />

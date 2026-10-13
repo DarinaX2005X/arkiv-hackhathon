@@ -17,6 +17,16 @@
 .pf-landing-description { max-width: 40ch; font-size: 18px; line-height: 1.6; margin-top: var(--space-6); color: var(--text-secondary); }
 .pf-landing-entry { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-8); }
 .pf-landing-entry .pf-button { min-height: 52px; padding-inline: 23px; font-size: 16px; }
+.pf-landing-demo-trigger { margin-top: var(--space-3); padding-inline: var(--space-3); }
+.pf-landing-demo-trigger > span { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+.pf-landing-demo-trigger svg { flex: none; }
+.pf-dialog.pf-landing-demo-dialog { width: min(1040px, calc(100% - 32px)); padding: clamp(16px, 3vw, 24px); }
+.pf-landing-demo-dialog .pf-dialog-header h2 { font-size: clamp(22px, 3vw, 28px); line-height: 1.2; }
+.pf-landing-demo-dialog .pf-dialog-body { margin-top: var(--space-4); }
+.pf-landing-demo-video { display: block; width: 100%; height: auto; max-height: calc(100dvh - 190px); aspect-ratio: 16 / 9; object-fit: contain; background: var(--surface-dark); border-radius: var(--radius-control); }
+.pf-landing-demo-video:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.pf-landing-demo-direct { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-top: var(--space-3); font-size: 14px; }
+.pf-landing-demo-error { margin-top: var(--space-4); color: var(--text-secondary); }
 .pf-landing-arkiv-intro { max-width: 42ch; font-size: 15px; line-height: 1.6; color: var(--text-secondary); margin-top: var(--space-6); }
 .pf-landing .pf-event-scene { margin-block: -18px -32px; }
 
