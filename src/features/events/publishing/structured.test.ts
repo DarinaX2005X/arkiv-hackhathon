@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { audienceChanges, audienceHash, type AudienceTerms } from '../../../domain/events';
-import { emptyPublishingFields, publishingFields, termsFromFields, validPublishingDraft, type PublishingFields } from './model';
+import { emptyPublishingFields, publishingDateInputType, publishingFields, publishingLocalInstant, termsFromFields, validPublishingDraft, type PublishingFields } from './model';
 import { catalogueFilters, eventCalendar, eventPlace, audienceValue } from '../presentation';
 import { countryOptions, timeZoneOptions } from '../places';
 
@@ -47,6 +47,16 @@ describe('structured event form and visitor facts', () => {
     expect(termsFromFields(input).ok).toBe(false);
     const first = terms({ ...input, deadlineOccurrence: 'earlier' }), second = terms({ ...input, deadlineOccurrence: 'later' });
     expect(second.registration!.deadline! - first.registration!.deadline!).toBe(3600000);
+  });
+  it('exposes repeated and invalid input without losing published millisecond precision', () => {
+    expect(publishingLocalInstant('2030-11-03T01:30:00.125', 'America/New_York')).toEqual({ ok: false, error: 'ambiguous_time' });
+    const early = publishingLocalInstant('2030-11-03T01:30:00.125', 'America/New_York', 'earlier');
+    const late = publishingLocalInstant('2030-11-03T01:30:00.125', 'America/New_York', 'later');
+    expect(early.ok && early.utcMilliseconds % 1000).toBe(125);
+    expect(early.ok && late.ok && late.utcMilliseconds - early.utcMilliseconds).toBe(3600000);
+    expect(publishingDateInputType('2030-11-03T01:30:00.125')).toBe('datetime-local');
+    expect(publishingDateInputType('2030-02-31T10:00')).toBe('text');
+    expect(publishingDateInputType('unfinished date')).toBe('text');
   });
   it('offers country names and readable time zones while keeping codes internal', () => {
     expect(countryOptions.find(item => item.value === 'KZ')?.label).toBe('Kazakhstan');

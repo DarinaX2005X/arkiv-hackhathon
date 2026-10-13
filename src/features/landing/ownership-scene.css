@@ -1,0 +1,20 @@
+.pf-ownership-art { display: block; width: 100%; height: auto; aspect-ratio: 124 / 81; overflow: visible; }
+.pf-owner-shadow { fill: var(--surface-dark); opacity: .3; filter: var(--owner-contact); }
+.pf-owner-foundation { fill: var(--surface-dark-light); }
+.pf-owner-foundation-side { fill: var(--surface-dark); }
+.pf-owner-foundation-rim { fill: none; stroke: var(--edge-light); stroke-width: 1.4; }
+.pf-owner-paper { fill: var(--owner-paper); }
+.pf-owner-paper-side { fill: var(--owner-edge); }
+.pf-owner-paper-rim { fill: none; stroke: var(--art-highlight); stroke-width: 1.5; }
+.pf-owner-fold { fill: var(--art-shadow); opacity: .45; }
+.pf-owner-green, .pf-owner-seal { fill: var(--owner-green); }
+.pf-owner-sage { fill: var(--art-shadow); }
+.pf-owner-seal-side { fill: var(--surface-dark); }
+.pf-owner-trace { fill: none; stroke: var(--action-on-dark); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .45; }
+.pf-owner-document-line { fill: none; stroke: var(--art-shadow); stroke-width: 2.5; stroke-linecap: round; }
+.pf-owner-signature { fill: none; stroke: var(--surface-dark-light); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pf-owner-check { fill: none; stroke: var(--action-on-dark); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.pf-owner-handle { fill: none; stroke: var(--surface-dark); stroke-width: 5; stroke-linecap: round; }
+.pf-owner-case-seam { fill: none; stroke: var(--art-shadow); stroke-width: 2; }
+.pf-owner-clock, .pf-owner-clock-ticks { fill: none; stroke: var(--surface-dark); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.pf-owner-clock-ticks { stroke-width: 2; }

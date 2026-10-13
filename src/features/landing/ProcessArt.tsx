@@ -19,7 +19,7 @@ export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' | 'join' 
       <linearGradient id={`${id}-paper`} x1="0%" y1="0%" x2="85%" y2="100%">
         <stop stopColor="var(--surface-work)" />
         <stop offset=".55" stopColor="var(--surface-work)" />
-        <stop offset="1" stopColor="var(--surface-inset)" />
+        <stop offset="1" stopColor="var(--art-sand)" />
       </linearGradient>
       <linearGradient id={`${id}-clay`} x1="0%" y1="0%" x2="100%" y2="85%">
         <stop stopColor="var(--art-cream)" />
@@ -27,8 +27,8 @@ export function ProcessArt({ kind }: { kind: 'set' | 'offer' | 'agree' | 'join' 
         <stop offset="1" stopColor="var(--art-shadow)" />
       </linearGradient>
       <linearGradient id={`${id}-forest`} x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop stopColor="var(--action)" />
-        <stop offset="1" stopColor="var(--brand-ink)" />
+        <stop stopColor="var(--surface-dark-light)" />
+        <stop offset="1" stopColor="var(--surface-dark)" />
       </linearGradient>
       <filter id={`${id}-contact`} x="-20%" y="-60%" width="140%" height="220%">
         <feGaussianBlur stdDeviation="2.5" />

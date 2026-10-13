@@ -1,7 +1,7 @@
 import type { AppRuntime } from '../../app/context';
 import { isAccountAddress } from '../../app/ids';
 import { parseRoute, routePath, safeReturnPath, type Route } from '../../app/routes';
-import type { LoadResult, StorageIssue } from '../../app/storage';
+import { createDraftStore, type LoadResult, type StorageIssue } from '../../app/storage';
 
 export interface AccountPreferences {
   label: string;
@@ -9,6 +9,7 @@ export interface AccountPreferences {
   setupComplete: boolean;
 }
 export const defaultAccountPreferences: AccountPreferences = { label: '', defaultDestination: 'workspace', setupComplete: false };
+export const ACCOUNT_PREFERENCES_EVENT = 'partfolk:account-preferences-changed';
 export function isAccountPreferences(value: unknown): value is AccountPreferences {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
@@ -19,7 +20,19 @@ export function isAccountPreferences(value: unknown): value is AccountPreference
 /** Device preferences are never a public identity record or signing authority. */
 export function createAccountPreferences(runtime: AppRuntime, address: string) {
   if (!isAccountAddress(address)) throw new TypeError('A valid wallet address is required.');
-  return runtime.drafts(`account-${address.toLowerCase()}`, 'account-preferences', isAccountPreferences);
+  const shared = createDraftStore({ storage: runtime.storage, key: `partfolk:account:${address.toLowerCase()}:preferences`,
+    kind: 'account-preferences', validate: isAccountPreferences, now: runtime.now });
+  if (shared.load().status === 'missing') {
+    const legacy = runtime.drafts(`account-${address.toLowerCase()}`, 'account-preferences', isAccountPreferences);
+    const existing = legacy.load();
+    if (existing.status === 'ready') shared.save(existing.value);
+    else if (existing.status === 'recovery') return legacy;
+  }
+  return { ...shared, save(value: AccountPreferences) {
+    const result = shared.save(value);
+    if (result.persisted && typeof window !== 'undefined') window.dispatchEvent(new Event(ACCOUNT_PREFERENCES_EVENT));
+    return result;
+  } };
 }
 export function readAccountPreferences(result: LoadResult<AccountPreferences>): { value: AccountPreferences; issue: StorageIssue | null } {
   return { value: result.status === 'ready' ? result.value : { ...defaultAccountPreferences },

@@ -5,7 +5,7 @@ import { Button, Link, Notice } from '../../ui';
 import { contributionDrafts, visitorDraftFingerprint } from './drafts';
 import { downloadText } from './shared';
 
-export function VisitorDraftHandoff({ pending, onUse }: { pending: boolean; onUse: () => void }) {
+export function VisitorDraftHandoff({ pending, onUse, onSignIn }: { pending: boolean; onUse: () => void; onSignIn?: () => void }) {
   const runtime = useApp(), session = useAppSession(), registry = contributionDrafts(runtime);
   const state = useSyncExternalStore(registry.subscribeVisitor, registry.getVisitorSnapshot, registry.getVisitorSnapshot);
   const [dismissed, setDismissed] = useState(''), [message, setMessage] = useState('');
@@ -19,7 +19,7 @@ export function VisitorDraftHandoff({ pending, onUse }: { pending: boolean; onUs
   const fingerprint = visitorDraftFingerprint(visitor);
   if (!session.actor) return <Notice title={visitor.owner ? 'Reconnect to finish your draft' : 'Continue this draft after signing in'}>
     <p>{visitor.owner ? `This draft is reserved for ${visitor.owner}. Reconnect that wallet to finish saving it.` : 'Your name, resources and unfinished offer fields will return here. Signing in does not publish them.'}</p>
-    <div className="pf-actions"><Link href={routeHref({ name: 'sign-in', returnTo: visitor.destination ?? session.destination })}>Sign in to continue this draft</Link><Button variant="quiet" onClick={backup}>Save guest draft backup</Button></div>
+    <div className="pf-actions">{onSignIn ? <Button variant="secondary" onClick={onSignIn}>Sign in to continue this draft</Button> : <Link href={routeHref({ name: 'sign-in', returnTo: visitor.destination ?? session.destination })}>Sign in to continue this draft</Link>}<Button variant="quiet" onClick={backup}>Save guest draft backup</Button></div>
   </Notice>;
   if (session.actor.kind !== 'wallet' || visitor.owner && visitor.owner.toLowerCase() !== session.actor.address.toLowerCase() || dismissed === fingerprint) return null;
   if (visitor.destination && visitor.destination !== session.destination) return <Notice title="Your saved draft belongs to another invitation">

@@ -42,17 +42,18 @@ export function KeepContributionAvailable({ publisher, onRefresh }: { publisher:
       const fresh = await runtime.repository.loadPublisher(publisher.root.key);
       if (!fresh.ok) throw new Error('Your contribution could not be refreshed. Nothing has been extended.');
       const current = runtime.session.getSnapshot();
-      if (!current.actor || !sameActor(current.actor, reviewed.actor)) throw new Error('The account changed. Review this extension with the owner account.');
-      const command = prepareRenewalCommand(fresh.value, authority, reviewed.target, reviewed.key, reviewed.days * 86400, runtime.now(), crypto.randomUUID());
+      const currentAuthority = writeAuthority(current.actor, current.mode, current.chainId);
+      if (!currentAuthority || !sameActor(currentAuthority.actor, reviewed.actor)) throw new Error('The account changed. Review this extension with the owner account.');
+      const command = prepareRenewalCommand(fresh.value, currentAuthority, reviewed.target, reviewed.key, reviewed.days * 86400, runtime.now(), crypto.randomUUID());
       const result = await action.run(command, (repo, input) => repo.renewEntity(input));
       if (result.ok) setReviewed(null);
       await onRefresh?.();
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The extension could not be prepared.'); }
     finally { setBusy(false); }
   };
-  return <section className="pf-stack pf-stack--compact">
+  return <section className="pf-sheet pf-stack pf-contribution-renewal">
     <h3>Keep my offers available</h3>
-    <p>Extend how long your saved contribution can be read. Availability dates and project approvals stay the same.</p>
+    <p>Extend how long your saved contribution can be read. Keep both your profile and its current offers available. Availability dates and project approvals stay the same.</p>
     <div className="pf-contribution-fields">
       <Select label="Keep available" value={target} onChange={event => setTarget(event.target.value as 'root' | 'book')}
         options={[{ value: 'book', label: 'My current offers and promises', disabled: publisher.book.status !== 'unique' }, { value: 'root', label: 'My contribution profile' }]} />
@@ -69,7 +70,7 @@ export function KeepContributionAvailable({ publisher, onRefresh }: { publisher:
         <p>Add about {reviewed?.days} days to {reviewed?.target === 'root' ? 'my contribution profile' : 'my current offers and promises'}.</p>
         <p>{session.mode === 'public' ? 'The network measures expiry in blocks, so this is an estimated duration. Your wallet will show the transaction before you approve it.' : 'This extends the saved local example.'}</p>
         <p>This does not renew an expired approval or make you available on new dates.</p>
-        <details><summary>Record details</summary><dl className="pf-contribution-details"><dt>Record</dt><dd>{reviewed?.key}</dd><dt>Current expiration block</dt><dd>{reviewed?.target === 'root' ? publisher.root.provenance.expiresAtBlock ?? 'Local example' : publisher.book.status === 'unique' ? publisher.book.entity.provenance.expiresAtBlock ?? 'Local example' : 'Unavailable'}</dd><dt>Requested nominal extension</dt><dd>{(reviewed?.days ?? 0) * 86400} seconds</dd></dl></details>
+        <details><summary>Advanced</summary><dl className="pf-contribution-details"><dt>Record</dt><dd>{reviewed?.key}</dd><dt>Current expiration block</dt><dd>{reviewed?.target === 'root' ? publisher.root.provenance.expiresAtBlock ?? 'Local example' : publisher.book.status === 'unique' ? publisher.book.entity.provenance.expiresAtBlock ?? 'Local example' : 'Unavailable'}</dd><dt>Requested nominal extension</dt><dd>{(reviewed?.days ?? 0) * 86400} seconds</dd></dl></details>
         {error && <Notice tone="danger" role="alert">{error}</Notice>}
         <ActionFeedback action={action} onRefresh={onRefresh} />
       </div>

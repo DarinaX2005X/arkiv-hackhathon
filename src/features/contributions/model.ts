@@ -3,7 +3,7 @@ import { sameActor, sameSource, activeSource, validateCurrentEntity } from '../.
 import { prepareDecision, prepareReleaseCommitment } from '../../domain/operations';
 import { validateBookState } from '../../domain/validation';
 import { PROTOCOL, TIRAMISU_CHAIN_ID } from '../../domain/types';
-import type { Actor, BookState, Condition, EntityKey, Offer, ProjectAggregate, PublisherAggregate, Resource, SourcePlanRef } from '../../domain/types';
+import type { Actor, BookState, Condition, EntityKey, Offer, ProjectAggregate, PublisherAggregate, Readiness, Resource, SourcePlanRef } from '../../domain/types';
 import type { ReplaceBookCommand, WriteAuthority } from '../../data/types';
 import { createOperationIntent } from '../../data/operations';
 import { localDateTimeToUtc, utcToLocalDateTime } from '../../app/time';
@@ -22,6 +22,10 @@ export function writeAuthority(actor: Actor | null, mode: 'public' | 'local', ch
   if (mode === 'local' && actor?.kind === 'local') return { mode, actor, chainId: null };
   if (mode === 'public' && actor?.kind === 'wallet' && chainId === TIRAMISU_CHAIN_ID) return { mode, actor, chainId: TIRAMISU_CHAIN_ID };
   return null;
+}
+/** Presentation only: a recorded acceptance is not a verified current approval while the plan needs checking. */
+export function hasVerifiedApproval(readiness: Readiness, publisherRoot: EntityKey): boolean {
+  return ['ready', 'awaiting_approval', 'declined'].includes(readiness.status) && readiness.acceptedApprovers.includes(publisherRoot);
 }
 export function ownsPublisher(publisher: PublisherAggregate, actor: Actor | null): boolean {
   return !!actor && sameActor(actor, publisher.root.payload.publisher) && sameActor(actor, publisher.root.provenance.creator)
@@ -98,6 +102,37 @@ export function addDraftOffer(draft: ContributionDraft, resourceId: string, offe
     [`offer:${offerId}`]: draft.editorWindows[`resource:${resourceId}`]!.map((window, index) => ({ ...window, id: `${offerId}:window:${index}` })) };
   return next;
 }
+/** A new contribution starts with its resource and offer together; no consent is created. */
+export function startDraftContribution(draft: ContributionDraft, input: {
+  kind: Resource['kind']; publisherKind: 'individual' | 'organization'; id: string;
+  name?: string; unit?: string; capability?: string; timeZone?: string;
+}): ContributionDraft {
+  const personal = input.kind === 'person' && input.publisherKind === 'individual';
+  const resourceId = personal ? 'self' : `resource-${input.id}`;
+  const offerId = `offer-${input.id}`;
+  if (draft.offers.some(offer => offer.id === offerId) || (!personal && draft.resources.some(resource => resource.id === resourceId))) throw new Error('This contribution is already in the editor.');
+  const existing = draft.resources.find(resource => resource.id === resourceId);
+  let next = structuredClone(draft);
+  if (!existing) {
+    const name = input.name ?? (input.kind === 'person' ? 'My time' : input.kind === 'place' ? 'My space' : 'My equipment');
+    next.resources.push({ id: resourceId, name, kind: input.kind, capacity: 1,
+      unit: input.unit ?? (input.kind === 'person' ? 'person' : input.kind === 'place' ? 'space' : 'item'),
+      availability: [], capabilities: input.capability ? [input.capability] : [] });
+    next.editorWindows = { ...next.editorWindows, [`resource:${resourceId}`]: [{ id: `${resourceId}:first`, start: '', end: '', timeZone: input.timeZone ?? 'UTC' }] };
+  }
+  next = addDraftOffer(next, resourceId, offerId);
+  const added = next.offers.find(offer => offer.id === offerId)!;
+  added.title = input.name ?? (input.kind === 'person' ? 'My time' : input.kind === 'place' ? 'A space for your event' : 'Equipment for your event');
+  if (input.capability) added.capabilities = [input.capability];
+  return next;
+}
+export function copyResourceAvailability(draft: ContributionDraft, offerId: string): ContributionDraft {
+  const offer = draft.offers.find(item => item.id === offerId);
+  const resource = draft.resources.find(item => item.id === offer?.resourceId);
+  if (!offer || !resource) throw new Error('Select a current offer and resource.');
+  const windows = draft.editorWindows?.[`resource:${resource.id}`] ?? editableWindows(resource.availability);
+  return { ...draft, editorWindows: { ...draft.editorWindows, [`offer:${offer.id}`]: windows.map((window, index) => ({ ...window, id: `${offer.id}:window:${index}` })) } };
+}
 export function bookLifetime(book: BookState, now: number): number {
   return Math.max(DEFAULT_LIFETIME, book.retentionDays * 86400, ...book.grants.map(g => Math.ceil((g.validUntil - now) / 1000) + 60));
 }
@@ -156,5 +191,6 @@ export function conditionText(condition: Condition): string {
   return `${condition.kind === 'requires_offer' ? 'Requires' : 'Cannot be combined with'} offer ${condition.offer.offerId} from ${condition.offer.publisherRoot}`;
 }
 export function publisherName(publisher: PublisherAggregate | undefined, fallback: EntityKey): string {
-  return publisher?.book.status === 'unique' ? publisher.book.entity.payload.name : `${fallback} (current name unavailable)`;
+  return publisher?.book.status === 'unique' ? publisher.book.entity.payload.name
+    : `${fallback.startsWith('0x') ? `${fallback.slice(0, 8)}…${fallback.slice(-6)}` : fallback} (name unavailable)`;
 }

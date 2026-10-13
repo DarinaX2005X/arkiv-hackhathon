@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RouteViewProps } from '../../app/App';
 import { useApp, useAppSession } from '../../app/context';
 import type { PublicRuntimeBinding } from '../../app/network';
-import { routeHref, routePath, type Route } from '../../app/routes';
+import { routeBehindSignIn, routeHref, routePath, type Route } from '../../app/routes';
 import { Button, Field, Link, Notice, Select } from '../../ui';
 import { accountReturnRoute, createAccountPreferences, readAccountPreferences, type AccountPreferences } from './account';
+import { AccountAvatar } from './AccountAvatar';
+import { WalletSignInDialog } from './WalletSignInDialog';
 
 const navigate = (route: Route) => { window.location.hash = routePath(route); };
 const returned = (route: Route) => 'returnTo' in route ? route.returnTo : undefined;
@@ -15,36 +17,10 @@ function download(filename: string, text: string) {
 }
 
 export function SignInPage({ binding, route }: RouteViewProps & { binding: PublicRuntimeBinding }) {
-  const runtime = useApp(), session = useAppSession();
-  const connection = useSyncExternalStore(binding.subscribe, binding.getSnapshot, binding.getSnapshot);
-  const returnTo = returned(route);
-  const continueToWork = () => {
-    const current = runtime.session.getSnapshot();
-    if (current.actor?.kind !== 'wallet') return;
-    const preferences = readAccountPreferences(createAccountPreferences(runtime, current.actor.address).load()).value;
-    navigate(preferences.setupComplete ? accountReturnRoute(returnTo, preferences) : { name: 'onboarding', returnTo });
-  };
-  const connect = async () => {
-    const destination = runtime.session.getSnapshot().destination;
-    if (await binding.connect() && runtime.session.getSnapshot().destination === destination
-      && window.location.hash === `#${destination}`) continueToWork();
-  };
-  return <div className="pf-account-layout">
-    <section className="pf-sheet pf-stack pf-account-main">
-      <h1>Sign in to Partfolk</h1>
-      <p>Use the same account to organize an event, offer your help and take part. Your wallet connects you to the projects, contributions and event registrations you own.</p>
-      {session.actor?.kind === 'wallet' ? <><p className="pf-account-address">Connected as {session.actor.address}</p><Button onClick={continueToWork}>Continue to my work</Button></>
-        : <Button pending={connection.connecting} pendingLabel="Waiting for your wallet" disabled={!connection.hasProvider} onClick={() => { void connect(); }}>Sign in with a wallet</Button>}
-      {connection.error && <Notice tone="warning" role="alert" title="Sign-in needs your attention">{connection.error}</Notice>}
-      {!connection.hasProvider && <p>Open Partfolk in a browser with an Ethereum-compatible wallet, then reload this page to sign in. You can keep reading public projects here.</p>}
-      <p className="pf-secondary">Connecting requests your wallet address and Arkiv Tiramisu network. It does not publish a profile, create a project or approve a plan.</p>
-      <div className="pf-actions"><Button variant="quiet" onClick={() => { if (connection.connecting) binding.disconnect(); navigate(accountReturnRoute(returnTo)); }}>{session.actor ? 'Return to my work' : 'Return without signing in'}</Button><Link href={routeHref({ name: 'help', topic: 'publishing', returnTo })}>How public data works</Link></div>
-    </section>
-    <aside className="pf-account-context pf-stack"><h2>One account, every part</h2><p>Host a workshop, lend equipment to another event or join as a visitor. You can do all three with the same wallet.</p><p>Return with that wallet to find your public records on another device. Drafts and device settings stay in this browser.</p><Link href={routeHref({ name: 'events' })}>Explore events first</Link></aside>
-  </div>;
+  return <WalletSignInDialog binding={binding} open onClose={() => navigate(routeBehindSignIn(route))} />;
 }
 
-function AccountForm({ address, onboarding, returnTo, binding }: { address: string; onboarding: boolean; returnTo?: string; binding: PublicRuntimeBinding }) {
+function AccountForm({ address, onboarding, returnTo, binding, onChangeWallet }: { address: string; onboarding: boolean; returnTo?: string; binding: PublicRuntimeBinding; onChangeWallet: () => void }) {
   const runtime = useApp();
   const store = useMemo(() => createAccountPreferences(runtime, address), [runtime, address]);
   const initial = useMemo(() => readAccountPreferences(store.load()), [store]);
@@ -62,20 +38,20 @@ function AccountForm({ address, onboarding, returnTo, binding }: { address: stri
     const result = store.save(value); setPreferences(value); setIssue(result.issue); setSaved(result.persisted);
     if (onboarding && result.persisted) navigate(accountReturnRoute(returnTo, value));
   };
-  const signOut = () => { binding.disconnect(); navigate({ name: 'sign-in', returnTo: routePath(accountReturnRoute(returnTo, preferences)) }); };
+  const signOut = () => { binding.disconnect(); };
   return <div className="pf-account-layout">
     <section className="pf-sheet pf-stack pf-account-main">
       <h1>{onboarding ? 'Welcome to Partfolk' : 'Account and settings'}</h1>
       <p>{onboarding ? 'Choose where to begin. You can organize, contribute and attend with this same account.' : 'One wallet connects your projects, contributions and event registrations. These preferences are saved only in this browser.'}</p>
-      <div className="pf-account-identity"><strong>Connected wallet</strong><span className="pf-account-address">{address}</span><span className="pf-secondary">Arkiv Tiramisu</span></div>
+      <div className="pf-account-identity"><AccountAvatar address={address} /><div><strong>Connected wallet</strong><span className="pf-account-address">{address}</span><span className="pf-secondary">Arkiv Tiramisu</span></div></div>
       <form className="pf-stack" onSubmit={event => { event.preventDefault(); save(); }}>
         <Field label="Label on this device (optional)" value={preferences.label} maxLength={80} autoComplete="off" onChange={event => update({ ...preferences, label: event.target.value.replace(/[\u0000-\u001f]/g, '') })} hint="For recognizing this wallet here. This is not published as a public profile." />
-        <Select label="Start here after signing in" value={preferences.defaultDestination} onChange={event => update({ ...preferences, defaultDestination: event.target.value as AccountPreferences['defaultDestination'] })} options={[{ value: 'workspace', label: 'My projects' }, { value: 'contributions', label: 'My contributions' }, { value: 'my-events', label: 'My events' }]} hint="This only sets your starting page. All roles remain available. Invitations and unfinished actions keep their original destination." />
+        <Select label="Preferred workspace" value={preferences.defaultDestination} onChange={event => update({ ...preferences, defaultDestination: event.target.value as AccountPreferences['defaultDestination'] })} options={[{ value: 'workspace', label: 'My projects' }, { value: 'contributions', label: 'My contributions' }, { value: 'my-events', label: 'My events' }]} hint="Used by the Return to my work link. Signing in keeps your current page and unfinished action." />
         {issue && <Notice tone="warning" title="These settings have not been saved">Your entries remain on this page. {store.exportRecovery() !== null ? 'Existing unreadable settings were kept. Export them before attempting recovery.' : 'Browser storage is unavailable or full. Export your settings before leaving.'}<div className="pf-actions"><Button variant="secondary" onClick={() => download('partfolk-device-settings.json', store.export(preferences))}>Export settings</Button>{store.exportRecovery() !== null && <Button variant="quiet" onClick={() => download('partfolk-settings-recovery.txt', store.exportRecovery()!)}>Export original data</Button>}</div></Notice>}
         {saved && <p role="status">Settings saved on this device.</p>}
         <div className="pf-actions"><Button type="submit">{onboarding ? 'Save and continue' : 'Save settings'}</Button>{onboarding ? <Button variant="quiet" onClick={() => { const result = store.save({ ...preferences, setupComplete: true }); setIssue(result.issue); navigate(accountReturnRoute(returnTo, preferences)); }}>Skip setup</Button> : <Link href={routeHref(accountReturnRoute(returnTo, preferences))}>Return to my work</Link>}</div>
       </form>
-      {!onboarding && <div className="pf-account-signout pf-stack"><h2>Session</h2><p>Sign out to stop this Partfolk session from publishing with your wallet. Your drafts, pending operations and public records are kept.</p><div className="pf-actions"><Button variant="secondary" onClick={signOut}>Sign out</Button><Button variant="quiet" onClick={() => { binding.disconnect(); navigate({ name: 'sign-in', returnTo: routePath(accountReturnRoute(returnTo, preferences)) }); }}>Use another wallet</Button></div></div>}
+      {!onboarding && <div className="pf-account-signout pf-stack"><h2>Session</h2><p>Sign out to stop this Partfolk session from publishing with your wallet. Your drafts, pending operations and public records are kept.</p><div className="pf-actions"><Button variant="secondary" onClick={signOut}>Sign out</Button><Button variant="quiet" onClick={onChangeWallet}>Use another wallet</Button></div></div>}
     </section>
     <aside className="pf-account-context pf-stack"><h2>Find your own work</h2><OwnRecords address={address} /><p>Published records are public. Signing out does not make them private or remove them from Arkiv.</p><Link href={routeHref({ name: 'help', topic: 'publishing', returnTo })}>Understand public records and local drafts</Link></aside>
   </div>;
@@ -105,6 +81,14 @@ function OwnRecords({ address }: { address: string }) {
 
 export function AccountPage({ binding, route }: RouteViewProps & { binding: PublicRuntimeBinding }) {
   const session = useAppSession();
-  if (session.actor?.kind !== 'wallet') return <SignInPage binding={binding} route={route} />;
-  return <AccountForm key={session.actor.address.toLowerCase()} address={session.actor.address} binding={binding} onboarding={route.name === 'onboarding'} returnTo={returned(route)} />;
+  const [signInOpen, setSignInOpen] = useState(false);
+  return <>{session.actor?.kind === 'wallet'
+    ? <AccountForm key={session.actor.address.toLowerCase()} address={session.actor.address} binding={binding} onboarding={route.name === 'onboarding'} returnTo={returned(route)} onChangeWallet={() => { binding.disconnect(); setSignInOpen(true); }} />
+    : <AccountGuest onSignIn={() => setSignInOpen(true)} />}
+    <WalletSignInDialog binding={binding} open={signInOpen} onClose={() => setSignInOpen(false)} />
+  </>;
+}
+
+function AccountGuest({ onSignIn }: { onSignIn: () => void }) {
+  return <section className="pf-sheet pf-stack pf-account-main"><h1>Account and settings</h1><p>Sign in to recognize your wallet, set your preferences and find your events and contributions.</p><Button onClick={onSignIn}>Sign in with a wallet</Button><Link href={routeHref({ name: 'events' })}>Browse events</Link></section>;
 }

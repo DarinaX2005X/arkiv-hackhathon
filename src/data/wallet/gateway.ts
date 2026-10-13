@@ -118,20 +118,31 @@ async function assertWallet(provider: InjectedWalletProvider, account: AccountAd
 }
 
 /** Connect from a user action. This requests an account/network, never an entity signature. */
-export async function connectWallet(provider: InjectedWalletProvider): Promise<{ account: AccountAddress; chainId: typeof TIRAMISU_CHAIN_ID }> {
+export async function connectWallet(provider: InjectedWalletProvider, options: { isCurrent?: () => boolean } = {}): Promise<{ account: AccountAddress; chainId: typeof TIRAMISU_CHAIN_ID }> {
+  const assertCurrent = () => { if (options.isCurrent && !options.isCurrent()) throw fail('This connection request was cancelled.', 'not_connected'); };
+  assertCurrent();
   const accounts = await provider.request({ method: 'eth_requestAccounts' });
+  assertCurrent();
   const account = Array.isArray(accounts) ? accounts[0] : undefined;
   if (typeof account !== 'string' || !addressPattern.test(account)) throw fail('Connect a valid EOA wallet account.', 'not_connected');
-  try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] }); }
-  catch (error) {
-    if (providerCode(error) !== 4902) throw error;
-    await provider.request({ method: 'wallet_addEthereumChain', params: [{
-      chainId: CHAIN_HEX, chainName: tiramisu.name, nativeCurrency: tiramisu.nativeCurrency,
-      rpcUrls: [tiramisu.rpcUrls.default.http[0]], blockExplorerUrls: ['https://tiramisu.explorer.arkiv.network'],
-    }] });
-    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
+  const chain = await provider.request({ method: 'eth_chainId' });
+  assertCurrent();
+  if (rpcInteger(chain) !== BigInt(TIRAMISU_CHAIN_ID)) {
+    try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] }); }
+    catch (error) {
+      assertCurrent();
+      if (providerCode(error) !== 4902) throw error;
+      await provider.request({ method: 'wallet_addEthereumChain', params: [{
+        chainId: CHAIN_HEX, chainName: tiramisu.name, nativeCurrency: tiramisu.nativeCurrency,
+        rpcUrls: [tiramisu.rpcUrls.default.http[0]], blockExplorerUrls: ['https://tiramisu.explorer.arkiv.network'],
+      }] });
+      assertCurrent();
+      await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
+    }
+    assertCurrent();
   }
   await assertWallet(provider, account as AccountAddress);
+  assertCurrent();
   return { account: account.toLowerCase() as AccountAddress, chainId: TIRAMISU_CHAIN_ID };
 }
 

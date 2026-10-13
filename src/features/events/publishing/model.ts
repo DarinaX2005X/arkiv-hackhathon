@@ -3,7 +3,7 @@ import { validRepositoryActionRecord } from '../../../app/actions';
 import { isAccountAddress, isPublicEntityKey } from '../../../app/ids';
 import type { AppSession } from '../../../app/session';
 import { createDraftStore, type StoragePort } from '../../../app/storage';
-import { localDateTimeToUtc, type TimeDisambiguation } from '../../../app/time';
+import { localDateTimeToUtc, type TimeDisambiguation, type TimeResult } from '../../../app/time';
 import { createOperationIntent } from '../../../data/operations';
 import type { EventRepositoryContract, PublishEventCommand, ReplaceEventCommand } from '../../../data/events/types';
 import type { MutationResult, Result } from '../../../data/types';
@@ -92,14 +92,20 @@ export function publishingDraftStore(storage: StoragePort | null, projectRoot: P
     validate: (value): value is PublishingDraft => validPublishingDraft(value) && value.projectRoot === projectRoot && value.organizer.toLowerCase() === organizer.toLowerCase() });
 }
 
+export function publishingLocalInstant(value: string, timeZone: string, occurrence: TimeDisambiguation = 'reject'): TimeResult {
+  const match = /^(.*T\d{2}:\d{2}:\d{2})\.(\d{1,3})$/.exec(value);
+  const result = localDateTimeToUtc(match?.[1] ?? value, timeZone, occurrence);
+  return result.ok ? { ok: true, utcMilliseconds: result.utcMilliseconds + (match ? Number(match[2]!.padEnd(3, '0')) : 0) } : result;
+}
+
+export function publishingDateInputType(value: string): 'text' | 'datetime-local' {
+  return value && !publishingLocalInstant(value, 'UTC').ok ? 'text' : 'datetime-local';
+}
+
 export function termsFromFields(fields: PublishingFields): { ok: true; terms: AudienceTerms } | { ok: false; message: string } {
   if (!fields.title.trim()) return fail('Give the event a title visitors will recognize.');
   if (fields.format !== 'online' && !fields.venue.trim()) return fail('Add the public place or meeting point.');
-  const instant = (value: string, occurrence: TimeDisambiguation) => {
-    const match = /^(.*T\d{2}:\d{2}:\d{2})\.(\d{1,3})$/.exec(value);
-    const result = localDateTimeToUtc(match?.[1] ?? value, fields.timeZone, occurrence);
-    return result.ok ? { ok: true as const, utcMilliseconds: result.utcMilliseconds + (match ? Number(match[2]!.padEnd(3, '0')) : 0) } : result;
-  };
+  const instant = (value: string, occurrence: TimeDisambiguation) => publishingLocalInstant(value, fields.timeZone, occurrence);
   const start = instant(fields.startsLocal, fields.startOccurrence), end = instant(fields.endsLocal, fields.endOccurrence);
   for (const [label, result] of [['start', start], ['end', end]] as const) {
     if (!result.ok) {

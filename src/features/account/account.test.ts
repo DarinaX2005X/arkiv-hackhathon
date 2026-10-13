@@ -4,7 +4,7 @@ import { routePath } from '../../app/routes';
 import type { StoragePort } from '../../app/storage';
 import {
   accountReturnRoute, createAccountPreferences, defaultAccountPreferences,
-  readAccountPreferences, workDestination, type AccountPreferences,
+  isAccountPreferences, readAccountPreferences, workDestination, type AccountPreferences,
 } from './account';
 
 const walletA = `0x${'ab'.repeat(20)}`;
@@ -23,6 +23,34 @@ function memoryStorage() {
 const runtimeFor = (storage: StoragePort | null) => createAppRuntime({ storage, namespace: 'account-test', now: () => now });
 
 describe('device account preferences without rendering or wallet authority', () => {
+  it('shares preferences between independent Studio and Desk namespaces without sharing live authority', () => {
+    const { storage } = memoryStorage();
+    const studio = createAppRuntime({ storage, namespace: 'partfolk:studio:public', now: () => now });
+    const desk = createAppRuntime({ storage, namespace: 'partfolk:partner-desk', now: () => now });
+    createAccountPreferences(studio, walletA).save(preferences);
+    expect(createAccountPreferences(desk, walletA).load()).toMatchObject({ status: 'ready', value: preferences });
+    expect(studio.session.getSnapshot().actor).toBeNull(); expect(desk.session.getSnapshot().actor).toBeNull();
+  });
+
+  it('copies legacy settings to the shared key while retaining their original bytes', () => {
+    const { storage, values } = memoryStorage(); const runtime = runtimeFor(storage);
+    const legacy = runtime.drafts(`account-${walletA}`, 'account-preferences', isAccountPreferences);
+    legacy.save(preferences); const original = [...values.entries()];
+    expect(createAccountPreferences(runtime, walletA).load()).toMatchObject({ status: 'ready', value: preferences });
+    for (const [key, value] of original) expect(values.get(key)).toBe(value);
+    expect(createAccountPreferences(createAppRuntime({ storage, namespace: 'independent-desk' }), walletA).load()).toMatchObject({ status: 'ready', value: preferences });
+  });
+
+  it('keeps malformed legacy settings recoverable instead of replacing them during migration', () => {
+    const { storage, values } = memoryStorage(); const runtime = runtimeFor(storage);
+    runtime.drafts(`account-${walletA}`, 'account-preferences', isAccountPreferences).save(preferences);
+    const key = [...values.keys()][0]!; storage.setItem(key, '{old unreadable preferences');
+    const account = createAccountPreferences(runtime, walletA);
+    expect(account.load()).toMatchObject({ status: 'recovery' });
+    expect(account.save(preferences).persisted).toBe(false);
+    expect(account.exportRecovery()).toBe('{old unreadable preferences');
+    expect(values.size).toBe(1); expect(values.get(key)).toBe('{old unreadable preferences');
+  });
   it('starts with unsaved defaults without creating a profile or work merely by reading', () => {
     const { storage, values } = memoryStorage();
     const store = createAccountPreferences(runtimeFor(storage), walletA);

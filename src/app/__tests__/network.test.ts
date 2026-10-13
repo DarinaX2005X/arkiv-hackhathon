@@ -5,6 +5,7 @@ import { COORDINATOR, KEYS, NOW, PUBLISHER, readyFixture } from '../../data/__te
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { InjectedWalletProvider, RpcRequest } from '../../data/wallet/types';
 import { WALLET_SESSION_KEY, type WalletSessionChannel, type WalletSessionMessage } from '../../features/account/wallet-session';
+import { WALLET_PROVIDER_KEY, type AvailableWallet, type WalletDiscovery } from '../../features/account/wallet-discovery';
 
 type Event = 'accountsChanged' | 'chainChanged' | 'disconnect';
 function deferred<T>() {
@@ -54,8 +55,80 @@ function retainWork(runtime: ReturnType<typeof createPublicRuntime>['runtime']) 
   draft.save({ text: 'My contribution terms' });
   return { draft, destination: runtime.session.getSnapshot().destination };
 }
+function walletRegistry(initial: AvailableWallet[]) {
+  let wallets = initial;
+  const listeners = new Set<() => void>();
+  const discovery: WalletDiscovery = {
+    getSnapshot: () => wallets,
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    refresh() {}, dispose() { listeners.clear(); },
+  };
+  return { discovery, add(wallet: AvailableWallet) { wallets = [...wallets, wallet]; listeners.forEach(listener => listener()); } };
+}
 
 describe('public runtime connection boundary without browser automation', () => {
+  it('connects only the chosen installed provider and saves its preference without storing account authority', async () => {
+    const first = new FakeProvider(), selected = new FakeProvider(); selected.accounts = [PUBLISHER];
+    const storage = createMemoryStorage(); storage.setItem(WALLET_SESSION_KEY, '"signed-out"');
+    const { discovery } = walletRegistry([
+      { id: 'eip6963:org.first.wallet', name: 'First wallet', provider: first },
+      { id: 'eip6963:org.second.wallet', name: 'Second wallet', provider: selected },
+    ]);
+    const runtime = createPublicRuntime({ storage, namespace: 'choose-wallet', walletDiscovery: discovery, request: readyFixture().rpc.request });
+    await runtime.ready; const { draft, destination } = retainWork(runtime.runtime);
+    expect(await runtime.connect('eip6963:org.second.wallet')).toBe(true);
+    expect(first.calls).toEqual([]);
+    expect(selected.calls[0]?.method).toBe('eth_requestAccounts');
+    expect(runtime.runtime.session.getSnapshot()).toMatchObject({ actor: { kind: 'wallet', address: PUBLISHER }, destination, activeDraftId: 'my-draft' });
+    expect(storage.getItem(WALLET_PROVIDER_KEY)).toBe('eip6963:org.second.wallet');
+    expect(storage.getItem('choose-wallet:session')).not.toContain(PUBLISHER);
+    expect(draft.peek()).toEqual({ text: 'My contribution terms' }); runtime.dispose();
+  });
+
+  it('closing a pending connection suppresses its late wallet events and prevents any following network prompt', async () => {
+    const provider = new FakeProvider(); provider.chain = '0x1';
+    const pending = deferred<unknown>(); provider.accountResponse = pending.promise;
+    const { binding: runtime } = binding(provider); const { draft, destination } = retainWork(runtime.runtime);
+    const connection = runtime.connect(); runtime.cancelConnection();
+    pending.resolve([COORDINATOR]); expect(await connection).toBe(false);
+    provider.chain = `0x${TIRAMISU_CHAIN_ID.toString(16)}`;
+    provider.emit('accountsChanged', [COORDINATOR]);
+    expect(await runtime.restore()).toBe(false);
+    expect(provider.calls.map(call => call.method)).toEqual(['eth_requestAccounts']);
+    expect(runtime.runtime.session.getSnapshot()).toMatchObject({ actor: null, destination, activeDraftId: 'my-draft' });
+    expect(draft.peek()).toEqual({ text: 'My contribution terms' });
+    provider.accountResponse = null;
+    expect(await runtime.connect()).toBe(true);
+    runtime.dispose();
+  });
+
+  it('clears the previous provider when a peer chooses one that has not announced yet, then restores that provider passively', async () => {
+    const peers = new Set<(message: WalletSessionMessage) => void>();
+    const channel = (): WalletSessionChannel => {
+      let own: ((message: WalletSessionMessage) => void) | undefined;
+      return { publish(message) { for (const peer of peers) if (peer !== own) peer(message); },
+        subscribe(listener) { own = listener; peers.add(listener); return () => { peers.delete(listener); }; } };
+    };
+    const storage = createMemoryStorage();
+    const previous = new FakeProvider(), chosen = new FakeProvider(), deskPrevious = new FakeProvider(), deskChosen = new FakeProvider();
+    chosen.accounts = [PUBLISHER]; deskChosen.accounts = [PUBLISHER];
+    const firstId = 'eip6963:org.first.wallet', selectedId = 'eip6963:org.second.wallet';
+    storage.setItem(WALLET_PROVIDER_KEY, firstId);
+    const studioRegistry = walletRegistry([{ id: firstId, name: 'First', provider: previous }, { id: selectedId, name: 'Second', provider: chosen }]);
+    const deskRegistry = walletRegistry([{ id: firstId, name: 'First', provider: deskPrevious }]);
+    const studio = createPublicRuntime({ storage, namespace: 'studio-selection', walletDiscovery: studioRegistry.discovery, sessionChannel: channel(), request: readyFixture().rpc.request });
+    const desk = createPublicRuntime({ storage, namespace: 'desk-selection', walletDiscovery: deskRegistry.discovery, sessionChannel: channel(), request: readyFixture().rpc.request });
+    await Promise.all([studio.ready, desk.ready]); deskPrevious.calls.length = 0;
+    expect(await studio.connect(selectedId)).toBe(true);
+    expect(desk.runtime.session.getSnapshot().actor).toBeNull();
+    expect(desk.getSnapshot().selectedWalletId).toBeNull();
+    expect(await desk.restore()).toBe(false); expect(deskPrevious.calls).toEqual([]);
+    deskRegistry.add({ id: selectedId, name: 'Second', provider: deskChosen });
+    expect(await desk.restore()).toBe(true);
+    expect(desk.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    expect(deskChosen.calls.every(call => ['eth_accounts', 'eth_chainId'].includes(call.method))).toBe(true);
+    expect(deskPrevious.calls).toEqual([]); studio.dispose(); desk.dispose();
+  });
   it('reads a genuine fixture through the SDK/RPC path without requesting a wallet', async () => {
     const provider = new FakeProvider();
     const { binding: publicBinding, fixture } = binding(provider);
@@ -137,6 +210,7 @@ describe('public runtime connection boundary without browser automation', () => 
     const { draft } = retainWork(publicBinding.runtime);
     const destination = `/events/${KEYS.project}`;
     publicBinding.runtime.session.navigate({ name: 'sign-in', returnTo: destination });
+    provider.chain = '0x1';
     provider.switchFailure = Object.assign(new Error('Declined switch'), { code: 4001 });
     expect(await publicBinding.connect()).toBe(false);
     expect(publicBinding.runtime.session.currentRoute()).toEqual({ name: 'sign-in', returnTo: destination });

@@ -7,7 +7,7 @@ import { activeSource, deriveDraftStatus, deriveReadiness } from '../../../domai
 import { solve } from '../../../domain/solver';
 import type { Actor, BookState, EntityKey, ProjectAggregate, Proposal, PublisherAggregate } from '../../../domain/types';
 import type { Result, WriteAuthority } from '../../../data/types';
-import { addDraftOffer, affectedProjects, availabilityWindowError, contributionDraft, DEFAULT_LIFETIME, editableWindows, isContributionDraft, isContributionTarget, materializeContributionDraft, prepareAvailability, prepareDecisionCommand, prepareEmptyRecovery, prepareReleaseCommand, removeDraftResource, writeAuthority } from '../model';
+import { addDraftOffer, affectedProjects, availabilityWindowError, contributionDraft, copyResourceAvailability, DEFAULT_LIFETIME, editableWindows, hasVerifiedApproval, isContributionDraft, isContributionTarget, materializeContributionDraft, prepareAvailability, prepareDecisionCommand, prepareEmptyRecovery, prepareReleaseCommand, removeDraftResource, startDraftContribution, writeAuthority } from '../model';
 import { requestProjects } from '../Requests';
 import { createDraftStore } from '../../../app/storage';
 import { agreementDifference } from '../difference';
@@ -30,6 +30,23 @@ async function activeFixture() {
 function firstOwner(project: ProjectAggregate) { return project.publishers.find(p => project.proposal!.payload.plan.requiredApprovers.includes(p.root.key))!; }
 
 describe('owner contribution commands', () => {
+  it('shows a recorded acceptance as verified only while its current exact terms and grant can be checked', async () => {
+    const { repository, project } = await activeFixture(); const owner = firstOwner(project);
+    value(await repository.replaceBook(prepareDecisionCommand(project, owner.root.key, authority(owner.root.payload.publisher), {
+      status: 'accepted', validUntil: SMALL_WORKS_NOW + 15 * 86400000, id: 'approval-display', now: SMALL_WORKS_NOW, reviewedSource: activeSource(project)!,
+    })));
+    const current = value(await repository.loadProject(project.root.key));
+    expect(hasVerifiedApproval(deriveReadiness(current, SMALL_WORKS_NOW), owner.root.key)).toBe(true);
+    const stale = structuredClone(current); stale.snapshot.freshness = 'stale';
+    const missingGrant = structuredClone(current); book(firstOwner(missingGrant)).grants = [];
+    const changedOffer = structuredClone(current); book(firstOwner(changedOffer)).offers[0]!.instructions += ' Different return terms.';
+    const newActivation = structuredClone(current); if (newActivation.activation.status !== 'unique') throw new Error('fixture'); newActivation.activation.entity.key = 'local:replacement-activation';
+    for (const changed of [stale, missingGrant, changedOffer, newActivation]) {
+      expect(book(firstOwner(changed)).decisions[0]!.status).toBe('accepted');
+      expect(hasVerifiedApproval(deriveReadiness(changed, SMALL_WORKS_NOW), owner.root.key)).toBe(false);
+    }
+    expect(hasVerifiedApproval(deriveReadiness(current, SMALL_WORKS_NOW + 16 * 86400000), owner.root.key)).toBe(false);
+  });
   it('preserves current commitments and flags affected projects when the owner changes offer terms', async () => {
     const { repository, project } = await activeFixture(); const owner = firstOwner(project); const actor = authority(owner.root.payload.publisher);
     const command = prepareDecisionCommand(project, owner.root.key, actor, { status: 'accepted', validUntil: SMALL_WORKS_NOW + 15 * 86400000,
@@ -112,6 +129,37 @@ describe('owner contribution commands', () => {
 });
 
 describe('availability editor drafts', () => {
+  it('starts a resource and offer together while keeping unfinished availability unpublished', () => {
+    const draft = startDraftContribution({ name: 'Oak', description: '', resources: [], offers: [] }, { kind: 'equipment', publisherKind: 'individual', id: 'boards' });
+    expect(draft.resources).toHaveLength(1); expect(draft.offers).toHaveLength(1);
+    expect(draft.offers[0]!.resourceId).toBe(draft.resources[0]!.id);
+    expect(draft.offers[0]!.availability).toEqual([]);
+    const store = createDraftStore({ storage: createMemoryStorage(), key: 'new-offer', kind: 'contribution', validate: isContributionDraft });
+    expect(store.save(draft).persisted).toBe(true);
+    const restored = store.load(); if (restored.status !== 'ready') throw new Error('draft');
+    expect(restored.value.editorWindows!['offer:offer-boards']![0]!.start).toBe('');
+    expect(() => materializeContributionDraft(restored.value)).toThrow('invalid datetime');
+    expect(() => startDraftContribution(draft, { kind: 'equipment', publisherKind: 'individual', id: 'boards' })).toThrow('already');
+  });
+  it('shares one capacity-one personal resource across several offers without replacing edited dates', () => {
+    let draft = startDraftContribution({ name: 'Oak', description: '', resources: [], offers: [] }, { kind: 'person', publisherKind: 'individual', id: 'first' });
+    draft.editorWindows!['resource:self']![0]!.start = '2026-10-18T10:00';
+    draft = startDraftContribution(draft, { kind: 'person', publisherKind: 'individual', id: 'second' });
+    expect(draft.resources).toHaveLength(1); expect(draft.resources[0]).toMatchObject({ id: 'self', capacity: 1 });
+    expect(draft.offers.map(offer => offer.resourceId)).toEqual(['self', 'self']);
+    expect(draft.editorWindows!['offer:offer-second']![0]!.start).toBe('2026-10-18T10:00');
+    expect(draft.editorWindows!['offer:offer-first']![0]!.start).toBe('');
+  });
+  it('copies the edited resource windows only into the selected offer without sharing mutable window objects', () => {
+    let draft = startDraftContribution({ name: 'Oak', description: '', resources: [], offers: [] }, { kind: 'place', publisherKind: 'organization', id: 'hall' });
+    draft = addDraftOffer(draft, 'resource-hall', 'evening');
+    draft.editorWindows!['resource:resource-hall'] = [{ id: 'new-time', start: '2026-10-18T18:00', end: '', timeZone: 'Europe/London' }];
+    const copied = copyResourceAvailability(draft, 'offer-hall');
+    expect(copied.editorWindows!['offer:offer-hall']![0]).toMatchObject({ start: '2026-10-18T18:00', end: '', timeZone: 'Europe/London' });
+    expect(copied.editorWindows!['offer:evening']![0]!.start).toBe('');
+    expect(copied.editorWindows!['offer:offer-hall']![0]).not.toBe(draft.editorWindows!['resource:resource-hall']![0]);
+    expect(() => materializeContributionDraft(copied)).toThrow('invalid datetime');
+  });
   it('persists and restores invalid raw times without silently publishing the previous valid value', () => {
     const owner = makeSmallWorksFixture({ oak: true }).publishers.find(p => p.root.key === 'local:oak')!;
     const draft = contributionDraft(book(owner)); const windows = editableWindows(draft.resources[0]!.availability);

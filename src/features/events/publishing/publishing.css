@@ -17,7 +17,9 @@
 .pf-publishing-preview > p:first-of-type { color: var(--text-secondary); }
 .pf-publishing-preview .pf-event-facts > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
 .pf-event-preview-object { border-radius: 12px; overflow: hidden; background: #e1e9d8; aspect-ratio: 28 / 15; }
-.pf-event-preview-object svg { display: block; width: 100%; height: 100%; }
+.pf-event-preview-object img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pf-publishing-place-source { font-size: .875rem; }
+.pf-publishing-section > p { color: var(--text-secondary); max-width: 68ch; }
 .pf-admissions { display: grid; gap: var(--space-4); margin-top: var(--space-6); padding-top: var(--space-6); border-top: 1px solid var(--border-quiet); min-width: 0; }
 .pf-admissions > .pf-button { justify-self: start; }
 .pf-admission-list { display: grid; list-style: none; padding: 0; margin: 0; gap: var(--space-3); }

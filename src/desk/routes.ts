@@ -1,16 +1,26 @@
 import { isPublicEntityKey } from '../app/ids';
+import { parseRoute, safeReturnPath, type Route } from '../app/routes';
 import { activeSource } from '../domain/readiness';
 import type { ContentHash, ProjectAggregate, PublicEntityKey } from '../domain/types';
 
 export interface InvitationRevision { activationKey?: PublicEntityKey; proposalKey?: PublicEntityKey; proposalHash?: ContentHash }
 export type DeskRoute =
-  | { name: 'contributions' | 'requests' | 'help' }
-  | { name: 'project'; projectRoot: PublicEntityKey; section: 'agreement' | 'plans' | 'runbook'; revision?: InvitationRevision }
+  | { name: 'contributions'; projectRoot?: PublicEntityKey; returnTo?: string }
+  | { name: 'requests' | 'help' }
+  | { name: 'project'; projectRoot: PublicEntityKey; section: 'needs' | 'agreement' | 'plans' | 'runbook'; revision?: InvitationRevision }
   | { name: 'publisher'; publisherRoot: PublicEntityKey; offerId?: string }
   | { name: 'not-found' };
 export type TargetKind = 'project' | 'publisher';
 const sections = ['agreement', 'plans', 'runbook', 'needs', 'history'];
 const offerIdValid = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value);
+function publicReturnPath(value: string | null, depth = 0): string | undefined {
+  const path = safeReturnPath(value);
+  if (!path || depth > 3) return undefined;
+  const route = parseRoute(path);
+  if ((route.name === 'project' || route.name === 'contributions') && route.projectRoot && !isPublicEntityKey(route.projectRoot)) return undefined;
+  if (route.name === 'contributions' && route.returnTo && !publicReturnPath(route.returnTo, depth + 1)) return undefined;
+  return ['home', 'events', 'event', 'my-events', 'requests', 'project', 'contributions', 'new-project'].includes(route.name) ? path : undefined;
+}
 
 /** Treat pasted URLs as data: read their public target; never follow their origin. */
 export function parseDeskRoute(input: string): DeskRoute {
@@ -33,13 +43,19 @@ export function parseDeskRoute(input: string): DeskRoute {
   catch { return { name: 'not-found' }; }
   const query = new URLSearchParams(separator < 0 ? '' : raw.slice(separator + 1));
   if ([...query.keys()].some(key => query.getAll(key).length !== 1)) return { name: 'not-found' };
+  if (path === '/contributions' || path === '/offers') {
+    const projectRoot = query.get('projectRoot'), returnTo = publicReturnPath(query.get('returnTo'));
+    if ([...query.keys()].some(key => !['projectRoot', 'returnTo'].includes(key)) || projectRoot !== null && !isPublicEntityKey(projectRoot)
+      || query.has('returnTo') && !returnTo) return { name: 'not-found' };
+    return { name: 'contributions', ...(projectRoot ? { projectRoot: projectRoot as PublicEntityKey } : {}), ...(returnTo ? { returnTo } : {}) };
+  }
   const project = /^\/projects\/([^/]+)(?:\/([^/]+))?$/.exec(path);
   if (project && isPublicEntityKey(project[1]) && (!project[2] || sections.includes(project[2]))) {
     if ([...query.keys()].some(key => !['activation', 'proposal', 'revision', 'hash'].includes(key))) return { name: 'not-found' };
     const activationKey = query.get('activation'); const proposalKey = query.get('proposal') ?? query.get('revision'); const proposalHash = query.get('hash');
     if ((query.has('proposal') && query.has('revision')) || [activationKey, proposalKey, proposalHash].some(key => key !== null && !isPublicEntityKey(key))) return { name: 'not-found' };
     const revision = { ...(activationKey ? { activationKey: activationKey as PublicEntityKey } : {}), ...(proposalKey ? { proposalKey: proposalKey as PublicEntityKey } : {}), ...(proposalHash ? { proposalHash: proposalHash as ContentHash } : {}) };
-    return { name: 'project', projectRoot: project[1], section: project[2] === 'runbook' ? 'runbook' : project[2] === 'plans' ? 'plans' : 'agreement', ...(Object.keys(revision).length ? { revision } : {}) };
+    return { name: 'project', projectRoot: project[1], section: project[2] === 'needs' ? 'needs' : project[2] === 'runbook' ? 'runbook' : project[2] === 'plans' ? 'plans' : 'agreement', ...(Object.keys(revision).length ? { revision } : {}) };
   }
   const publisher = /^\/(?:publishers|contributions|offers)\/([^/]+)$/.exec(path);
   if (publisher && isPublicEntityKey(publisher[1]) && [...query.keys()].every(key => key === 'offer')) {
@@ -60,6 +76,12 @@ export function parsePublicTarget(input: string, kind: TargetKind): DeskRoute {
 export function deskPath(route: DeskRoute): string {
   if (route.name === 'not-found') return '/not-found';
   if (route.name === 'publisher') return `/publishers/${route.publisherRoot}${route.offerId ? `?offer=${encodeURIComponent(route.offerId)}` : ''}`;
+  if (route.name === 'contributions') {
+    const query = new URLSearchParams();
+    if (route.projectRoot) query.set('projectRoot', route.projectRoot);
+    if (route.returnTo) query.set('returnTo', route.returnTo);
+    return `/contributions${query.size ? `?${query}` : ''}`;
+  }
   if (route.name !== 'project') return `/${route.name}`;
   const query = new URLSearchParams();
   if (route.revision?.activationKey) query.set('activation', route.revision.activationKey);
@@ -68,6 +90,13 @@ export function deskPath(route: DeskRoute): string {
   return `/projects/${route.projectRoot}/${route.section}${query.size ? `?${query}` : ''}`;
 }
 export const deskHref = (route: DeskRoute) => `#${deskPath(route)}`;
+/** The separate hash router retains exact invitation revisions; shared draft handoff needs its current contribution destination. */
+export function deskSessionRoute(route: DeskRoute): Route {
+  if (route.name === 'project') return { name: 'project', projectRoot: route.projectRoot, tab: route.section };
+  if (route.name === 'publisher') return { name: 'contributions' };
+  if (route.name === 'not-found') return { name: 'not-found', path: '/not-found' };
+  return route;
+}
 export function invitationStatus(project: ProjectAggregate, revision?: InvitationRevision): 'current' | 'different' | 'unavailable' {
   if (!revision) return 'current';
   const source = activeSource(project);

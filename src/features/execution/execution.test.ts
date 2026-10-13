@@ -10,7 +10,7 @@ import type { EntityKey, ProjectAggregate, SolverResult } from '../../domain/typ
 import type { ReplaceBookCommand, WriteAuthority } from '../../data/types';
 import { templateToEditorDraft } from '../projects/editor';
 import { publishPlanInput } from '../projects/selectors';
-import { prepareClosureCommand, prepareProgressCommand, rowLabels, runbookRows, sourceForProposal, versionStatus } from './model';
+import { completionReviewFingerprint, prepareClosureCommand, prepareProgressCommand, rowLabels, runbookRows, sourceForProposal, transferQuantity, versionStatus } from './model';
 import { createRepairController, prepareExecutionCheckpoint, repairFingerprint, repairInput, solveRepair } from './repair';
 import { buildExecutionExports, packetFromProject, parseExecutionExport } from './export';
 
@@ -60,6 +60,24 @@ function progress(project: ProjectAggregate, root: EntityKey, duty: string, inpu
 function advance(project: ProjectAggregate) { project.snapshot.blockTimestamp++; project.snapshot.fetchedAt++; project.publishers.forEach(publisher => { publisher.snapshot = { ...project.snapshot }; }); }
 
 describe('execution presentation and commands', () => {
+  it('keeps cleared transfer quantities invalid and accepts only whole quantities within the reviewed remainder', () => {
+    for (const raw of ['', ' ', '0', '-1', '1.5', '1e2', '01', '7', '9007199254740992']) expect(transferQuantity(raw, 6), raw).toBeNull();
+    expect(transferQuantity('1', 6)).toBe(1); expect(transferQuantity('6', 6)).toBe(6);
+    expect(transferQuantity('1', 0)).toBeNull(); expect(transferQuantity('1', Number.NaN)).toBeNull();
+  });
+  it('invalidates closure review for changed work, custody, evidence or activation while allowing an unchanged refresh', () => {
+    const project = fixture(true); agree(project);
+    const original = completionReviewFingerprint(project);
+    advance(project); expect(completionReviewFingerprint(project)).toBe(original);
+    progress(project, 'local:makerspace', 'handover-boards', { kind: 'transfer_report', quantity: 4 }, 'review-give');
+    const reported = completionReviewFingerprint(project); expect(reported).not.toBe(original);
+    progress(project, 'local:cedar', 'handover-boards', { kind: 'transfer_acknowledgement', reportId: 'report:review-give', quantity: 4 }, 'review-receive');
+    expect(completionReviewFingerprint(project)).not.toBe(reported);
+    const current = completionReviewFingerprint(project), stale = structuredClone(project);
+    stale.snapshot.freshness = 'stale'; expect(completionReviewFingerprint(stale)).not.toBe(current);
+    if (project.activation.status !== 'unique') throw new Error('fixture'); project.activation.entity.key = 'local:changed-current-activation';
+    expect(completionReviewFingerprint(project)).not.toBe(current);
+  });
   it('orders actual task times and shows no readiness just from viewing a proposal', () => {
     const project = fixture();
     const rows = runbookRows(project, project.proposal!, activeSource(project), null);

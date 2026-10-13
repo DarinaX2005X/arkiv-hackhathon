@@ -1,7 +1,7 @@
 import type { EntityKey, PublicEntityKey } from '../domain/types';
 import { isEntityKey, isPublicEntityKey } from './ids';
 
-export const projectTabs = ['needs', 'plans', 'agreement', 'runbook', 'history'] as const;
+export const projectTabs = ['needs', 'plans', 'agreement', 'runbook', 'history', 'guests'] as const;
 export type ProjectTab = (typeof projectTabs)[number];
 export type Route =
   | { name: 'home' | 'demo' | 'workspace' | 'new-project' | 'requests' | 'events' | 'my-events' }
@@ -33,7 +33,7 @@ export function parseRoute(input: string, depth = 0): Route {
   if (Object.hasOwn(simpleRoutes, path)) return { name: simpleRoutes[path as keyof typeof simpleRoutes] };
   const event = /^\/events\/([^/]+)$/.exec(path);
   if (event && isPublicEntityKey(event[1])) return { name: 'event', projectRoot: event[1] };
-  const match = /^\/projects\/([^/]+)(?:\/(needs|plans|agreement|runbook|history))?$/.exec(path);
+  const match = /^\/projects\/([^/]+)(?:\/(needs|plans|agreement|runbook|history|guests))?$/.exec(path);
   if (match && isEntityKey(match[1])) return { name: 'project', projectRoot: match[1], tab: (match[2] as ProjectTab | undefined) ?? 'needs' };
   return { name: 'not-found', path: path.slice(0, 256) };
 }
@@ -53,10 +53,14 @@ export function routePath(route: Route): string {
     if (returnTo) query.set('returnTo', returnTo);
     return `/${route.name}${query.size ? `?${query}` : ''}`;
   }
-  if (route.name === 'not-found') return '/';
+  if (route.name === 'not-found') return '/404';
   return Object.entries(simpleRoutes).find(([, name]) => name === route.name)?.[0] ?? '/';
 }
 export const routeHref = (route: Route): string => `#${routePath(route)}`;
+/** An authentication route overlays its intended screen instead of replacing it. */
+export function routeBehindSignIn(route: Route): Route {
+  return route.name === 'sign-in' ? parseRoute(safeReturnPath(route.returnTo) ?? '/') : route;
+}
 /** A blank landing URL must never inherit another visit's saved destination. */
 export function routeFromLocation(location: { pathname: string; search?: string; hash: string }): Route {
   if (location.hash.startsWith('#/')) return parseRoute(location.hash);

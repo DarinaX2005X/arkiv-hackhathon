@@ -21,9 +21,9 @@ Studio is available at `http://127.0.0.1:5173/`. Start Partner Desk independentl
 npm run dev:desk
 ```
 
-Desk is available at `http://127.0.0.1:5174/desk.html`. Its own entry point, runtime, browser storage namespace, and wallet connection do not require the Studio development server. Stop Studio to check that boundary; keep the Desk server running. The user performs browser and visual verification.
+Desk is available at `http://127.0.0.1:5174/desk`. Its own entry point, runtime and browser journal namespace do not require the Studio development server. Same-origin windows share the wallet choice, explicit sign-out and account display preferences. Different ports/origins keep separate storage. The user performs browser and visual verification.
 
-Reading public projects, editing local drafts, and synthetic local practice need no wallet. Local practice and local roles are simulations. They do not publish records or grant public consent.
+Reading public projects, preparing unsent input and synthetic practice need no wallet. Ordinary projects publish through the connected owner's wallet. Older device-only projects remain recoverable; the separate practice and its fictional roles do not grant public consent.
 
 ### Checks and production artifacts
 
@@ -38,19 +38,23 @@ This runs TypeScript checking, Vitest tests, bootstrap/atomic script tests, and 
 | `npm run typecheck` | TypeScript validation. |
 | `npm run test:unit` | Domain, repository, application, and client unit tests. |
 | `npm run test:bootstrap` | Tests for the historical bootstrap and atomic probe scripts. |
-| `npm run build` | Studio and bundled Desk entry points in `dist/`. |
+| `npm run build` | Studio, bundled Desk and the 404 document in `dist/`. |
 | `npm run build:desk` | Independent Desk artifact in `dist-desk/`. |
 | `npm run preview` | Serve `dist/` on `http://127.0.0.1:4173/`. |
-| `npm run preview:desk` | Serve `dist-desk/` on `http://127.0.0.1:4174/desk.html`. |
+| `npm run preview:desk` | Serve `dist-desk/` on `http://127.0.0.1:4174/desk`. |
 | `npm run verify -- --help` | Show the read-only verifier's arguments. |
 
-Build before running the corresponding preview command. All four development/preview ports are strict: an occupied port causes an error instead of silently choosing another. There is no `npm start` script. Vite preview serves a local build; production hosting should serve the generated static files over HTTPS.
+Build before running the corresponding preview command. All four development/preview ports are strict: an occupied port causes an error instead of silently choosing another. There is no `npm start` script. The main production bundle uses the hosted read endpoint, so its local preview requires the server-only access key below; standalone Desk builds use direct RPC.
 
-The [Studio build configuration](../vite.config.ts) and [Desk build configuration](../vite.desk.config.ts) use relative asset URLs. Deploy the contents of `dist/`, or deploy `dist-desk/` separately with `/desk.html` as its entry point. Keep each HTML file and its generated assets together. Do not publish the source workspace, `.local/`, or signer journals as a static site. No provider-specific deployment command or production hosting target is configured yet.
+The [Studio build configuration](../vite.config.ts) and [Desk build configuration](../vite.desk.config.ts) use origin-root asset URLs. Keep HTML and generated assets together at the hosting origin root. The independent `dist-desk/` artifact works with `/desk.html`; the provided development/preview server also serves `/desk` and redirects the older path. Do not publish `.local/`, environment files, source maps or journals as static files.
+
+The deployed product is [partfolk.vercel.app](https://partfolk.vercel.app/). For a Vercel source deployment, [vercel.json](../vercel.json) installs dependencies, builds `dist/` and includes [api/arkiv-read.ts](../api/arkiv-read.ts) as a Node function. Set `ARKIV_RPC_ACCESS_KEY` in the server environment before enabling hosted reads. It is a provider access credential, not a signing key. `/desk` serves the same-product contributor workspace; unknown document paths redirect to `/404`, which returns HTTP 404. Missing private files and assets return 404 directly. Deployments must preserve origin storage and transaction recovery journals.
 
 ## Runtime and network configuration
 
-No `.env` file, API token, private-key environment variable, or `VITE_*` setting is required by the current application. The network settings are source configuration, not runtime environment overrides:
+Direct development reads need no token. The main production browser build reads through `/api/arkiv-read`, whose only provider credential is server-side `ARKIV_RPC_ACCESS_KEY`. For loopback development and preview, the Vite server reads that process variable or the ignored `.local/arkiv-access-key.txt` file. The file contains one access token. With no local token, development uses direct public RPC; main production preview reports the missing hosted access explicitly. Builds never load the local key into browser code.
+
+`VITE_ARKIV_READ_TRANSPORT` is a non-secret build choice (`auto`, `direct` or `hosted`). The supplied Vite configurations set it deliberately: the hosted main build uses the same-origin read API, and the independent Desk build uses direct RPC. The network itself is fixed in source:
 
 | Setting | Current value/source |
 | --- | --- |
@@ -63,13 +67,15 @@ No `.env` file, API token, private-key environment variable, or `VITE_*` setting
 | Reader configuration | [src/data/arkiv/client.ts](../src/data/arkiv/client.ts). |
 | Wallet configuration | [src/data/wallet/gateway.ts](../src/data/wallet/gateway.ts). |
 
-The reader allows only specific read RPC methods, uses no cached RPC responses, has a ten-second transport timeout, and disables transport retries. Tests can inject a request function; that injection is not an end-user environment setting. Changing the chain or RPC requires a reviewed source change and matching wallet, protocol, and validation settings.
+The read service validates a small allowlist of methods and exact Partfolk query/native-estimate shapes. It cannot sign or submit a transaction and does not accept a caller-selected upstream. Requests, responses, queues, concurrency and request time are bounded. Its rate admission is per instance; it is not a distributed quota guarantee. The access key is sent only to the fixed official RPC and never returned to the browser.
 
-Public reads pin related records to one block and require complete pagination. The reader defaults are 160 pages, 4,000 entities, 50 publishers, 100 records per page, and one cursor restart. Exceeding a bound or losing a page produces an incomplete/unverified result. It does not establish that no records exist. Studio project views and the contributor view refresh every 15 seconds and on window focus, sharing any pending request. A failed read keeps the last-known data marked stale. Snapshot confidence expires after 60 seconds even if a later request hangs; see [projectReader.ts](../src/features/projects/projectReader.ts). Local projects use opening and manual refresh. Every public mutation still performs its own fresh check.
+Browser readers share pending work and short-lived immutable query pages within a verified block/hash generation. Chain IDs and block headers stay independent, including the final reorg check. Each read has a ten-second fetch/body limit, at most one transient retry, and a cooldown that respects quota headers. Cancellation reaches the transport. Oversized query responses can restart the complete scope at smaller page sizes at the same block; generic failures cannot produce a partial successful result. The service never automatically falls back to a different upstream or replays a write.
+
+Public reads pin related records to one block and require complete pagination. The reader defaults are 160 pages, 4,000 entities, 50 publishers, 100 records per page, and one cursor restart. Exceeding a bound or losing a page produces an incomplete/unverified result. Project views poll every 45 seconds while visible and limit focus refreshes to one per 15 seconds, respecting cooldowns. Catalogue filtering uses its loaded dataset without another traversal. Failed refreshes keep last-known data marked stale, including nested source and roster snapshots. Confidence expires after 60 seconds; see [projectReader.ts](../src/features/projects/projectReader.ts). Every public mutation still performs its own fresh complete check.
 
 ### Wallet and development signer boundary
 
-Public writes require the participant's injected EOA wallet, browser storage, and browser Web Locks support. Connection requests the account and switches/adds Tiramisu. Sending rechecks the account, wallet chain, RPC chain, and frozen native transaction. Account/network changes or disconnect clear live signing authority while keeping drafts. Connect again with the original owner account to recover its pending request.
+Public writes require the participant's injected EOA wallet, browser storage, and browser Web Locks support. The modal lists detected providers, requests the chosen account and switches/adds Tiramisu only when needed. A previously authorized session can restore with passive account/chain reads. Explicit sign-out and cancelled connections suppress late provider events. Sending rechecks the account, wallet chain, RPC chain, and frozen native transaction. Account/network changes clear obsolete signing authority while keeping input and journals.
 
 The application does not accept a private key and does not expose a public or loopback signer endpoint. Never place a key in a `VITE_*` variable, browser bundle, source file, or public deployment. The operation journal stores requests and transaction evidence, not signing keys. Published payloads are public; use synthetic demonstration data and do not enter private contact, address, or calendar details.
 
@@ -80,10 +86,10 @@ The application does not accept a private key and does not expose a public or lo
 With both preview servers running, this Node command checks HTTP reachability without opening a browser:
 
 ```sh
-node --input-type=module -e "for (const url of process.argv.slice(1)) { const response = await fetch(url); console.log(response.status, url); if (!response.ok) process.exitCode = 1; }" http://127.0.0.1:4173/ http://127.0.0.1:4174/desk.html
+node --input-type=module -e "for (const url of process.argv.slice(1)) { const response = await fetch(url); console.log(response.status, url); if (!response.ok) process.exitCode = 1; }" http://127.0.0.1:4173/ http://127.0.0.1:4174/desk
 ```
 
-An HTTP success establishes endpoint availability, not a correct user flow, wallet interaction, or agreement. There is no application `/health` or version API. Record the release revision and build/check results separately when deploying; use fresh RPC verification for public data.
+An HTTP success establishes endpoint availability, not a correct user flow, wallet interaction, or agreement. The packaged public release includes `/version.json` with its source commit. Local Vite has no application health endpoint. Record build/check results separately and use fresh RPC verification for public data.
 
 The bounded capability probe requires no wallet or key:
 
@@ -158,6 +164,6 @@ If the current book is missing but its publisher root is still live, authentic, 
 
 The checked-in [bootstrap evidence](../arkiv/evidence/bootstrap.json) and [atomic transition evidence](../arkiv/evidence/atomic-transition.json) record historical Tiramisu transactions. The atomic probe records creation of A, replacement by B, and rejection of a stale A-to-C gas estimate. It explicitly records `staleBroadcast: false` and `minedRollbackTested: false`. It does not prove a mined stale transaction rollback or a full Partfolk workflow.
 
-The bounded product live-proof runner is documented in [tests/arkiv-live](../tests/arkiv-live). Its live execution is in progress; completed public product proof has not yet been published. Do not infer completion from unit tests, a runner file, local practice, or capability evidence.
+The [completed contributor proof](../arkiv/evidence/product-proof.json) records the synthetic P1 → withdrawal → P2 → P3 workflow on 11 October 2026. The separate [event proof](../arkiv/evidence/test-events.json) records three labelled test events, managed admissions and attendance. Together they contain 135 confirmed transactions within the 0.1 test GLM budget. They establish dated protocol behavior, not physical events or current readiness. The guarded runner is documented in [tests/arkiv-live](../tests/arkiv-live); rerunning it is not a setup step.
 
-A release record should distinguish: build/check results, public-record verification block, source revision, deployed HTTPS address, server/HTTP checks, user visual/wallet verification, repository visibility, and submission status. Production hosting is public and its files have passed HTTP checks; complete live product evidence and final browser/wallet acceptance remain separate. Deployment should preserve browser journals across upgrades, serve fresh HTML, and avoid caching RPC responses. A frontend host outage can be worked around with an independent Desk or CLI, but the current clients still rely on the configured RPC/indexer and on readable owner-controlled entities.
+A release record should distinguish build/check results, public-record verification block, source revision, deployed address, server/HTTP checks and user visual/wallet verification. The read endpoint returns no-store responses. A frontend host outage can be worked around with the independent direct-RPC Desk build or CLI; every client still relies on the configured RPC/indexer and readable owner-controlled entities.

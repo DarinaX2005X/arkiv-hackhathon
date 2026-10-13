@@ -17,7 +17,41 @@ export const availabilityCopy: Record<EventAvailability, { label: string; tone: 
 };
 
 export function eventDate(terms: AudienceTerms): string {
+  if (eventZoneChanges(terms)) {
+    const format = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: terms.timeZone, timeZoneName: 'short' });
+    return `${format.format(terms.startsAt)} to ${format.format(terms.endsAt)}`;
+  }
   return `${formatDateTime(terms.startsAt, terms.timeZone)} to ${formatDateTime(terms.endsAt, terms.timeZone)}`;
+}
+
+function eventZoneChanges(terms: AudienceTerms): boolean {
+  const format = new Intl.DateTimeFormat('en', { timeZone: terms.timeZone, timeZoneName: 'shortOffset' });
+  const zone = (instant: number) => format.formatToParts(instant).find(part => part.type === 'timeZoneName')?.value;
+  return zone(terms.startsAt) !== zone(terms.endsAt);
+}
+
+export function eventDayLabel(terms: AudienceTerms): string {
+  const format = new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: terms.timeZone });
+  return format.formatRange(terms.startsAt, terms.endsAt);
+}
+
+export function eventTimeLabel(terms: AudienceTerms): string {
+  const format = new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit', timeZone: terms.timeZone,
+    ...(eventZoneChanges(terms) ? { timeZoneName: 'short' as const } : {}) });
+  return `${format.format(terms.startsAt)} to ${format.format(terms.endsAt)}`;
+}
+
+/** A compact place is separate from the format, so online events never read "Online: Online". */
+export function eventLocationLabel(terms: AudienceTerms): string {
+  return terms.format === 'online' ? '' : terms.location
+    ? [terms.location.city, terms.location.country].filter(Boolean).join(', ')
+    : terms.venue;
+}
+
+export function eventAdmissionLabel(terms: AudienceTerms): string {
+  if (terms.registration?.admission === 'invite_only') return 'Invitation required';
+  if (terms.registration?.capacity.kind === 'limited') return 'Organizer confirms places';
+  return 'Open to everyone';
 }
 
 export function eventError(error: RepositoryError): string {

@@ -17,6 +17,7 @@ import type { EntityPayload, PublicEntityKey } from '../../src/domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
 import type { ChildMessage, ParentMessage, ProcessResult, ProcessRole, ProcessStart } from './support/process-messages';
 import { WALLET_SESSION_KEY } from '../../src/features/account/wallet-session';
+import { WALLET_PROVIDER_KEY } from '../../src/features/account/wallet-discovery';
 
 /** Narrow deterministic native create/delete responses. No real RPC or signer. */
 function ledger(mode: 'withdraw' | 'publication' = 'withdraw') {
@@ -198,7 +199,7 @@ describe('independent public client processes with a deterministic RPC ledger', 
     expect(restartedStudio.walletMethods.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
     expect(cli.walletMethods.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
     expect(desk.storageKeys.every(key => key.startsWith('partfolk:partner-desk:')
-      || key === WALLET_SESSION_KEY || key === 'partfolk:wallet-session:storage-check')).toBe(true);
+      || key === WALLET_SESSION_KEY || key === WALLET_PROVIDER_KEY || key === 'partfolk:wallet-session:storage-check')).toBe(true);
     expect(fixture.sent).toHaveLength(1);
     for (const role of ['studio-read', 'desk-withdraw', 'cli-read'] as const) {
       expect(fixture.calls.some(call => call.role === role && call.method === 'arkiv_query')).toBe(true);

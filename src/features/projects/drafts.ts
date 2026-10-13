@@ -1,7 +1,7 @@
 import type { AppRuntime } from '../../app/context';
 import type { Actor, DataMode, EntityKey, ProjectRecipe } from '../../domain/types';
 import { isEntityKey } from '../../app/ids';
-import { isEditorDraft, recipeToEditorDraft, templateToEditorDraft, type EditorDraft } from './editor/model';
+import { createEventEditorDraft, isEditorDraft, recipeToEditorDraft, templateToEditorDraft, type EditorDraft } from './editor/model';
 import { validateEntityPayload } from '../../domain/validation';
 import type { ProjectState } from '../../domain/types';
 import type { StorageIssue } from '../../app/storage';
@@ -34,8 +34,9 @@ export function isDraftCollection(value: unknown): value is DraftCollection {
 export function blankRecipe(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'): ProjectRecipe {
   return { title: '', outcome: '', timeZone, variants: [], instructions: '' };
 }
-export function makeDraft(scope: string, recipe = blankRecipe(), now = Date.now(), id: string = globalThis.crypto.randomUUID()): SavedProjectDraft {
-  return { id, scope, createdAt: now, updatedAt: now, projectRoot: null, baselineStateKey: null, editor: recipeToEditorDraft(recipe) };
+export function makeDraft(scope: string, recipe?: ProjectRecipe, now = Date.now(), id: string = globalThis.crypto.randomUUID()): SavedProjectDraft {
+  return { id, scope, createdAt: now, updatedAt: now, projectRoot: null, baselineStateKey: null,
+    editor: recipe ? recipeToEditorDraft(recipe) : createEventEditorDraft(blankRecipe().timeZone, 'main-date') };
 }
 /** Verification packets can supply a recipe, never imported agreement or authority. */
 export function draftFromRecipePacket(raw: string, scope: string, now: number, id: string = globalThis.crypto.randomUUID()): SavedProjectDraft | null {

@@ -22,8 +22,16 @@ export interface EditorRequirementDraft extends Omit<Requirement, 'quantity' | '
   /** Keeps seconds and milliseconds intact until the corresponding date field changes. */
   originalInterval?: OriginalInterval;
 }
+export interface EditorScheduleDraft {
+  startLocal: string;
+  endLocal: string;
+  startDisambiguation: TimeDisambiguation;
+  endDisambiguation: TimeDisambiguation;
+}
 export interface EditorVariantDraft extends Omit<ProjectVariant, 'requirements'> {
   requirements: EditorRequirementDraft[];
+  /** Form defaults for new needs, never an extra field in an agreed recipe. */
+  schedule?: EditorScheduleDraft;
 }
 export interface EditorDraft extends Omit<ProjectRecipe, 'variants'> {
   variants: EditorVariantDraft[];
@@ -127,6 +135,15 @@ export function validateEditorDraft(draft: EditorDraft): EditorValidation {
     variants: draft.variants.map((variant, variantIndex) => {
       const path = `variants[${variantIndex}]`;
       const timeZone = namedZone(variant.timeZone, `${path}.timeZone`, errors);
+      if (variant.schedule) {
+        const start = localDateTimeToUtc(variant.schedule.startLocal, timeZone, variant.schedule.startDisambiguation);
+        const end = localDateTimeToUtc(variant.schedule.endLocal, timeZone, variant.schedule.endDisambiguation);
+        if (!start.ok) errors[`${path}.schedule.startLocal`] = dateErrors[start.error];
+        else if (start.utcMilliseconds < 0) errors[`${path}.schedule.startLocal`] = 'Choose a date on or after 1 January 1970.';
+        if (!end.ok) errors[`${path}.schedule.endLocal`] = dateErrors[end.error];
+        else if (end.utcMilliseconds < 0) errors[`${path}.schedule.endLocal`] = 'Choose a date on or after 1 January 1970.';
+        if (start.ok && end.ok && end.utcMilliseconds <= start.utcMilliseconds) errors[`${path}.schedule.endLocal`] = 'End must be after start.';
+      }
       if (!variant.requirements.length) errors[`${path}.requirements`] = 'Add at least one requirement.';
       if (variant.requirements.length > 128) errors[`${path}.requirements`] = 'Use 128 requirements or fewer in each variant.';
       const converted: ProjectVariant = {
@@ -193,8 +210,50 @@ export function editorDraftToRecipe(draft: EditorDraft): ProjectRecipe | null {
   return validateEditorDraft(draft).recipe;
 }
 
+export function variantSchedule(variant: EditorVariantDraft): EditorScheduleDraft {
+  if (variant.schedule) return variant.schedule;
+  const first = [...variant.requirements].filter(item => item.startLocal).sort((left, right) => left.startLocal.localeCompare(right.startLocal))[0];
+  const last = [...variant.requirements].filter(item => item.endLocal).sort((left, right) => right.endLocal.localeCompare(left.endLocal))[0];
+  return { startLocal: first?.startLocal ?? '', endLocal: last?.endLocal ?? '',
+    startDisambiguation: first?.startDisambiguation ?? 'reject', endDisambiguation: last?.endDisambiguation ?? 'reject' };
+}
+
+/** Move only needs that still share a schedule edge. Individually set times stay intact. */
+export function updateVariantSchedule(draft: EditorDraft, variantId: string, patch: Partial<EditorScheduleDraft>): EditorDraft {
+  return { ...draft, variants: draft.variants.map(variant => {
+    if (variant.id !== variantId) return variant;
+    const previous = variantSchedule(variant), schedule = { ...previous, ...patch };
+    return { ...variant, schedule, requirements: variant.requirements.map(requirement => ({
+      ...requirement,
+      ...(requirement.startLocal === previous.startLocal && requirement.startDisambiguation === previous.startDisambiguation
+        ? { startLocal: schedule.startLocal, startDisambiguation: schedule.startDisambiguation } : {}),
+      ...(requirement.endLocal === previous.endLocal && requirement.endDisambiguation === previous.endDisambiguation
+        ? { endLocal: schedule.endLocal, endDisambiguation: schedule.endDisambiguation } : {}),
+    })) };
+  }) };
+}
+
+export function createEventEditorDraft(timeZone: string, variantId: string): EditorDraft {
+  return { title: '', outcome: '', timeZone, instructions: '', variants: [{
+    id: variantId, title: 'Main date', venueId: '', timeZone, instructions: '', requirements: [],
+    schedule: { startLocal: '', endLocal: '', startDisambiguation: 'reject', endDisambiguation: 'reject' },
+  }] };
+}
+
+/** The first step is complete without requiring the later contribution editor. */
+export function eventDetailsReady(draft: EditorDraft): boolean {
+  const first = draft.variants[0];
+  if (!first || !draft.title.trim() || draft.title.trim().length > 200 || !draft.outcome.trim() || draft.outcome.trim().length > 200
+    || !isTimeZone(draft.timeZone) || !isTimeZone(first.timeZone) || draft.instructions.length > 10_000) return false;
+  const schedule = variantSchedule(first);
+  const start = localDateTimeToUtc(schedule.startLocal, first.timeZone, schedule.startDisambiguation);
+  const end = localDateTimeToUtc(schedule.endLocal, first.timeZone, schedule.endDisambiguation);
+  return start.ok && end.ok && start.utcMilliseconds >= 0 && end.utcMilliseconds > start.utcMilliseconds;
+}
+
 export function addVariant(draft: EditorDraft, id: string): EditorDraft {
-  return { ...draft, variants: [...draft.variants, { id, title: '', venueId: '', timeZone: draft.timeZone, instructions: '', requirements: [] }] };
+  return { ...draft, variants: [...draft.variants, { id, title: '', venueId: '', timeZone: draft.timeZone, instructions: '', requirements: [],
+    schedule: { startLocal: '', endLocal: '', startDisambiguation: 'reject', endDisambiguation: 'reject' } }] };
 }
 
 export function copyVariant(draft: EditorDraft, variantId: string, newVariantId: string, idFactory: () => string): EditorDraft {
@@ -217,9 +276,10 @@ export function removeVariant(draft: EditorDraft, variantId: string): EditorDraf
 }
 
 export function addRequirement(draft: EditorDraft, variantId: string, id: string): EditorDraft {
+  const variant = draft.variants.find(item => item.id === variantId);
   const requirement: EditorRequirementDraft = {
     id, title: '', kind: 'person', capability: '', unit: 'person', quantity: '1',
-    startLocal: '', endLocal: '', startDisambiguation: 'reject', endDisambiguation: 'reject',
+    ...(variant ? variantSchedule(variant) : { startLocal: '', endLocal: '', startDisambiguation: 'reject' as const, endDisambiguation: 'reject' as const }),
     instructions: '', dependsOn: [],
   };
   return { ...draft, variants: draft.variants.map(variant => variant.id === variantId ? { ...variant, requirements: [...variant.requirements, requirement] } : variant) };
@@ -268,11 +328,15 @@ function requirementDraft(value: unknown): value is EditorRequirementDraft {
     && (value.originalInterval === undefined || originalInterval(value.originalInterval));
 }
 function variantDraft(value: unknown): value is EditorVariantDraft {
-  return record(value) && exact(value, ['id', 'title', 'venueId', 'timeZone', 'instructions', 'requirements'])
+  return record(value) && exact(value, ['id', 'title', 'venueId', 'timeZone', 'instructions', 'requirements'], ['schedule'])
     && strings(value, ['id', 'title', 'venueId', 'timeZone', 'instructions'])
     && identity(value.id)
     && Array.isArray(value.requirements) && value.requirements.length <= 128 && value.requirements.every(requirementDraft)
-    && uniqueIdentities(value.requirements);
+    && uniqueIdentities(value.requirements)
+    && (value.schedule === undefined || record(value.schedule)
+      && exact(value.schedule, ['startLocal', 'endLocal', 'startDisambiguation', 'endDisambiguation'])
+      && strings(value.schedule, ['startLocal', 'endLocal'])
+      && disambiguation(value.schedule.startDisambiguation) && disambiguation(value.schedule.endDisambiguation));
 }
 
 /** Checks persisted form structure, deliberately allowing invalid and unfinished text. */

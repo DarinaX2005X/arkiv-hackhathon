@@ -11,30 +11,30 @@
 
 .pf-process-shadow,
 .pf-process-small-shadow {
-  fill: var(--brand-ink);
+  fill: var(--surface-dark);
   opacity: .12;
   filter: var(--process-contact);
 }
 .pf-process-small-shadow { opacity: .16; }
 .pf-process-paper { fill: var(--process-paper); }
-.pf-process-paper-side { fill: var(--border-quiet); }
-.pf-process-wall { fill: var(--surface-soft); }
-.pf-process-wall-side { fill: var(--surface-inset); }
+.pf-process-paper-side { fill: var(--art-shadow); }
+.pf-process-wall { fill: var(--art-sand); }
+.pf-process-wall-side { fill: var(--art-sand); }
 .pf-process-rim, .pf-process-cream { fill: var(--art-cream); }
-.pf-process-inset { fill: var(--surface-inset); }
-.pf-process-window { fill: var(--surface-strong); }
+.pf-process-inset { fill: var(--art-sand); }
+.pf-process-window { fill: var(--surface-dark-light); }
 .pf-process-clay { fill: var(--process-clay); }
 .pf-process-clay-side { fill: var(--art-shadow); }
 .pf-process-forest { fill: var(--process-forest); }
-.pf-process-ink { fill: var(--brand-ink); }
+.pf-process-ink { fill: var(--surface-dark); }
 .pf-process-strip { fill: var(--art-sand); }
-.pf-process-strip-side { fill: color-mix(in srgb, var(--art-sand) 85%, var(--brand-ink)); }
-.pf-process-case-side { fill: var(--brand-ink); }
-.pf-process-case-lid { fill: var(--action); }
+.pf-process-strip-side { fill: color-mix(in srgb, var(--art-sand) 85%, var(--surface-dark)); }
+.pf-process-case-side { fill: var(--surface-dark); }
+.pf-process-case-lid { fill: var(--surface-dark-light); }
 .pf-process-latch { fill: var(--art-cream); }
 .pf-process-latch-inset { fill: var(--art-shadow); }
 .pf-process-seal { fill: var(--process-forest); }
-.pf-process-seal-side { fill: var(--brand-ink); }
+.pf-process-seal-side { fill: var(--surface-dark); }
 .pf-process-seal-impression { fill: var(--art-sand); }
 .pf-process-edge,
 .pf-process-frame-edge {
@@ -47,12 +47,12 @@
 .pf-process-plan-line,
 .pf-process-paper-line {
   fill: none;
-  stroke: var(--border-control);
+  stroke: var(--art-shadow);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.pf-process-schedule-line { fill: none; stroke: var(--border-control); stroke-width: 1.25; }
+.pf-process-schedule-line { fill: none; stroke: var(--art-shadow); stroke-width: 1.25; }
 .pf-process-case-highlight { fill: none; stroke: var(--art-sand); stroke-width: 1.4; opacity: .7; }
 .pf-process-handle {
   fill: none;

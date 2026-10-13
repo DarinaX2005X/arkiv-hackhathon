@@ -9,7 +9,7 @@ import { rankPlan } from '../../domain/solver';
 import type { EntityRecord, ProjectAggregate, Proposal } from '../../domain/types';
 import type { PublishPlanCommand } from '../../data/types';
 import { createOperationIntent } from '../../data/operations';
-import { Button, Dialog, Notice, PlanDiff, StatusLabel } from '../../ui';
+import { Button, Dialog, Link, Notice, PlanDiff, Select, StatusLabel } from '../../ui';
 import { authorityFor, comparePlans, ownsProject, planningInput, publishPlanInput, restoreTerms } from './selectors';
 import { projectsCopy as copy, reasonText } from './catalog';
 import { ProjectPlan } from './ProjectPlan';
@@ -19,7 +19,9 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
   const runtime = useApp(), session = useAppSession();
   const action = useRepositoryAction(`project-restore:${project.root.key}`);
   const [selected, setSelected] = useState<EntityRecord<Proposal> | null>(null), [error, setError] = useState<string | null>(null);
+  const [viewedKey, setViewedKey] = useState<string | null>(null);
   const records = project.proposal && !project.proposalHistory.some(record => record.key === project.proposal!.key) ? [...project.proposalHistory, project.proposal] : project.proposalHistory;
+  const viewed = records.find(record => record.key === viewedKey) ?? records.find(record => record.key === project.proposal?.key) ?? records.at(-1);
   const restored = useMemo(() => { if (!selected) return null; try { return restoreTerms(project, selected); } catch { return null; } }, [project, selected]);
   const input = planningInput(project), finalized = restored && input ? finalizePlan(restored, input.publishers, project.snapshot, completedWorkContext(project)) : null;
   const authority = authorityFor(session.actor, session.mode, session.chainId), owner = ownsProject(project, session.actor);
@@ -45,19 +47,23 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
   };
   return <section className="pf-stack"><h2>{copy.history}</h2><p>Review earlier plans and how they changed. Each person’s decision stays with the version they reviewed.</p>
     {project.proposalHistoryStatus?.complete !== true && records.length > 0 && <Notice tone="warning">{copy.historyGap}</Notice>}
-    {records.length === 0 ? <p>No published plan history is available for this project yet.</p> : records.map((record, index) => {
+    {records.length === 0 && <div className="pf-stack pf-stack--compact"><p>{project.proposalHistoryStatus?.complete ? 'No plan has been published here yet. Find a complete plan and ask contributors to review the first version.' : 'No plan history is available in this read. Refresh the project to check its records.'}</p><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Find a plan</Link></div>}
+    {records.length > 0 && <Select label="Choose a plan version" value={viewed?.key ?? ''} onChange={event => setViewedKey(event.target.value)} options={records.map((record, index) => ({ value: record.key, label: `${project.proposalHistoryStatus?.complete ? `Plan ${index + 1}` : 'Available plan'}: ${record.payload.plan.variant.title}, ${formatDateTime(record.payload.createdAt, record.payload.plan.variant.timeZone)}${record.key === project.proposal?.key ? ' (current plan)' : ''}` }))} />}
+    {viewed && (() => {
+      const record = viewed, index = records.indexOf(record);
       const predecessor = record.payload.plan.predecessor;
       const prior = predecessor ? records.find(item => item.key === predecessor.proposalKey && item.payload.proposalHash === predecessor.proposalHash) : null;
       const current = project.proposal?.key === record.key && project.activation.status === 'unique';
       return <article className="pf-sheet pf-stack" key={record.key}>
         <header className="project-heading"><div><h3>{project.proposalHistoryStatus?.complete ? `Plan ${index + 1}` : 'Available plan'}: {record.payload.plan.variant.title}</h3><p>{formatDateTime(record.payload.createdAt, record.payload.plan.variant.timeZone)}</p></div><StatusLabel tone={current ? 'neutral' : undefined}>{current ? 'Current plan' : 'Earlier plan'}</StatusLabel></header>
         {record.payload.changeExplanation && <p>{record.payload.changeExplanation}</p>}
-        <details><summary>Read this exact plan</summary><ProjectPlan project={project} plan={record.payload.plan} /><p>Proposal: {record.key}</p><p>Terms hash: {record.payload.proposalHash}</p></details>
-        {prior && <details><summary>Changes from its predecessor</summary><PlanDiff title="Recorded version changes" labels={{ requirement: 'Requirement', before: 'Predecessor', after: 'This plan' }} rows={comparePlans(prior.payload.plan, record.payload.plan, project)} /></details>}
+        <ProjectPlan project={project} plan={record.payload.plan} title="The terms in this version" />
+        {prior && <PlanDiff title="Changes from the preceding version" labels={{ requirement: 'Requirement', before: 'Preceding plan', after: 'This plan' }} rows={comparePlans(prior.payload.plan, record.payload.plan, project)} />}
         {predecessor && !prior && <Notice tone="warning">The predecessor proposal is unavailable. This gap does not mean there was no earlier plan.</Notice>}
         {owner && !current && <Button variant="secondary" disabled={!open || waiting || !authority} onClick={() => { setSelected(record); setError(null); }}>{copy.restore}</Button>}
+        <details><summary>Advanced: exact version references</summary><p>Proposal: {record.key}</p><p>Terms hash: {record.payload.proposalHash}</p></details>
       </article>;
-    })}
+    })()}
     <ActionFeedback action={action} state={action.state} onReconcile={() => { void action.reconcile().then(() => onRefresh()); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
     <Dialog open={selected !== null} title="Restore terms with fresh agreement" closeLabel="Keep current plan" onClose={() => setSelected(null)} footer={<Button onClick={() => { void publish(); }} disabled={!finalized?.ok || !authority || waiting}>Publish these terms as a new version</Button>}>
       <div className="pf-stack"><Notice>{copy.restoreNote} The editable project recipe remains separate from this active agreement.</Notice>

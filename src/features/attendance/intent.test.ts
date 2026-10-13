@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRepositoryActionController, validRepositoryActionRecord } from '../../app/actions';
 import type { AppSession } from '../../app/session';
 import { createDraftStore, type StoragePort } from '../../app/storage';
@@ -7,7 +7,7 @@ import { createOperationIntent } from '../../data/operations';
 import { COORDINATOR, KEYS, NOW, STRANGER, entityKey, readyFixture } from '../../data/__tests__/arkiv-fixture';
 import type { EventReadOptions, EventRepositoryContract } from '../../data/events/types';
 import type { OperationIntent } from '../../data/types';
-import { attendanceStatus, audienceHash, deriveEventAvailability, EVENTS_PROTOCOL, type AttendanceState, type EventAggregate, type EventRelease, type EventRecord } from '../../domain/events';
+import { attendanceStatus, audienceHash, deriveEventAvailability, eventRosterVerified, EVENTS_PROTOCOL, type AttendanceState, type EventAggregate, type EventRelease, type EventRecord } from '../../domain/events';
 import type { Actor, EntityProvenance } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import { readEventForActor, readEventForWithdrawal, type EventRead } from '../events/hooks';
@@ -260,5 +260,149 @@ describe('returning attendee decisions', () => {
     const refreshed = await readEventForActor(repository, KEYS.project, account);
     expect(refreshed.ok && refreshed.value.attendance?.status).toBe('unique');
     expect(refreshed.ok && myEventStatus(refreshed.value.myEvent!, NOW)).toBe('going');
+  });
+});
+
+describe('detail reads reuse the complete authenticated event roster', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  async function structuredRead() {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const { event, read } = await fixture();
+    const release = event.release!;
+    release.payload.terms = { ...release.payload.terms, termsVersion: 2, format: 'in_person',
+      location: { countryCode: 'GB', country: 'United Kingdom', city: 'London', venue: release.payload.terms.venue }, online: null,
+      registration: { deadline: NOW + 1_800_000, capacity: { kind: 'limited', limit: 1 }, waitlist: true, admission: 'open', invitedAccounts: [] } };
+    release.payload.audienceHash = audienceHash(release.payload.terms);
+    if (event.state.status !== 'unique') throw new Error('fixture');
+    event.state.entity.payload.audienceHash = release.payload.audienceHash;
+    event.state.entity.payload.admissions = [];
+    event.roster = { snapshot: structuredClone(event.snapshot), diagnostics: [], entries: [] };
+    const listMyEvents = vi.fn(async () => ({ ok: true, value: { items: read.myEvent ? [read.myEvent] : [], snapshot: event.snapshot, diagnostics: [] } }));
+    const repository = { loadEvent: async () => ({ ok: true, value: event }), listMyEvents } as unknown as EventRepositoryContract;
+    return { event, read, repository, listMyEvents };
+  }
+
+  it('uses authoritative absence without reading all of the account’s other events', async () => {
+    const { event, repository, listMyEvents } = await structuredRead();
+    expect(eventRosterVerified(event, NOW)).toBe(true);
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok && result.value.attendance).toEqual({ status: 'missing', reason: 'not_initialized' });
+    expect(result.ok && result.value.myEvent).toBeNull();
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exact registered release and current owner confirmation without another account read', async () => {
+    const { event, read, repository, listMyEvents } = await structuredRead();
+    const own = register(read);
+    event.roster!.entries = [{ attendee: account.address, attendance: read.attendance!, registeredRelease: read.myEvent!.registeredRelease, inclusionTimestamp: NOW - 1000 }];
+    if (event.state.status !== 'unique') throw new Error('fixture');
+    event.state.entity.payload.admissions = [{ attendee: account.address, attendanceKey: own.key, releaseKey: event.release!.key }];
+    expect(eventRosterVerified(event, NOW)).toBe(true);
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.attendance).toBe(read.attendance);
+    expect(result.value.myEvent?.registeredRelease).toBe(read.myEvent!.registeredRelease);
+    expect(result.value.myEvent?.event).toBe(event);
+    expect(attendanceStatus(result.value.attendance!, event, NOW, result.value.myEvent?.registeredRelease)).toBe('going');
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it('keeps consent tied to the earlier release when a new version is read from the roster', async () => {
+    const { event, read, repository, listMyEvents } = await structuredRead();
+    const own = register(read);
+    const previous = read.myEvent!.registeredRelease!;
+    event.roster!.entries = [{ attendee: account.address, attendance: read.attendance!, registeredRelease: previous, inclusionTimestamp: NOW - 1000 }];
+    event.release = { ...structuredClone(event.release!), key: entityKey(104), payload: { ...event.release!.payload, predecessorReleaseKey: previous.key } };
+    if (event.state.status !== 'unique') throw new Error('fixture');
+    event.state.entity.payload.releaseKey = event.release.key;
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(myEventStatus(result.value.myEvent!, NOW)).toBe('needs_review');
+    expect(result.value.myEvent!.registeredRelease).toBe(previous);
+    const prepared = prepareRegistration(result.value, targetForEvent(result.value, session, NOW)!, session, NOW);
+    expect(prepared.ok && prepared.command.releaseKey).toBe(event.release.key);
+    expect(prepared.ok && prepared.command.expectedHeads).toEqual([own.key]);
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it('propagates an ambiguous own scope instead of interpreting it as no registration', async () => {
+    const { event, repository, listMyEvents } = await structuredRead();
+    event.roster!.entries = [{ attendee: account.address, attendance: { status: 'conflict', entities: [] }, registeredRelease: null, inclusionTimestamp: null }];
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok && result.value.attendance?.status).toBe('conflict');
+    expect(result.ok && result.value.myEvent?.diagnostics).toEqual([{ code: 'conflicting_heads' }]);
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it.each(['block', 'stale', 'incomplete'] as const)('falls back to the pinned personal read for a %s roster', async kind => {
+    const { event, read, repository, listMyEvents } = await structuredRead();
+    register(read);
+    if (kind === 'block') event.roster!.snapshot.blockHash = entityKey(999);
+    else if (kind === 'stale') event.roster!.snapshot.freshness = 'stale';
+    else event.roster!.snapshot.completeness = 'incomplete';
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok && result.value.attendance?.status).toBe('unique');
+    expect(listMyEvents).toHaveBeenCalledOnce();
+    expect(listMyEvents).toHaveBeenCalledWith(account, { snapshot: event.snapshot, signal: undefined });
+    expect(result.ok && myEventStatus(result.value.myEvent!, NOW)).toBe('unverified');
+  });
+
+  it('permits explicit own withdrawal without contributor reads while keeping new registration blocked', async () => {
+    const { event, read, repository, listMyEvents } = await structuredRead();
+    register(read);
+    event.roster!.entries = [{ attendee: account.address, attendance: read.attendance!, registeredRelease: read.myEvent!.registeredRelease, inclusionTimestamp: NOW - 1000 }];
+    const withdrawal = targetForWithdrawal(read, session, NOW)!;
+    const join = targetForEvent(read, session, NOW)!;
+    event.sourceProject = null;
+    const result = await readEventForWithdrawal(repository, KEYS.project, account);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(prepareWithdrawal(result.value, withdrawal, session, NOW).ok).toBe(true);
+    expect(prepareRegistration(result.value, join, session, NOW).ok).toBe(false);
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it('keeps cancellation distinct from withdrawal and never turns it into a confirmed attendance', async () => {
+    const { event, read, repository, listMyEvents } = await structuredRead();
+    register(read);
+    event.roster!.entries = [{ attendee: account.address, attendance: read.attendance!, registeredRelease: read.myEvent!.registeredRelease, inclusionTimestamp: NOW - 1000 }];
+    if (event.state.status !== 'unique') throw new Error('fixture');
+    event.state.entity.payload.status = 'cancelled';
+    event.sourceProject = null;
+    const result = await readEventForActor(repository, KEYS.project, account);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(myEventStatus(result.value.myEvent!, NOW)).toBe('cancelled');
+    expect(prepareWithdrawal(result.value, targetForWithdrawal(result.value, session, NOW)!, session, NOW).ok).toBe(true);
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it.each(['before', 'after'] as const)('does not reuse or fan out from a read cancelled %s the event response', async timing => {
+    const { event, listMyEvents } = await structuredRead();
+    const cancellation = new AbortController();
+    const loadEvent = vi.fn(async () => { cancellation.abort(); return { ok: true, value: event }; });
+    const repository = { loadEvent, listMyEvents } as unknown as EventRepositoryContract;
+    if (timing === 'before') cancellation.abort();
+    const result = await readEventForActor(repository, KEYS.project, account, cancellation.signal);
+    expect(result.ok).toBe(false);
+    if (timing === 'before') expect(loadEvent).not.toHaveBeenCalled();
+    else expect(loadEvent).toHaveBeenCalledOnce();
+    expect(listMyEvents).not.toHaveBeenCalled();
+  });
+
+  it('discards a personal fallback result when its request was cancelled', async () => {
+    const { event } = await structuredRead();
+    event.roster = undefined;
+    const cancellation = new AbortController();
+    const listMyEvents = vi.fn(async () => {
+      cancellation.abort(); return { ok: true, value: { items: [], snapshot: event.snapshot, diagnostics: [] } };
+    });
+    const repository = { loadEvent: async () => ({ ok: true, value: event }), listMyEvents } as unknown as EventRepositoryContract;
+    const result = await readEventForActor(repository, KEYS.project, account, cancellation.signal);
+    expect(result.ok).toBe(false);
+    expect(listMyEvents).toHaveBeenCalledOnce();
   });
 });

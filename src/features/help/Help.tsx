@@ -55,12 +55,12 @@ export function HelpPage({ topic, returnTo, sourceLinks = [], onCreateProject, o
           {selected.id === 'offers' && <Link href={routeHref(helpContributionRoute(returnRoute))}>{copy.contributionsAction}</Link>}
           {selected.id === 'agreement' && <Link href={routeHref({ name: 'requests' })}>{copy.requestsAction}</Link>}
           {selected.id === 'recovery' && <><Link href={routeHref({ name: 'workspace' })}>Open my projects</Link>{accountLink}</>}
-          {selected.id === 'partner-desk' && <><Link href={routeHref(helpContributionRoute(returnRoute))}>{copy.contributionsAction}</Link><Link href={routeHref({ name: 'requests' })}>{copy.requestsAction}</Link></>}
+          {selected.id === 'partner-desk' && <><Link href="/desk">Open Desk</Link><Link href={routeHref(helpContributionRoute(returnRoute))}>{copy.contributionsAction}</Link><Link href={routeHref({ name: 'requests' })}>{copy.requestsAction}</Link></>}
         </div>
         {selected.id === 'technical' && sourceLinks.length > 0 && <section className="pf-help-sources"><h2>{copy.technicalLinks}</h2><ul>{sourceLinks.map(source => <li key={source.href}><Link href={source.href}>{source.label}</Link></li>)}</ul></section>}
         <div className="pf-help-bottom"><Link href={routeHref(returnRoute)}>{helpReturnLabel(returnRoute)}</Link></div>
       </article>
-      <aside className="pf-help-answer-support"><nav className="pf-help-topics" aria-label={copy.topics}><h2>{copy.topics}</h2>{topicLinks(starting)}{topicLinks(together)}<details open={deeper.includes(selected.id)}><summary>Sharing and data</summary>{topicLinks(deeper)}</details></nav>{onReplayTour && <Button variant="quiet" onClick={onReplayTour}>{copy.tourAction}</Button>}</aside>
+      <aside className="pf-help-answer-support"><nav className="pf-help-topics" aria-label={copy.topics}><h2>{copy.topics}</h2>{topicLinks(starting)}{topicLinks(together)}<h3>Sharing and saved work</h3>{topicLinks(deeper)}</nav>{onReplayTour && <Button variant="quiet" onClick={onReplayTour}>{copy.tourAction}</Button>}</aside>
     </div>}
   </div>;
 }

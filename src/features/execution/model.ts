@@ -1,7 +1,8 @@
 import type { Actor, Attestation, EntityKey, EntityRecord, ProjectAggregate, Proposal, RunbookObligation, SourcePlanRef } from '../../domain/types';
 import type { ReplaceBookCommand, ReplaceProjectCommand, WriteAuthority } from '../../data/types';
 import { activeSource, deriveReadiness, sameActor, sameSource } from '../../domain/readiness';
-import { effectiveStatements, evaluateExecution, transferStatementHash } from '../../domain/execution';
+import { deriveExecution, effectiveStatements, evaluateExecution, transferStatementHash } from '../../domain/execution';
+import { hashCanonical } from '../../domain/canonical';
 import { prepareAttestation, prepareCloseProject, prepareReleaseCustodyHold } from '../../domain/operations';
 import { createOperationIntent } from '../../data/operations';
 import { bookLifetime } from '../contributions/model';
@@ -10,6 +11,21 @@ import { STATE_LIFETIME_SECONDS } from '../projects/selectors';
 
 export type TransferReport = Extract<Attestation, { kind: 'transfer_report' }>;
 export type TransferAcknowledgement = Extract<Attestation, { kind: 'transfer_acknowledgement' }>;
+/** Preserve an explicitly cleared quantity instead of silently replacing it with a previous/default amount. */
+export function transferQuantity(raw: string, maximum: number): number | null {
+  const quantity = Number(raw);
+  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(quantity) && Number.isSafeInteger(maximum) && quantity <= maximum ? quantity : null;
+}
+export function completionReviewFingerprint(project: ProjectAggregate): string {
+  const execution = deriveExecution(project);
+  const statements = project.publishers.flatMap(publisher => publisher.book.status === 'unique'
+    ? publisher.book.entity.payload.attestations.filter(item => item.projectRoot === project.root.key && item.author === publisher.root.key) : [])
+    .sort((left, right) => left.author.localeCompare(right.author) || left.id.localeCompare(right.id));
+  return hashCanonical({ projectRoot: project.root.key, state: project.state.status === 'unique' ? project.state.entity.key : project.state.status,
+    source: activeSource(project), completed: execution.completed, outstanding: execution.outstandingObligationIds,
+    custody: execution.outstandingCustodyHolds, reasons: execution.reasons, evidence: execution.evidenceAvailability, statements,
+    freshness: project.snapshot.freshness, completeness: project.snapshot.completeness });
+}
 export interface RunbookRow {
   obligation: RunbookObligation; reports: Exclude<Attestation, TransferAcknowledgement>[]; acknowledgements: TransferAcknowledgement[];
   historicalStatements: Attestation[];

@@ -1,15 +1,15 @@
 import { useMemo } from 'react';
-import { localDateTimeToUtc } from '../../../app/time';
-import { Field, Select } from '../../../ui';
+import { isTimeZone, localDateTimeToUtc } from '../../../app/time';
+import { Field, SearchSelect } from '../../../ui';
 
 export function timeZoneOptions(current: string) {
   const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
   const zones = supported ? supported('timeZone') : ['Africa/Cairo', 'America/Chicago', 'America/Los_Angeles', 'America/New_York', 'Asia/Almaty', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney', 'Europe/Berlin', 'Europe/London', 'Pacific/Auckland'];
-  return [...new Set(['UTC', current, ...zones])].filter(Boolean).map(value => ({ value, label: value === 'UTC' ? 'UTC (Universal time)' : value.split('/').reverse().map(part => part.replaceAll('_', ' ')).join(', ') }));
+  return [...new Set(['UTC', ...(isTimeZone(current) ? [current] : []), ...zones])].filter(Boolean).map(value => ({ value, label: value === 'UTC' ? 'UTC (Universal time)' : value.split('/').reverse().map(part => part.replaceAll('_', ' ')).join(', '), keywords: [value] }));
 }
 export function TimeZoneField({ label = 'Time zone', value, onChange, hint, error }: { label?: string; value: string; onChange: (value: string) => void; hint?: string; error?: string }) {
   const options = useMemo(() => timeZoneOptions(value), [value]);
-  return <Select label={label} value={value} options={options} onChange={event => onChange(event.target.value)} hint={hint} error={error} />;
+  return <SearchSelect label={label} value={value} options={options} onValueChange={onChange} help={value && !isTimeZone(value) ? `Saved time zone “${value}” needs a valid choice. Your original input is kept.` : hint} error={error} required clearable={false} placeholder="Search a city or time zone" />;
 }
 /** A malformed imported value stays editable instead of being hidden by native input sanitization. */
 export function dateInputType(value: string): 'text' | 'datetime-local' {

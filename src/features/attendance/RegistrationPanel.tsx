@@ -9,6 +9,7 @@ import { attendanceStatus, deriveEventAvailability, registrationEligibility, typ
 import { TIRAMISU_CHAIN_ID, type PublicEntityKey } from '../../domain/types';
 import { Button, Checkbox, Link, Notice } from '../../ui';
 import type { EventRead } from '../events/hooks';
+import { EventFactIcon } from '../events/cover';
 import { availabilityCopy, eventDate, eventError, shortAddress, eventPlace, downloadEventCalendar } from '../events/presentation';
 import { browserEventStorage, useEventAction } from '../events/useEventAction';
 import { clearJoinTarget, joinTargetStore, prepareRegistration, prepareWithdrawal, registrationLifetime, targetForEvent, targetForWithdrawal, targetMatchesEvent, type JoinTarget, type WithdrawalTarget } from './intent';
@@ -57,7 +58,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
   const ownStatus = unverified || !read.attendance || read.actor?.address.toLowerCase() !== account?.toLowerCase() ? 'unverified'
     : attendanceStatus(read.attendance, read.event, now, read.myEvent?.registeredRelease ?? null);
   const eligibility = registrationEligibility(read.event, session.actor ?? undefined, now);
-  const retainedPlace = read.event.state.status === 'unique' && read.event.state.entity.payload.admissions?.some(item => item.attendee.toLowerCase() === account?.toLowerCase());
+  const retainedPlace = availability !== 'unverified' && read.event.state.status === 'unique' && read.event.state.entity.payload.admissions?.some(item => item.attendee.toLowerCase() === account?.toLowerCase());
   const requested = ownStatus === 'pending' || ownStatus === 'waitlisted';
   const canStart = !unverified && ['join', 'request', 'waitlist'].includes(eligibility.status);
   const requestLabel = eligibility.status === 'waitlist' ? 'Join waiting list' : eligibility.requiresApproval ? 'Request a place' : 'Join event';
@@ -154,17 +155,18 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
     } finally { busy.current = false; setChecking(false); }
   }
 
-  return <aside className="pf-event-registration pf-surface-light" aria-labelledby="registration-title" aria-busy={submitting}>
-    <h2 id="registration-title">{freshConfirmation ? 'Your registration is confirmed' : requested ? ownStatus === 'waitlisted' ? 'You’re on the waiting list' : 'Your place is requested' : withdrawn ? 'You withdrew' : 'Take part in this event'}</h2>
-    {freshConfirmation ? <><Notice tone="success" role="status">Your registration is confirmed for the event details shown here.</Notice>
+  return <aside className={`pf-event-registration pf-surface-light${freshConfirmation ? ' pf-event-registration--confirmed' : ''}`} aria-labelledby="registration-title" aria-busy={submitting}>
+    <div className="pf-event-registration-heading"><span className="pf-event-registration-icon"><EventFactIcon name={freshConfirmation ? 'check' : 'people'} /></span>
+      <h2 id="registration-title">{freshConfirmation ? eligibility.requiresApproval ? 'Your place is confirmed' : 'You’re registered' : requested ? ownStatus === 'waitlisted' ? 'You’re on the waiting list' : 'Request sent' : withdrawn ? 'You withdrew' : 'Take part in this event'}</h2></div>
+    {freshConfirmation ? <><Notice tone="success" role="status">{eligibility.requiresApproval ? 'The organizer confirmed your place for this event version.' : 'Your registration is recorded for the event details shown here.'}</Notice>
       <p>Registered as <span title={account ?? undefined}>{account ? shortAddress(account) : 'your wallet'}</span>.</p>
       <Link href={routeHref({ name: 'my-events' })}>View my events</Link></>
       : requested ? <><Notice tone="warning" role="status">{ownStatus === 'waitlisted' ? 'The organizer will confirm your place if one becomes available. You do not have a confirmed place yet.' : 'Your request is saved. The organizer must confirm your place before you are registered.'}</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></> : withdrawn ? <><Notice role="status">Your withdrawal is recorded. You can choose to join again if registration is open.</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></>
-        : <p>{eligibility.requiresApproval ? 'Request a place and wait for the organizer to confirm it.' : 'Review the event details, then record your registration.'}</p>}
+        : <p>{eligibility.requiresApproval ? 'Request a place and wait for the organizer to confirm it.' : 'Review the event details, then confirm your registration.'}</p>}
     {availability !== 'open' && !requested && !(eligibility.status === 'request' && retainedPlace) && <Notice tone={availabilityCopy[availability].tone} title={availabilityCopy[availability].label}>{availabilityCopy[availability].explanation}</Notice>}
-    {eligibility.status === 'invitation_required' && <Notice tone="warning" title="Invitation required">{signedIn ? 'This wallet is not on the event’s public invitation list. Use an invited wallet or contact the organizer.' : 'Sign in with an invited wallet to check your invitation.'}{!signedIn && <Link href={signInHref} onClick={chooseCurrent}>Sign in to check invitation</Link>}</Notice>}
+    {availability !== 'unverified' && eligibility.status === 'invitation_required' && <Notice tone="warning" title="Invitation required">{signedIn ? 'This wallet is not on the event’s public invitation list. Use an invited wallet or contact the organizer.' : 'Sign in with an invited wallet to check your invitation.'}{!signedIn && <Link href={signInHref} onClick={chooseCurrent}>Sign in to check invitation</Link>}</Notice>}
     {eligibility.status === 'request' && retainedPlace && !registered && !requested && <Notice>Your previous place remains reserved. Review the latest event details and request confirmation for this version.</Notice>}
-    {eligibility.remaining !== null && !unverified && <p>{eligibility.remaining} {eligibility.remaining === 1 ? 'place' : 'places'} currently unreserved</p>}
+    {eligibility.remaining !== null && availability !== 'unverified' && <p className="pf-event-capacity"><EventFactIcon name="people" /><span><strong>{eligibility.remaining}</strong> {eligibility.remaining === 1 ? 'place' : 'places'} currently unreserved</span></p>}
     {freshConfirmation && terms && <Button variant="secondary" onClick={() => downloadEventCalendar(terms, projectRoot)}>Add to calendar</Button>}
     {ownStatus === 'needs_review' && <Notice tone="warning" title="Review this new version">The organizer published a new version of this event. Your earlier registration belongs to the previous version. Review the latest details before confirming again.</Notice>}
     {signedIn && !ownKnown && !unresolved && <Notice tone="warning" actions={<Button variant="secondary" onClick={() => void refresh()} disabled={submitting}>Check my registration</Button>}>Your existing registration could not be fully checked. No new decision will be sent until it is verified.</Notice>}
@@ -187,13 +189,13 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
       {(changedTerms || differentWallet) ? <Notice tone="warning" title={differentWallet ? 'The wallet changed' : 'The event details changed'} actions={<Button variant="secondary" onClick={chooseCurrent} disabled={!canStart}>Review current details</Button>}>
         {differentWallet ? 'This review belongs to another wallet. Start a new review for the wallet currently connected.' : 'The version selected before sign-in is no longer current. Check the updated details before registering.'}
       </Notice> : terms && <div className="pf-event-public-preview">
-        <h3>Your public registration</h3>
+        <h3>{eligibility.requiresApproval ? 'Your public request' : 'Your public registration'}</h3>
         <dl className="pf-event-facts"><div><dt>Event</dt><dd>{terms.title}</dd></div><div><dt>When</dt><dd>{eventDate(terms)} ({terms.timeZone})</dd></div>
           <div><dt>Place</dt><dd>{eventPlace(terms)}</dd></div><div><dt>Wallet</dt><dd className="pf-event-reference">{account}</dd></div><div><dt>Decision</dt><dd>{eligibility.requiresApproval ? joinWaitlist ? 'Request a place and join the waiting list if needed' : 'Request a place' : 'I plan to attend'}</dd></div></dl>
         <p>Your wallet address, this event version and your decision will be publicly readable on Arkiv. No name, email or phone number is requested.</p>
         <details><summary>Record lifetime</summary><p>This request asks for {Math.ceil(registrationLifetime(terms.endsAt, Math.min(now, read.event.snapshot.blockTimestamp)) / 86_400)} days of storage. Event references have their own lifetimes. Expiry does not erase downloaded copies or guarantee a permanent history.</p></details>
         {terms.registration?.waitlist && <Checkbox label="Join the waiting list if a place is not available" checked={joinWaitlist} onChange={event => { setJoinWaitlist(event.target.checked); setAcknowledged(false); }} disabled={submitting} />}
-        <Checkbox label="I reviewed the event details and understand that my registration is public." checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} disabled={submitting} />
+        <Checkbox label={`I reviewed the event details and understand that my ${eligibility.requiresApproval ? 'request' : 'registration'} is public.`} checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} disabled={submitting} />
         {!correctChain && <Notice tone="warning">Switch your wallet to Arkiv Tiramisu to continue. Your review is kept.</Notice>}
         <Button onClick={() => void confirm()} disabled={!canConfirm} {...(submitting ? { pending: true as const, pendingLabel: 'Checking your registration' } : { pending: false as const })}>
           {savedRetry ? 'Retry saved registration' : eligibility.requiresApproval ? joinWaitlist && eligibility.status === 'waitlist' ? 'Confirm waiting list request' : 'Send my place request' : 'Confirm my registration'}
@@ -202,7 +204,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
       </div>}
     </>}
     {signedIn && !unresolved && read.attendance?.status === 'unique' && read.attendance.entity.payload.decision === 'going' && !withdrawal
-      && <Button variant="secondary" onClick={chooseWithdrawal} disabled={submitting || !correctChain} disabledReason={!correctChain ? 'Switch your wallet to Arkiv Tiramisu to withdraw.' : undefined}>{retryingWithdrawal ? 'Review saved withdrawal' : 'Withdraw my registration'}</Button>}
+      && <Button variant="secondary" onClick={chooseWithdrawal} disabled={submitting || !correctChain} disabledReason={!correctChain ? 'Switch your wallet to Arkiv Tiramisu to withdraw.' : undefined}>{retryingWithdrawal ? 'Review saved withdrawal' : requested ? 'Withdraw my request' : 'Withdraw my registration'}</Button>}
     {withdrawal && !unresolved && <div className="pf-event-public-preview">
       <h3>Withdraw your registration</h3><p>You will replace your own intention to attend with a public withdrawal. The event and other people’s decisions stay available.</p>
       <dl className="pf-event-facts"><div><dt>Event</dt><dd>{terms?.title ?? read.myEvent?.registeredRelease?.payload.terms.title ?? 'Event details unavailable'}</dd></div>

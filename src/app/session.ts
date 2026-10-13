@@ -33,7 +33,7 @@ export function createSessionStore({ storage = null, namespace = 'partfolk:studi
   return {
     getSnapshot: (): AppSession => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    navigate: (route: Route) => update({ ...state, destination: route.name === 'not-found' ? `/${route.path.replace(/^\//, '')}` : routePath(route) }),
+    navigate: (route: Route) => update({ ...state, destination: routePath(route) }),
     currentRoute: (): Route => parseRoute(state.destination),
     selectDraft: (activeDraftId: string | null) => {
       if (!isSavedSession({ mode: state.mode, destination: state.destination, activeDraftId })) throw new TypeError('Invalid draft identity.');

@@ -50,8 +50,9 @@ export function useContributionDraft(id: string, initial: ContributionDraft) {
     exportRecovery: () => { const raw = store.exportRecovery(); if (raw !== null) downloadText('partfolk-original-draft-recovery.json', raw); },
     replaceRecovery: () => { store.update(state.draft, true); } };
 }
-export function DraftStatus({ saved, onExport, recovery, onExportRecovery, onReplaceRecovery }: { saved: boolean; onExport: () => void; recovery?: boolean; onExportRecovery?: () => void; onReplaceRecovery?: () => void }) {
+export function DraftStatus({ saved, exists = true, onExport, recovery, onExportRecovery, onReplaceRecovery }: { saved: boolean; exists?: boolean; onExport: () => void; recovery?: boolean; onExportRecovery?: () => void; onReplaceRecovery?: () => void }) {
   return recovery ? <Notice tone="warning" title="The previous saved draft needs recovery"><p>The original data was kept intact. Export it before replacing it with the current draft.</p><div className="pf-actions"><Button variant="secondary" onClick={onExportRecovery}>Export original saved data</Button><Button variant="secondary" onClick={onExport}>Export current draft</Button><Button variant="quiet" onClick={onReplaceRecovery}>Use current draft on this device</Button></div></Notice>
     : saved ? <p className="pf-secondary" role="status">Draft saved on this device for this account.</p>
+    : !exists ? <p className="pf-secondary">Your edits stay on this device until you publish them.</p>
     : <Notice tone="warning" title="This draft is only in memory"><p>Local storage is unavailable or needs recovery. Export the draft before leaving.</p><Button variant="secondary" onClick={onExport}>Export draft</Button></Notice>;
 }

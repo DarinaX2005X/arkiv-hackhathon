@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalSnapshot, makeSmallWorksProject, SMALL_WORKS_NOW } from '../../domain/fixtures';
 import { TIRAMISU_CHAIN_ID, type ProjectAggregate } from '../../domain/types';
 import type { Result } from '../../data/types';
-import { createProjectReader, PROJECT_REFRESH_INTERVAL_MS, type FocusEvents } from './projectReader';
+import { createProjectReader, PROJECT_FOCUS_MIN_INTERVAL_MS, PROJECT_MAX_RETRY_JITTER_MS, PROJECT_NETWORK_COOLDOWN_MS, PROJECT_RATE_LIMIT_COOLDOWN_MS, PROJECT_REFRESH_INTERVAL_MS, type FocusEvents } from './projectReader';
 
 function focusEvents() {
   const listeners = new Set<() => void>();
@@ -40,7 +40,7 @@ describe('project reads and freshness', () => {
     expect(reader.getSnapshot().loading).toBe(true);
     reader.stop();
   });
-  it('refreshes public records every 15 seconds and on focus without any write callback', async () => {
+  it('refreshes visible public records every 45 seconds and bounds focus reads', async () => {
     const focus = focusEvents(), load = vi.fn(async () => ok());
     const reader = createProjectReader(load);
     reader.start(true, focus); await reader.refresh();
@@ -49,10 +49,60 @@ describe('project reads and freshness', () => {
     expect(load).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(load).toHaveBeenCalledTimes(2);
+    focus.focus(); await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(PROJECT_FOCUS_MIN_INTERVAL_MS);
     focus.focus(); await reader.refresh();
     expect(load).toHaveBeenCalledTimes(3);
     expect(reader.getSnapshot().project?.snapshot.freshness).toBe('fresh');
     reader.stop(); expect(focus.count()).toBe(0);
+  });
+
+  it('skips background polling while hidden without extending snapshot confidence', async () => {
+    let visible = true;
+    const focus = focusEvents(), load = vi.fn(async () => ok());
+    const reader = createProjectReader(load, Date.now, { isVisible: () => visible });
+    reader.start(true, focus); await reader.refresh();
+    visible = false;
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(reader.getSnapshot().project?.snapshot.freshness).toBe('stale');
+    visible = true; focus.focus(); await reader.refresh();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(reader.getSnapshot().project?.snapshot.freshness).toBe('fresh');
+    reader.stop();
+  });
+
+  it.each([
+    ['rate_limited', PROJECT_RATE_LIMIT_COOLDOWN_MS],
+    ['network', PROJECT_NETWORK_COOLDOWN_MS],
+  ] as const)('backs off automatic %s reads with bounded jitter', async (code, cooldown) => {
+    const focus = focusEvents(), load = vi.fn<() => Promise<Result<ProjectAggregate>>>()
+      .mockResolvedValueOnce({ ok: false, error: { code, reasons: [{ code: 'rpc_error' }], retryable: true } })
+      .mockImplementation(async () => ok());
+    const reader = createProjectReader(load, Date.now, { random: () => 1 });
+    reader.start(true, focus); await reader.refresh();
+    await vi.advanceTimersByTimeAsync(cooldown + PROJECT_MAX_RETRY_JITTER_MS - 1);
+    focus.focus(); await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    focus.focus(); await reader.refresh();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(reader.getSnapshot().error).toBeNull();
+    reader.stop();
+  });
+
+  it('allows an explicit refresh during automatic cooldown without adding automatic requests', async () => {
+    const focus = focusEvents(), load = vi.fn<() => Promise<Result<ProjectAggregate>>>()
+      .mockResolvedValueOnce({ ok: false, error: { code: 'rate_limited', reasons: [{ code: 'rpc_error' }], retryable: true } })
+      .mockImplementation(async () => ok());
+    const reader = createProjectReader(load, Date.now, { random: () => 0 });
+    reader.start(true, focus); await reader.refresh();
+    focus.focus(); await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+    await reader.refresh();
+    expect(load).toHaveBeenCalledTimes(2);
+    reader.stop();
   });
 
   it('keeps local work to mount and manual reads, without timer or focus reads', async () => {
@@ -138,8 +188,8 @@ describe('project reads and freshness', () => {
     const reader = createProjectReader(load);
     reader.start(true); await reader.refresh();
     await vi.advanceTimersByTimeAsync(60_001);
-    expect(load).toHaveBeenCalledTimes(5);
-    expect(reader.getSnapshot().project?.snapshot).toMatchObject({ blockTimestamp, fetchedAt: SMALL_WORKS_NOW + 60_000, freshness: 'stale' });
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(reader.getSnapshot().project?.snapshot).toMatchObject({ blockTimestamp, fetchedAt: SMALL_WORKS_NOW + PROJECT_REFRESH_INTERVAL_MS, freshness: 'stale' });
     await reader.refresh();
     expect(reader.getSnapshot().project?.snapshot).toMatchObject({ fetchedAt: Date.now(), freshness: 'stale' });
     reader.stop();

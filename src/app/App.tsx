@@ -1,6 +1,6 @@
 import { Component, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { AppProvider, useApp, useAppSession, type AppRuntime } from './context';
-import { parseRoute, routeFromLocation, routeHref, type Route } from './routes';
+import { parseRoute, routeBehindSignIn, routeFromLocation, routeHref, routePath, type Route } from './routes';
 import { BrandMark, Button, EmptyState, ErrorState, LoadingState, Notice } from '../ui';
 import { workDestination } from '../features/account/account';
 
@@ -18,23 +18,26 @@ function HashNavigation() {
   const { session } = useApp();
   useEffect(() => {
     const read = () => {
-      session.navigate(routeFromLocation(window.location));
-      document.getElementById('main-content')?.focus({ preventScroll: true });
+      const previous = session.currentRoute();
+      const next = routeFromLocation(window.location);
+      if (next.name === 'not-found' && window.location.hash !== '#/404') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/404`);
+      session.navigate(next);
+      if (previous.name !== 'sign-in' && next.name !== 'sign-in') document.getElementById('main-content')?.focus({ preventScroll: true });
     };
-    session.navigate(routeFromLocation(window.location));
+    const first = routeFromLocation(window.location);
+    if (first.name === 'not-found' && window.location.hash !== '#/404') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/404`);
+    session.navigate(first);
     window.addEventListener('hashchange', read);
     return () => window.removeEventListener('hashchange', read);
   }, [session]);
   return null;
 }
 
-export function AppShell({ children, controls, account, guide }: { children: ReactNode; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
+export function AppShell({ children, controls, account, guide, header }: { children: ReactNode; controls?: ReactNode; account?: ReactNode; guide?: ReactNode; header?: ReactNode }) {
   const { copy, session } = useApp();
   const state = useAppSession();
   const t = copy.text.bind(copy, 'shell');
-  const route = parseRoute(state.destination);
-  const visibleNavigation = route.name === 'home'
-    ? navigation.filter(item => ['events', 'workspace', 'help'].includes(item.name)) : navigation;
+  const route = routeBehindSignIn(parseRoute(state.destination));
   const needsRecovery = state.storageIssue !== null && ['invalid_json', 'unsupported_version', 'invalid_payload', 'too_large', 'recovery_required'].includes(state.storageIssue.code);
   const exportRecovery = () => {
     const original = session.exportRecovery();
@@ -47,13 +50,13 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
   };
   return <>
     <a className="pf-skip" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>{t('skip')}</a>
-    <header className={`pf-app-header${route.name === 'home' ? ' pf-app-header--public' : ''}`}>
+    {header ?? <header className="pf-app-header">
       <a className="pf-brand" href={routeHref({ name: 'home' })}><BrandMark /><span className="pf-wordmark">{t('brand')}</span></a>
       <nav aria-label={t('navigation')} className="pf-app-navigation">
-        {visibleNavigation.map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (['project', 'new-project'].includes(route.name) && item.name === 'workspace') || (route.name === 'event' && item.name === 'events') ? 'page' : undefined}>{t(item.label)}</a>)}
+        {navigation.map(item => <a key={item.name} id={`nav-${item.name}`} href={routeHref(item.name === 'help' ? { name: 'help', returnTo: workDestination(route) } : { name: item.name })} aria-current={route.name === item.name || (['project', 'new-project'].includes(route.name) && item.name === 'workspace') || (route.name === 'event' && item.name === 'events') ? 'page' : undefined}>{t(item.label)}</a>)}
       </nav>
       {account}
-    </header>
+    </header>}
     {controls}
     <main className={`pf-page pf-app-main${route.name === 'home' ? ' pf-app-main--home' : ''}`} id="main-content" tabIndex={-1}>
       {state.storageIssue && <Notice tone="warning" title={t(needsRecovery ? 'recoveryTitle' : 'storageTitle')}>
@@ -70,10 +73,10 @@ export function AppShell({ children, controls, account, guide }: { children: Rea
         <p className="pf-secondary">People publish their own offers and decisions on Arkiv.</p>
       </div>
       <div className="pf-footer-links" aria-label="Footer navigation">
-        <div className="pf-footer-group"><strong>Take part</strong><a href={routeHref({ name: 'events' })}>Browse events</a><a href={routeHref({ name: 'my-events' })}>My events</a><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a></div>
+        <div className="pf-footer-group"><strong>Take part</strong><a href={routeHref({ name: 'events' })}>Browse events</a><a href={routeHref({ name: 'new-project' })}>Create an event</a><a href={routeHref({ name: 'my-events' })}>My events</a><a href={routeHref({ name: 'workspace' })}>My projects</a><a href={routeHref({ name: 'contributions' })}>My contributions</a><a href="/desk/">Open Desk</a></div>
         <div className="pf-footer-group"><strong>Learn</strong><a href={routeHref({ name: 'help', topic: 'publishing', returnTo: state.destination })}>Public records and your data</a><a href={routeHref({ name: 'help', topic: 'agreement', returnTo: state.destination })}>Agreements and ownership</a><a href={routeHref({ name: 'help', returnTo: state.destination })}>Help with Partfolk</a></div>
       </div>
-      <div className="pf-footer-meta"><span>Drafts stay in this browser. Published project details and decisions are public.</span></div>
+      <div className="pf-footer-meta"><span>Offers, event details and decisions are public on Arkiv.</span></div>
     </footer>
   </>;
 }
@@ -108,15 +111,17 @@ export class ViewLoadBoundary extends Component<{ destination: string; failureTi
   }
 }
 
-function RoutedApp({ routes, controls, account, guide }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
+function RoutedApp({ routes, controls, account, guide, header }: { routes: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode; header?: ReactNode }) {
   const state = useAppSession();
   const route = parseRoute(state.destination);
-  const View = routes[route.name] ?? FoundationView;
-  return <><HashNavigation /><AppShell controls={controls} account={account} guide={guide}>
-    <ViewLoadBoundary destination={state.destination}><Suspense fallback={<LoadingState title="Opening this page" />}><View route={route} /></Suspense></ViewLoadBoundary>
-  </AppShell></>;
+  const backgroundRoute = routeBehindSignIn(route);
+  const View = routes[backgroundRoute.name] ?? FoundationView;
+  const SignIn = routes['sign-in'];
+  return <><HashNavigation /><AppShell controls={controls} account={account} guide={guide} header={header}>
+    <ViewLoadBoundary destination={routePath(backgroundRoute)}><Suspense fallback={<LoadingState title="Opening this page" />}><View route={backgroundRoute} /></Suspense></ViewLoadBoundary>
+  </AppShell>{route.name === 'sign-in' && SignIn && <ViewLoadBoundary destination={state.destination}><Suspense fallback={null}><SignIn route={route} /></Suspense></ViewLoadBoundary>}</>;
 }
 /** MAIN composes the feature registry; Desk may use only AppProvider/AppShell. */
-export function RootApp({ runtime, routes = {}, controls, account, guide }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode }) {
-  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} account={account} guide={guide} /></AppProvider>;
+export function RootApp({ runtime, routes = {}, controls, account, guide, header }: { runtime: AppRuntime; routes?: RouteRegistry; controls?: ReactNode; account?: ReactNode; guide?: ReactNode; header?: ReactNode }) {
+  return <AppProvider runtime={runtime}><RoutedApp routes={routes} controls={controls} account={account} guide={guide} header={header} /></AppProvider>;
 }

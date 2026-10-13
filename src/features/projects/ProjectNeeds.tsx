@@ -20,14 +20,15 @@ export function ProjectNeeds({ project }: { project: ProjectAggregate }) {
         <dl className="project-needs-facts">
           <dt>Quantity needed</dt><dd>{requirement.quantityLabel}</dd>
           <dt>Kind</dt><dd>{requirement.kindLabel}</dd>
+          <dt>Skill or use to match</dt><dd>{requirement.capability}</dd>
           <dt>Required from</dt><dd><time dateTime={requirement.startIso}>{requirement.startLabel}</time></dd>
           <dt>Required until</dt><dd><time dateTime={requirement.endIso}>{requirement.endLabel}</time></dd>
           <dt>Must follow</dt><dd>{requirement.dependencies.length ? requirement.dependencies.map(dependency => dependency.label).join(', ') : 'No preceding requirement'}</dd>
         </dl>
         {requirement.instructions && <p className="project-needs-instructions"><strong>Requirement instructions:</strong> {requirement.instructions}</p>}
       </section>)}
-      <details><summary>Exact matching details for an offer</summary><p>Option reference: <code>{variant.id}</code></p><ul>{variant.requirements.map(requirement => <li key={requirement.id}><strong>{requirement.title}</strong><p>Required capability: <code>{requirement.capability}</code></p><p>Requirement reference: <code>{requirement.id}</code></p></li>)}</ul></details>
+      <details><summary>Advanced: exact references</summary><p>Option reference: <code>{variant.id}</code></p><ul>{variant.requirements.map(requirement => <li key={requirement.id}><strong>{requirement.title}</strong><p>Requirement reference: <code>{requirement.id}</code></p></li>)}</ul></details>
     </section>)}
-    {model.sourceProjectRoot && <details><summary>Where these needs came from</summary><p>Adapted from project <code>{model.sourceProjectRoot}</code>. This reference carries no participants or approvals into this project.</p></details>}
+    {model.sourceProjectRoot && <details><summary>Advanced: source project</summary><p>Adapted from project <code>{model.sourceProjectRoot}</code>. This reference carries no participants or approvals into this project.</p></details>}
   </section>;
 }

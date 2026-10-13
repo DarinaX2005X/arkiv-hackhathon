@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRoute, routeFromLocation, routeHref, routePath, safeReturnPath } from '../routes';
+import { parseRoute, routeBehindSignIn, routeFromLocation, routeHref, routePath, safeReturnPath } from '../routes';
 import { createSessionStore } from '../session';
 import type { StoragePort } from '../storage';
 
@@ -17,6 +17,13 @@ function memoryStorage(): StoragePort {
 }
 
 describe('service entry routes and safe continuation without rendering', () => {
+  it('keeps an event publisher and its exact Guests destination behind sign-in', () => {
+    const guests = { name: 'project', projectRoot: publicRoot, tab: 'guests' } as const;
+    expect(parseRoute(routeHref(guests))).toEqual(guests);
+    expect(routeBehindSignIn(parseRoute(routeHref({ name: 'sign-in', returnTo: routePath(guests) })))).toEqual(guests);
+    expect(routeBehindSignIn({ name: 'sign-in' })).toEqual({ name: 'home' });
+    expect(routePath({ name: 'not-found', path: '/missing' })).toBe('/404');
+  });
   it('lets the current URL choose landing or a deep link regardless of the saved last destination', () => {
     const storage = memoryStorage(); const session = createSessionStore({ storage });
     session.navigate({ name: 'events' }); session.selectDraft('keep-this-draft');

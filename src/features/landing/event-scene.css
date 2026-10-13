@@ -29,6 +29,7 @@
 .pf-event-case-handle { fill: none; stroke: var(--art-sand); stroke-width: 5; stroke-linecap: round; }
 .pf-event-case-edge { fill: none; stroke: var(--art-shadow); stroke-width: 1.5; opacity: .6; }
 .pf-event-agreement-lines { fill: none; stroke: var(--art-shadow); stroke-width: 3; stroke-linecap: round; }
+.pf-event-agreement-signature { fill: none; stroke: var(--surface-dark-light); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .pf-event-agreement-mark { fill: none; stroke: var(--on-action-on-dark); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .pf-event-stem { fill: none; stroke: var(--action-on-dark); stroke-width: 2.5; stroke-linecap: round; }
 .pf-event-leaf { fill: var(--surface-dark-light); stroke: var(--art-shadow); stroke-opacity: .25; stroke-width: 1; }

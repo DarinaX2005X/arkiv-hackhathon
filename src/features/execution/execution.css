@@ -30,3 +30,10 @@
 .execution-exports { scroll-margin-top: var(--space-6); }
 .execution-duty:focus-visible, .execution-exports:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; border-radius: var(--radius-control); }
 @media (max-width: 760px) { .execution-overview, .execution-version { grid-template-columns: minmax(0, 1fr); } }
+.execution-duty-title { display: grid; justify-items: start; gap: 8px; flex: 1; min-width: min(100%, 180px); }
+.execution-duty-content header .execution-duty-title h4 { min-width: 0; margin: 0; }
+.execution-duty-content .pf-actions > .pf-field { flex: 1 1 180px; max-width: 360px; min-width: 0; }
+.execution-completion .execution-statement { display: grid; gap: 16px; }
+.execution-workspace details > summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
+.execution-workspace details[open] > summary { margin-bottom: 12px; }
+.execution-workspace :is(p, li, h4) { overflow-wrap: anywhere; }

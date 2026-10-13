@@ -34,7 +34,7 @@ export function EventScene() {
   return <div ref={scene} className="pf-event-scene" data-playing="false" style={materials}>
     <svg className="pf-event-art" viewBox="0 0 720 610" width="720" height="610" role="img" aria-labelledby={`${id}-title ${id}-description`} focusable="false">
       <title id={`${id}-title`}>An event brought together from everyone’s contributions</title>
-      <desc id={`${id}-description`}>A dimensional gathering space connects to an online screen, a resource case and separate agreement sheets. People can come together while each contributor retains control of their part.</desc>
+      <desc id={`${id}-description`}>A dimensional gathering space connects to an online session and an equipment case. A separate signed agreement sits beside each contribution. People can come together while each contributor retains control of their part.</desc>
       <defs>
         <linearGradient id={`${id}-paper`} x1="0" y1="0" x2=".85" y2="1" gradientUnits="objectBoundingBox"><stop stopColor="var(--art-highlight)" /><stop offset=".52" stopColor="var(--art-cream)" /><stop offset="1" stopColor="var(--art-sand)" /></linearGradient>
         <linearGradient id={`${id}-edge`} x1="0" y1="0" x2="1" y2=".8" gradientUnits="objectBoundingBox"><stop stopColor="var(--art-sand)" /><stop offset="1" stopColor="var(--art-shadow)" /></linearGradient>
@@ -120,12 +120,12 @@ export function EventScene() {
         </g>
       </g>
 
-      {/* Separate physical sheets echo separately authored agreements. */}
+      {/* Each owned contribution carries a separate agreement on the shared
+          receiving plane. No central sheet stands in for all three authors. */}
       <g className="pf-event-agreements">
-        <path className="pf-event-contact" d="m272 498 76-43 133 71-76 44Z" />
-        <Agreement x={280} y={450} />
-        <Agreement x={302} y={468} />
-        <Agreement x={324} y={486} />
+        <Agreement x={194} y={435} />
+        <Agreement x={447} y={333} />
+        <Agreement x={364} y={464} />
       </g>
       <g className="pf-event-secondary-object pf-event-plant" transform="translate(79 381)">
         <ellipse className="pf-event-contact" cx="0" cy="20" rx="29" ry="10" />
@@ -165,9 +165,11 @@ function Person({ x, y, coat }: { x: number; y: number; coat: 'mint' | 'cream' |
 
 function Agreement({ x, y }: { x: number; y: number }) {
   return <g transform={`translate(${x} ${y})`}>
+    <path className="pf-event-contact" d="m-3 6 51-29 90 50-51 28Z" />
     <path className="pf-event-room-edge" d="m0 0 48-27 85 47v5l-48 27L0 5Z" />
     <path className="pf-event-paper" d="m0 0 48-27 85 47-48 27Z" />
     <path className="pf-event-agreement-lines" d="m26-3 29 16m-16-23 36 20" />
+    <path className="pf-event-agreement-signature" d="m36 8 7-6 4 8 7-4 8 4" />
     <path className="pf-event-green" d="m85 14 13-7 13 7v5l-13 7-13-7Z" />
     <path className="pf-event-mint" d="m85 14 13-7 13 7-13 7Z" />
     <path className="pf-event-agreement-mark" d="m92 13 5 3 8-4" />

@@ -3,6 +3,7 @@ import { useApp, useAppSession } from '../../app/context';
 import { parseRoute } from '../../app/routes';
 import { Button, Dialog } from '../../ui';
 import { createAccountPreferences, readAccountPreferences } from '../account/account';
+import { walletDialogActivity } from '../account/dialog-activity';
 import { canShowTour, tourContext, tourSteps, workspaceTour } from './tour';
 import { TourIllustration } from './TourIllustration';
 import './tour.css';
@@ -11,15 +12,16 @@ export function WorkspaceTour() {
   const runtime = useApp(), session = useAppSession();
   const controller = useMemo(() => workspaceTour(runtime, session.actor), [runtime, session.actor]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const signingIn = useSyncExternalStore(walletDialogActivity.subscribe, walletDialogActivity.getSnapshot, walletDialogActivity.getSnapshot);
   const route = parseRoute(session.destination);
   const eligible = canShowTour(route, session.mode, session.actor);
   const preferences = session.actor?.kind === 'wallet'
     ? readAccountPreferences(createAccountPreferences(runtime, session.actor.address).load()).value : null;
   useEffect(() => {
-    // Help only replays on request. First-use guidance follows actual sign-in and setup.
-    if (eligible && route.name !== 'help' && preferences?.setupComplete) controller.ensureStarted();
-  }, [controller, eligible, preferences?.setupComplete, route.name]);
-  if (!eligible || state.progress.status !== 'active') return null;
+    // Home keeps the invitation pending; Help replays it only on request.
+    if (eligible && !signingIn && route.name !== 'help') controller.ensureStarted();
+  }, [controller, eligible, signingIn, route.name]);
+  if (!eligible || signingIn || state.progress.status !== 'active') return null;
   const steps = tourSteps(tourContext(route, preferences?.defaultDestination));
   const step = steps[state.progress.step] ?? steps[0]!;
   const last = state.progress.step === steps.length - 1;

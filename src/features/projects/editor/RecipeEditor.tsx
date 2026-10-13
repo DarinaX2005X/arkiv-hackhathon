@@ -5,9 +5,9 @@ import type { TimeDisambiguation } from '../../../app/time';
 import { Button, Checkbox, Field, FieldMessage, Select, Textarea } from '../../../ui';
 import {
   addRequirement, addVariant, copyVariant, recipeToEditorDraft, removeRequirement, removeVariant,
-  updateRequirement, validateEditorDraft,
+  updateRequirement, updateVariantSchedule, validateEditorDraft, variantSchedule,
 } from './model';
-import type { EditorDraft, EditorRequirementDraft, EditorVariantDraft } from './model';
+import type { EditorDraft, EditorRequirementDraft, EditorScheduleDraft, EditorVariantDraft } from './model';
 import './editor.css';
 import { LocalDateField, TimeZoneField } from './DateFields';
 import { needPresets } from './needPresets';
@@ -21,6 +21,8 @@ export interface RecipeEditorProps {
   draft?: EditorDraft;
   onDraftChange?: (draft: EditorDraft) => void;
   onValidityChange?: (valid: boolean) => void;
+  /** Creation uses two visible steps; existing project editing shows both. */
+  section?: 'event' | 'needs';
 }
 
 const humanReview = 'Helpful details for the people taking part.';
@@ -37,7 +39,17 @@ function needsOccurrence(value: string, timeZone: string): boolean {
 
 function newId(prefix: string): string { return `${prefix}-${globalThis.crypto.randomUUID()}`; }
 
-export function RecipeEditor({ value, onChange, disabled = false, draft: controlledDraft, onDraftChange, onValidityChange }: RecipeEditorProps) {
+function ScheduleFields({ variant, path, errors, onChange }: { variant: EditorVariantDraft; path: string; errors: Record<string, string>; onChange: (patch: Partial<EditorScheduleDraft>) => void }) {
+  const schedule = variantSchedule(variant);
+  return <div className="pf-recipe-grid pf-recipe-schedule">
+    <div className="pf-recipe-fields"><LocalDateField label="Starts" value={schedule.startLocal} error={errors[`${path}.schedule.startLocal`]} onChange={startLocal => onChange({ startLocal, startDisambiguation: 'reject' })} />
+      {needsOccurrence(schedule.startLocal, variant.timeZone) && <Select label="Which repeated start time?" value={schedule.startDisambiguation} options={occurrences} onChange={event => onChange({ startDisambiguation: event.target.value as TimeDisambiguation })} />}</div>
+    <div className="pf-recipe-fields"><LocalDateField label="Ends" value={schedule.endLocal} error={errors[`${path}.schedule.endLocal`]} onChange={endLocal => onChange({ endLocal, endDisambiguation: 'reject' })} />
+      {needsOccurrence(schedule.endLocal, variant.timeZone) && <Select label="Which repeated end time?" value={schedule.endDisambiguation} options={occurrences} onChange={event => onChange({ endDisambiguation: event.target.value as TimeDisambiguation })} />}</div>
+  </div>;
+}
+
+export function RecipeEditor({ value, onChange, disabled = false, draft: controlledDraft, onDraftChange, onValidityChange, section }: RecipeEditorProps) {
   const baseId = useId();
   const [localDraft, setLocalDraft] = useState(() => controlledDraft ?? recipeToEditorDraft(value));
   const valueKey = JSON.stringify(value);
@@ -75,19 +87,21 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
 
   const issueCount = Object.keys(errors).length;
   return <div className="pf-recipe-editor">
-    <section className="pf-sheet pf-recipe-outline"><h2>Your event</h2><p className="pf-secondary">Start with a name and what people will come together to do.</p><fieldset className="pf-recipe-fieldset" disabled={disabled}>
+    {section !== 'needs' && <section className="pf-sheet pf-recipe-outline"><h2>Your event</h2><p className="pf-secondary">Start with a name, the date and what people will come together to do.</p><fieldset className="pf-recipe-fieldset" disabled={disabled}>
       <legend className="pf-visually-hidden">Event details</legend>
       <div className="pf-recipe-fields">
         <Field label="Event name" placeholder="Community workshop, online talk, film night…" value={draft.title} error={errors.title} onChange={event => change({ ...draft, title: event.target.value })} autoComplete="off" />
         <Textarea label="What will happen?" hint="A short description of the event and the result you want." placeholder="Bring neighbors together to learn bicycle repairs." value={draft.outcome} error={errors.outcome} rows={2} onChange={event => change({ ...draft, outcome: event.target.value })} />
-        <TimeZoneField label="Event time zone" hint="New date options use this zone." value={draft.timeZone} error={errors.timeZone} onChange={timeZone => change({ ...draft, timeZone })} />
-        <details open={errors.instructions ? true : undefined}><summary>Instructions for everyone (optional)</summary><Textarea label="Shared instructions" hint={humanReview} value={draft.instructions} error={errors.instructions} rows={3} onChange={event => change({ ...draft, instructions: event.target.value })} /></details>
+        <TimeZoneField label="Event time zone" hint="Dates use this clock time. Each alternative can have its own zone." value={draft.timeZone} error={errors.timeZone} onChange={timeZone => change({ ...draft, timeZone, variants: draft.variants.map(variant => variant.timeZone === draft.timeZone ? { ...variant, timeZone } : variant) })} />
+        {draft.variants[0] && <div className="pf-recipe-fields"><h3>When are you planning it?</h3><ScheduleFields variant={draft.variants[0]} path="variants[0]" errors={errors} onChange={patch => change(updateVariantSchedule(draft, draft.variants[0]!.id, patch))} /><p className="pf-field-message">New needs start with these times. Adjust setup, transport or cleanup times below. You will review guest hours before publishing the visitor page.</p></div>}
+        {!draft.variants.length && <Button variant="secondary" onClick={() => change(addVariant(draft, newId('variant')))}>Add event dates</Button>}
+        <Textarea label="Instructions for everyone (optional)" hint={humanReview} value={draft.instructions} error={errors.instructions} rows={2} onChange={event => change({ ...draft, instructions: event.target.value })} />
       </div>
-    </fieldset></section>
+    </fieldset></section>}
 
-    <section className="pf-recipe-variants" aria-labelledby={`${baseId}-variants`}>
+    {section !== 'event' && <section className="pf-recipe-variants" aria-labelledby={`${baseId}-variants`}>
       <div className="pf-recipe-section-heading">
-        <div><h2 id={`${baseId}-variants`}>Dates and help needed</h2><p className="pf-secondary">Add one option to begin. You can compare another date or venue later.</p></div>
+        <div><h2 id={`${baseId}-variants`}>Place and help needed</h2><p className="pf-secondary">Add the people, place or equipment needed to make your event happen. Compare another date or venue when useful.</p></div>
         <Button variant="secondary" disabled={disabled || draft.variants.length >= 64} onClick={() => change(addVariant(draft, newId('variant')))}>{draft.variants.length ? 'Add another option' : 'Add date and place'}</Button>
       </div>
       {errors.variants && <FieldMessage tone="danger">{errors.variants}</FieldMessage>}
@@ -99,7 +113,7 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
             <h3 id={variantHeading}>{variant.title.trim() || `Option ${variantIndex + 1}`}</h3>
             <div className="pf-actions">
               <Button variant="quiet" size="compact" disabled={disabled || draft.variants.length >= 64} aria-label={`Copy ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(copyVariant(draft, variant.id, newId('variant'), () => newId('requirement')))}>Copy option</Button>
-              <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(removeVariant(draft, variant.id))}>Remove option</Button>
+              {draft.variants.length > 1 && <Button variant="quiet" size="compact" disabled={disabled} aria-label={`Remove ${variant.title || `option ${variantIndex + 1}`}`} onClick={() => change(removeVariant(draft, variant.id))}>Remove option</Button>}
             </div>
           </div>
           <fieldset className="pf-recipe-fieldset" disabled={disabled}>
@@ -109,7 +123,8 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
               <Field label="Venue or online meeting space" placeholder="Community hall or online" hint="Use a recognizable name. Guest location and joining details are added when you publish the event page." value={variant.venueId} error={errors[`${path}.venueId`]} onChange={event => changeVariant(variant.id, { venueId: event.target.value })} />
               <TimeZoneField label="Time zone for these dates" hint="Changing the zone keeps the clock times you entered." value={variant.timeZone} error={errors[`${path}.timeZone`]} onChange={timeZone => changeVariant(variant.id, { timeZone })} />
             </div>
-            <details open={errors[`${path}.instructions`] ? true : undefined}><summary>Notes for this option (optional)</summary><Textarea label="Option notes" hint={humanReview} value={variant.instructions} error={errors[`${path}.instructions`]} rows={2} onChange={event => changeVariant(variant.id, { instructions: event.target.value })} /></details>
+            {variantIndex > 0 && <ScheduleFields variant={variant} path={path} errors={errors} onChange={patch => change(updateVariantSchedule(draft, variant.id, patch))} />}
+            <Textarea label="Option notes (optional)" hint={humanReview} value={variant.instructions} error={errors[`${path}.instructions`]} rows={2} onChange={event => changeVariant(variant.id, { instructions: event.target.value })} />
           </fieldset>
 
           <div className="pf-recipe-requirements">
@@ -142,7 +157,7 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
                       {needsOccurrence(requirement.endLocal, variant.timeZone) && <Select label="Which repeated end time?" value={requirement.endDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { endDisambiguation: event.target.value as TimeDisambiguation })} />}
                     </div>
                   </div>
-                  <details open={errors[`${itemPath}.capability`] || errors[`${itemPath}.unit`] || errors[`${itemPath}.dependsOn`] ? true : undefined}><summary>Custom matching and task order</summary><div className="pf-recipe-grid">
+                  <section className="pf-recipe-fields"><h5>Matching and task order</h5><div className="pf-recipe-grid">
                     <Select label="Contribution type" value={requirement.kind} options={[{ value: 'person', label: 'Person' }, { value: 'place', label: 'Place' }, { value: 'equipment', label: 'Equipment' }]} onChange={event => { const kind = event.target.value as ResourceKind; changeRequirement(variant.id, requirement.id, { kind, unit: kind === 'person' ? 'person' : kind === 'place' ? 'space' : 'item' }); }} />
                     <Field label="Skill or use to match" hint="Use the same term as a contributor’s offer, for example translation or catering." value={requirement.capability} error={errors[`${itemPath}.capability`]} onChange={event => changeRequirement(variant.id, requirement.id, { capability: event.target.value })} />
                     <Field label="Unit to match" hint="Use the offer’s unit, for example person, space or chair." value={requirement.unit} error={errors[`${itemPath}.unit`]} onChange={event => changeRequirement(variant.id, requirement.id, { unit: event.target.value })} />
@@ -152,7 +167,7 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
                     {candidates.length ? candidates.map(candidate => <Checkbox key={candidate.id} label={candidate.title || 'Untitled requirement'} checked={requirement.dependsOn.includes(candidate.id)} onChange={event => changeRequirement(variant.id, requirement.id, { dependsOn: event.target.checked ? [...requirement.dependsOn, candidate.id] : requirement.dependsOn.filter(id => id !== candidate.id) })} />) : <p className="pf-field-message">Add another requirement to choose what must finish first.</p>}
                     {requirement.dependsOn.some(id => !candidates.some(candidate => candidate.id === id)) && <Button variant="quiet" size="compact" onClick={() => changeRequirement(variant.id, requirement.id, { dependsOn: requirement.dependsOn.filter(id => candidates.some(candidate => candidate.id === id)) })}>Clear unavailable dependencies</Button>}
                     {errors[`${itemPath}.dependsOn`] && <FieldMessage id={dependencyErrorId} role="alert" tone="danger">{errors[`${itemPath}.dependsOn`]}</FieldMessage>}
-                  </fieldset></details>
+                  </fieldset></section>
                   <Textarea label="Requirement instructions" hint={humanReview} value={requirement.instructions} error={errors[`${itemPath}.instructions`]} rows={2} onChange={event => changeRequirement(variant.id, requirement.id, { instructions: event.target.value })} />
                 </fieldset>
               </section>;
@@ -160,8 +175,8 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
           </div>
         </section>;
       })}
-    </section>
-    {!!issueCount && <div className="pf-recipe-validation" role="status">
+    </section>}
+    {section !== 'event' && !!issueCount && <div className="pf-recipe-validation" role="status">
       <p>{issueCount === 1 ? 'One detail is still needed.' : `${issueCount} details are still needed.`} Your draft is kept as you write.</p>
       {errors.$ && <p>{errors.$}</p>}
     </div>}

@@ -5,6 +5,7 @@ import type { StoragePort } from '../app/storage';
 import { DeskApp } from './DeskApp';
 import { createDeskNavigation } from './navigation';
 import '../styles/styles.css';
+import '../styles/app.css';
 import './desk.css';
 
 let storage: StoragePort | null = null;

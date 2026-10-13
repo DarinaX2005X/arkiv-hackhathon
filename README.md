@@ -55,7 +55,7 @@ npm ci
 npm run dev
 ```
 
-Open [Partfolk at localhost:5173](http://127.0.0.1:5173/). No environment file, API key, database or container is needed. On Windows PowerShell, use `npm.cmd` instead of `npm`, especially when forwarding arguments after `--`.
+Open [Partfolk at localhost:5173](http://127.0.0.1:5173/). No database or container is needed. Public reads work directly without a key. For a larger catalogue, an optional server-only Arkiv access key enables the same bounded read service used by the hosted app; see [network configuration](docs/operations.md#runtime-and-network-configuration). On Windows PowerShell, use `npm.cmd` instead of `npm`, especially when forwarding arguments after `--`.
 
 | Start here | Local route |
 | --- | --- |
@@ -73,7 +73,7 @@ The local example initializes when opened. The public catalogue reads authored A
 | [Bookbinding at a shared table](https://partfolk.vercel.app/#/events/0x4237eacdb4079255ecb729b5888d827a43300dd963f9c18fc164c8aa2d141d90) | 25 October 2026, in person, Almaty | 3 going, 1 waitlisted |
 | [Community audio walk workshop](https://partfolk.vercel.app/#/events/0x7bb81a521f301f642d512752d313ba0016c3e292ee0ddf55d1e9b0725eea065c) | 26 October 2026, hybrid, London | 2 going |
 
-These counts come from the [11 October evidence export](arkiv/evidence/test-events.json), at blocks 446077, 446084 and 446092 respectively. Public RPC query quotas can temporarily prevent catalogue or event reads; an unavailable read does not mean the catalogue is empty.
+These counts come from the [11 October evidence export](arkiv/evidence/test-events.json), at blocks 446077, 446084 and 446092 respectively. Catalogue filters apply to the loaded records immediately. Network reads share in-flight work and respect quota cooldowns; an unavailable refresh keeps dated results visibly unverified.
 
 Publishing and registration require an injected Ethereum-compatible EOA wallet on **Arkiv Tiramisu**, testnet gas, browser storage and Web Locks support.
 
@@ -83,20 +83,20 @@ Publishing and registration require an injected Ethereum-compatible EOA wallet o
 
 <img src="docs/assets/exact-agreement.svg" alt="Small Works first assigns transport to Oak and installation to Cedar and Willow. When Oak withdraws, Cedar takes transport and Juniper joins Willow. Every required contributor must approve the revised version." width="960">
 
-1. **Find a workable arrangement.** Choose **Add Oak and find a plan**. Oak transports the artworks; Cedar and Willow install. The proposal includes equipment delivery and return.
-2. **Agree to this version.** Choose **Play the group's agreement**. Each fictional contributor records a separate local decision. The plan becomes ready when every required agreement matches.
-3. **See what changes.** Choose **Let Oak withdraw**. The old plan loses readiness, while its decisions remain attached to their original version.
-4. **Repair and agree again.** Choose **Add Juniper and update the plan**, then **Play fresh agreement**. Juniper installs with Willow, freeing Cedar for transport. Every required owner approves the new version.
+1. **Find a workable arrangement.** Use **Practice as** to prepare Oak's transport offer in **My contributions**. As coordinator, admit the offer in **People**, then find and propose an arrangement in **Plan**, including equipment handover and return.
+2. **Agree to this version.** Switch to each required contributor and review the proposal. Their separate decisions must all match the exact plan before it becomes ready.
+3. **See what changes.** As Oak, withdraw the transport commitment. The old plan loses readiness, while its decisions remain attached to their original version.
+4. **Repair and agree again.** Share Juniper's installation offer, then find a replacement as coordinator. Juniper installs with Willow, freeing Cedar for transport. Every required owner reviews the new version.
 
-Choose **Explore the full project** to inspect people, history and the run sheet. The full practice lets you switch fictional roles, record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
+The practice opens the full project, including people, history and the run sheet. Switch fictional roles to record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
 
-Practice uses real local domain operations with fictional identities and a controlled clock. Its agreement buttons simulate the separate owners. Progress survives reload; **Start the example again** resets only the example.
+Practice uses local domain operations with fictional identities and a controlled clock. Its role selector simulates the separate owners. Progress survives reload; **Reset practice** resets only the example.
 
-**Make it yours:** choose **Create an event**, enter an outcome, time zone, date/place options and requirements. Drafts live in **My projects**, with reopen, export, import and delete actions. Publishing is explicit. Reusing a recipe creates new work without copying anyone's approvals.
+**Make it yours:** choose **Create an event**, enter its purpose, date, time and time zone, then describe the place and contributions it needs. Unsent input is saved automatically while you work. Publishing requires your wallet and an explicit review. Earlier device-only projects remain available for recovery in **My projects**. Reusing a recipe starts a new public-project draft without copying anyone's approvals.
 
 ## Events people can actually join
 
-Events can be **online**, **in person** or **hybrid**. Physical events name a country, city and venue; online participation uses a public HTTPS link or public joining instructions. Each event displays its own named time zone.
+Events can be **online**, **in person** or **hybrid**. Physical events name a country, city and venue; online participation uses a public HTTPS link or public joining instructions. Each event displays its own named time zone. Publication uses searchable country and city choices from a [versioned directory](public/places/ATTRIBUTION.md), loaded one country at a time. Catalog filters use the locations actually present in the loaded events.
 
 Organizers can set a deadline, limited or unlimited places, an optional waiting list and open or wallet-invitation-only admission. Registration can be closed and reopened after validation; events can be cancelled or ended.
 
@@ -116,7 +116,7 @@ Registration has no ticket payments. Invitations establish eligibility, not priv
 
 The event is shared; authority stays with each author.
 
-<img src="docs/assets/arkiv-exchange.svg" alt="Separate owner wallets authorize writes to Arkiv. Partfolk, the independent Partner Desk and the read-only project verifier each read the shared public records directly." width="960">
+<img src="docs/assets/arkiv-exchange.svg" alt="Separate owner wallets authorize writes to Arkiv. Partfolk, the independent Partner Desk and the read-only project verifier inspect the same shared public records." width="960">
 
 | Record owner | What they control |
 | --- | --- |
@@ -138,8 +138,8 @@ Read the [data schema](arkiv/schema.md), [full protocol](docs/protocol.md) and [
 
 | Stays in this browser | Published on Arkiv |
 | --- | --- |
-| Drafts, device label and tour progress | Projects, offers and immutable proposals |
-| Local projects and isolated practice | Independently authored decisions and grants |
+| Unsent input, display preferences and tour progress | Projects, offers and immutable proposals |
+| Isolated practice and recoverable older drafts | Independently authored decisions and grants |
 | Pending-action and transaction journals | Event releases, admissions and attendance states |
 
 The same wallet can discover its public records from another client. Drafts and pending journals do not automatically move between browsers or origins. Deleting a draft does not delete a published project; disconnecting preserves saved work.
@@ -150,15 +150,15 @@ Public records are readable by others. Keep private contact details and meeting 
 
 ## Read the same agreement independently
 
-**Partner Desk** is a technical client within Partfolk for contributors and agreement inspection. Its separate build, runtime and wallet connection read Arkiv directly, without the organizer's Studio process.
+**Partner Desk** is the contributor workspace within Partfolk, with the same header, wallet selection and account preferences. Its separate build and runtime can also read Arkiv directly without the Studio process. The hosted app uses a bounded read service to keep the provider access key on the server; authority still comes from the records and wallet signatures.
 
-Open the [hosted Partner Desk](https://partfolk.vercel.app/desk.html), or start it locally:
+Open the [hosted Partner Desk](https://partfolk.vercel.app/desk), or start it locally:
 
 ```sh
 npm run dev:desk
 ```
 
-Open [Partner Desk at localhost:5174/desk.html](http://127.0.0.1:5174/desk.html) and use a public project/publisher key or supported invitation link. It is optional for ordinary users.
+Open [Partner Desk at localhost:5174/desk](http://127.0.0.1:5174/desk) and use a public project/publisher key or supported invitation link. It is also available from the account menu in Partfolk.
 
 The read-only CLI verifies the contributor project and agreement:
 
@@ -190,11 +190,11 @@ This runs TypeScript checks, unit and integration suites, offline probe/helper t
 | `npm run build` | Main bundle in `dist/`, including Studio and Desk |
 | `npm run build:desk` | Independent Desk bundle in `dist-desk/` |
 | `npm run preview` | Built main app at `http://127.0.0.1:4173/` |
-| `npm run preview:desk` | Built Desk at `http://127.0.0.1:4174/desk.html` |
+| `npm run preview:desk` | Built Desk at `http://127.0.0.1:4174/desk` |
 
-Build before previewing. Deploy the generated static files over HTTPS, keeping HTML and assets together. Both builds use relative assets and hash routing. No application server, database migration or signing secret is required.
+Build before previewing. The main release includes Studio, Desk, a dedicated 404 document and the read-only API entry point. The [Vercel configuration](vercel.json) serves `/desk`, preserves older `/desk.html` links and sends unknown document paths to `/404`. Assets use origin-root URLs; application links also support hash routes. The standalone Desk build uses direct RPC and can be hosted independently.
 
-The browser application requires no environment variables. The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Configuration lives in [the read client](src/data/arkiv/client.ts) and [wallet gateway](src/data/wallet/gateway.ts). See [operations](docs/operations.md) for deployment details and troubleshooting.
+The source-configured network is **Tiramisu, chain ID 7738577**, using `https://rpc.tiramisu.db-chain.testnet.arkiv.network`. Hosted reads use `/api/arkiv-read` and the server-only `ARKIV_RPC_ACCESS_KEY`. No signing key or provider credential belongs in a `VITE_*` variable or browser bundle. Configuration lives in [the read client](src/data/arkiv/client.ts), [read service](src/server/arkiv-read.ts) and [wallet gateway](src/data/wallet/gateway.ts). See [operations](docs/operations.md) for deployment details and troubleshooting.
 
 The implementation is organized around `src/domain/` for constraints and consent, `src/data/` for repositories and transaction recovery, and `src/features/` for product flows. `src/domain/events/` and `src/data/events/` implement visitor participation; `src/desk/` and `src/cli/` provide independent clients.
 
@@ -228,6 +228,6 @@ The verified source baseline passed TypeScript, unit/integration checks and both
 
 ## License
 
-Partfolk is [MIT licensed](LICENSE). IBM Plex Sans retains its [SIL Open Font License](public/fonts/IBM-Plex-Sans/license.txt); dependencies retain their respective licenses.
+Partfolk's application code is [MIT licensed](LICENSE). IBM Plex Sans retains its [SIL Open Font License](public/fonts/IBM-Plex-Sans/license.txt); dependencies retain their respective licenses. The separately licensed city directory is redistributed under ODbL 1.0, with its [source attribution, coverage and complete derivative download](public/places/ATTRIBUTION.md).
 
 The README diagrams are original explanatory illustrations, not interface screenshots. VibeMachina supplied development guidance; it is not a runtime dependency.

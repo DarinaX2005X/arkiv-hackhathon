@@ -30,6 +30,7 @@ describe('contextual tour progress without rendering', () => {
     expect(canShowTour(route, 'public', { kind: 'local', id: 'local-actor:me' })).toBe(false);
     expect(canShowTour(route, 'practice', actorA)).toBe(false);
     expect(canShowTour({ name: 'onboarding' }, 'public', actorA)).toBe(false);
+    expect(canShowTour({ name: 'home' }, 'public', actorA)).toBe(false);
     expect(canShowTour({ name: 'help' }, 'public', actorA)).toBe(true);
   });
 

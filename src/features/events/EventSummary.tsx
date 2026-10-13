@@ -1,30 +1,47 @@
 import { routeHref } from '../../app/routes';
 import { formatDateTime } from '../../app/time';
 import { isPublicEntityKey } from '../../app/ids';
-import { deriveEventAvailability, isTestEventTerms, type EventAggregate, type EventAvailability } from '../../domain/events';
+import { deriveEventAvailability, isTestEventTerms, type AudienceTerms, type EventAggregate, type EventAvailability } from '../../domain/events';
 import { Link, StatusLabel } from '../../ui';
-import { availabilityCopy, eventDate, shortAddress, eventPlace, eventFormatLabel, eventRegistrationLabel } from './presentation';
+import { availabilityCopy, shortAddress, eventFormatLabel, eventDayLabel, eventTimeLabel, eventLocationLabel, eventAdmissionLabel } from './presentation';
+import { EventCover, EventFactIcon } from './cover';
 
 export function EventStatus({ status }: { status: EventAvailability }) {
   const copy = availabilityCopy[status];
   return <StatusLabel tone={copy.tone}>{copy.label}</StatusLabel>;
 }
 
+export function EventCoverFrame({ terms, verified, className = '' }: { terms?: AudienceTerms; verified: boolean; className?: string }) {
+  return <div className={`pf-event-cover-frame ${className}`}>
+    <EventCover format={terms?.format} />
+    <div className="pf-event-cover-badges">
+      {isTestEventTerms(terms) && <StatusLabel tone="neutral">TEST EVENT</StatusLabel>}
+      {verified && <StatusLabel tone="success" title="The current public event record was checked. This does not verify the organizer’s real-world identity or physical attendance."><EventFactIcon name="check" />Verified record</StatusLabel>}
+    </div>
+  </div>;
+}
+
+export function EventQuickFacts({ terms }: { terms: AudienceTerms }) {
+  const location = eventLocationLabel(terms);
+  return <ul className="pf-event-quick-facts">
+    <li><EventFactIcon name="calendar" /><span>{eventDayLabel(terms)}</span></li>
+    <li><EventFactIcon name="clock" /><span>{eventTimeLabel(terms)}<span className="pf-event-fact-secondary">{terms.timeZone}</span></span></li>
+    <li><EventFactIcon name={terms.format ?? 'place'} /><span>{eventFormatLabel(terms)}{location && <span className="pf-event-fact-secondary">{location}</span>}</span></li>
+  </ul>;
+}
+
 export function EventSummary({ event, now, unverified = false }: { event: EventAggregate; now: number; unverified?: boolean }) {
   const terms = event.release?.payload.terms;
   const status = unverified ? 'unverified' : deriveEventAvailability(event, now);
-  const date = terms ? new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', timeZone: terms.timeZone }).format(new Date(terms.startsAt)) : null;
-  return <article className="pf-event-row pf-surface-light">
-    <div className="pf-event-date" aria-hidden="true">{date ?? 'Date unavailable'}</div>
-    <div className="pf-event-row-content">
-      <h2>{isPublicEntityKey(event.projectRoot)
-        ? <Link href={routeHref({ name: 'event', projectRoot: event.projectRoot })}>{terms?.title ?? 'Event details unavailable'}</Link>
-        : terms?.title ?? 'Event details unavailable'}</h2>
-      {terms ? <><p className="pf-event-meta">{eventDate(terms)} <span>({terms.timeZone})</span></p><p>{eventFormatLabel(terms)}: {eventPlace(terms)}</p><p className="pf-event-meta">{eventRegistrationLabel(terms)}</p>{terms.registration?.deadline != null && <p className="pf-event-meta">Register by {formatDateTime(terms.registration.deadline, terms.timeZone)}</p>}
-        {terms.description && <p className="pf-event-description">{terms.description}</p>}</> : <p>The original page may have expired or become unavailable. Open the record to check its status.</p>}
-      <div className="pf-event-title-status"><EventStatus status={status} />{isTestEventTerms(terms) && <StatusLabel tone="neutral">TEST EVENT</StatusLabel>}</div>
+  return <article className="pf-event-card pf-surface-light">
+    <EventCoverFrame terms={terms} verified={status !== 'unverified'} />
+    <div className="pf-event-card-content">
+      <h2>{terms?.title ?? 'Event details unavailable'}</h2>
+      {terms ? <><EventQuickFacts terms={terms} />{terms.description && <p className="pf-event-description">{terms.description}</p>}</>
+        : <p>The visitor page is unavailable. Open the event to check its current record.</p>}
+      <div className="pf-event-card-outcome"><EventStatus status={status} />{terms && <p>{eventAdmissionLabel(terms)}</p>}</div>
+      {isPublicEntityKey(event.projectRoot) && <Link className="pf-button pf-button--primary pf-event-open" href={routeHref({ name: 'event', projectRoot: event.projectRoot })} aria-label={`View ${terms?.title ?? 'event details'}`}>View event</Link>}
     </div>
-    {isPublicEntityKey(event.projectRoot) && <Link className="pf-event-open" href={routeHref({ name: 'event', projectRoot: event.projectRoot })} aria-label={`View ${terms?.title ?? 'event details'}`}>View event</Link>}
   </article>;
 }
 

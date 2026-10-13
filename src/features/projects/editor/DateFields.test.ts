@@ -17,8 +17,8 @@ describe('date entry preserves unfinished imported values', () => {
   });
   it('keeps a saved zone and readable native choices without rewriting its identity', () => {
     const options = timeZoneOptions('US/Eastern');
-    expect(options).toContainEqual({ value: 'US/Eastern', label: 'Eastern, US' });
-    expect(options).toContainEqual({ value: 'America/New_York', label: 'New York, America' });
+    expect(options).toContainEqual(expect.objectContaining({ value: 'US/Eastern', label: 'Eastern, US' }));
+    expect(options).toContainEqual(expect.objectContaining({ value: 'America/New_York', label: 'New York, America' }));
     expect(new Set(options.map(option => option.value)).size).toBe(options.length);
   });
 });

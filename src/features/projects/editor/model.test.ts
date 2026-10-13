@@ -1,10 +1,55 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectRecipe, RecipeTemplate, Requirement } from '../../../domain/types';
 import {
-  addRequirement, addVariant, copyVariant, editorDraftToRecipe, isEditorDraft,
+  addRequirement, addVariant, copyVariant, createEventEditorDraft, editorDraftToRecipe, eventDetailsReady, isEditorDraft,
   recipeToEditorDraft, removeRequirement, removeVariant, templateToEditorDraft,
-  updateRequirement, validateEditorDraft,
+  updateRequirement, updateVariantSchedule, validateEditorDraft, variantSchedule,
 } from './model';
+
+describe('event creation schedule', () => {
+  it('starts with visible scheduling fields without inventing a date or a contribution', () => {
+    const draft = createEventEditorDraft('Europe/London', 'main-date');
+    expect(draft.variants).toHaveLength(1);
+    expect(variantSchedule(draft.variants[0]!)).toMatchObject({ startLocal: '', endLocal: '' });
+    expect(draft.variants[0]!.requirements).toEqual([]);
+    expect(eventDetailsReady(draft)).toBe(false);
+    expect(isEditorDraft(draft)).toBe(true);
+  });
+
+  it('carries the chosen schedule into a need while keeping independent setup times', () => {
+    let draft = createEventEditorDraft('UTC', 'main-date');
+    draft = { ...draft, title: 'Bicycle repair workshop', outcome: 'Learn to repair a bicycle' };
+    draft = updateVariantSchedule(draft, 'main-date', { startLocal: '2026-11-07T10:00', endLocal: '2026-11-07T12:00' });
+    expect(eventDetailsReady(draft)).toBe(true);
+    expect(validateEditorDraft(draft).valid).toBe(false);
+    draft = addRequirement(draft, 'main-date', 'host');
+    draft = addRequirement(draft, 'main-date', 'setup');
+    draft = updateRequirement(draft, 'main-date', 'host', { title: 'Host', capability: 'hosting' });
+    draft = updateRequirement(draft, 'main-date', 'setup', { title: 'Prepare the room', capability: 'setup', startLocal: '2026-11-07T09:00', endLocal: '2026-11-07T09:30' });
+    draft = updateVariantSchedule(draft, 'main-date', { endLocal: '2026-11-07T13:00' });
+    expect(draft.variants[0]!.requirements[0]).toMatchObject({ startLocal: '2026-11-07T10:00', endLocal: '2026-11-07T13:00' });
+    expect(draft.variants[0]!.requirements[1]).toMatchObject({ startLocal: '2026-11-07T09:00', endLocal: '2026-11-07T09:30' });
+    draft.variants[0]!.venueId = 'Workshop room';
+    const recipe = editorDraftToRecipe(draft);
+    expect(recipe).not.toBeNull();
+    expect(recipe!.variants[0]).not.toHaveProperty('schedule');
+    expect(recipe!.variants[0]!.requirements[0]!.interval).toEqual({ start: Date.UTC(2026, 10, 7, 10), end: Date.UTC(2026, 10, 7, 13) });
+  });
+
+  it('keeps unfinished input recoverable and asks which repeated clock time to use', () => {
+    let draft = { ...createEventEditorDraft('Europe/London', 'main-date'), title: 'Autumn gathering', outcome: 'Meet the neighborhood' };
+    draft = updateVariantSchedule(draft, 'main-date', { startLocal: '2026-10-25T01:30', endLocal: '2026-10-25T02:30' });
+    expect(eventDetailsReady(draft)).toBe(false);
+    expect(validateEditorDraft(draft).errors['variants[0].schedule.startLocal']).toContain('occurs twice');
+    draft = updateVariantSchedule(draft, 'main-date', { startDisambiguation: 'earlier' });
+    expect(eventDetailsReady(draft)).toBe(true);
+    draft = updateVariantSchedule(draft, 'main-date', { endLocal: 'not finished' });
+    const restored = JSON.parse(JSON.stringify(draft));
+    expect(isEditorDraft(restored)).toBe(true);
+    expect(restored.variants[0].schedule.endLocal).toBe('not finished');
+    expect(eventDetailsReady(restored)).toBe(false);
+  });
+});
 
 function requirement(id: string, dependsOn: string[] = []): Requirement {
   const hourOffset = id === 'record' ? 2 : id === 'pack' ? 4 : 0;

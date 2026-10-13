@@ -9,7 +9,7 @@ export interface RuntimeOptions { repository?: Repository | null; storage?: Stor
 /** Studio and Desk each create their own runtime. No router, storage or repository singleton. */
 export function createAppRuntime({ repository = null, storage = null, namespace = 'partfolk:studio', now = Date.now }: RuntimeOptions = {}) {
   return {
-    repository, now, session: createSessionStore({ storage, namespace }),
+    repository, storage, now, session: createSessionStore({ storage, namespace }),
     copy: createCopyRegistry({ shell: shellCopy }),
     drafts: <T,>(id: string, kind: string, validate: Validator<T>) => {
       if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(id)) throw new TypeError('Invalid draft identity.');

@@ -57,10 +57,10 @@ export function ResolveContributionConflict({ publisher, onRefresh }: { publishe
     try {
       const current = await runtime.repository.loadPublisher(publisher.root.key);
       if (!current.ok) throw new Error('Your contribution could not be refreshed. The copies have been kept.');
-      const actor = runtime.session.getSnapshot().actor;
-      if (!actor || !sameActor(actor, preview.actor)) throw new Error('The account changed. Review these choices with the owner account.');
+      const sessionNow = runtime.session.getSnapshot(), currentAuthority = writeAuthority(sessionNow.actor, sessionNow.mode, sessionNow.chainId);
+      if (!currentAuthority || !sameActor(currentAuthority.actor, preview.actor)) throw new Error('The account changed. Review these choices with the owner account.');
       // Revalidate the reviewed choices against the complete fresh head set before freezing the send command.
-      const checked = prepareConflictCommand(current.value, authority, { ...preview.input, now: runtime.now() });
+      const checked = prepareConflictCommand(current.value, currentAuthority, { ...preview.input, now: runtime.now() });
       if (!checked.ok) { setProblems(checked.reasons); throw new Error('The contribution changed or these choices no longer fit. Close this review and refresh before trying again.'); }
       // A deadline crossing between preview and send also changes the records retained by the merge.
       if (resolutionReviewContent(checked.command.book, preview.input.operationId) !== resolutionReviewContent(preview.command.book, preview.input.operationId)) throw new Error('A promise changed since this review. Refresh and review the combined contribution again.');
@@ -72,16 +72,15 @@ export function ResolveContributionConflict({ publisher, onRefresh }: { publishe
   return <section className="pf-stack">
     <h3>Resolve competing copies</h3>
     <p>{heads.length} copies of this contribution are saved. Choose the offers to use from now on. Work reports, equipment custody and active promises from every copy will be kept.</p>
-    <div className="pf-stack pf-stack--compact">{heads.map(head => <details key={head.key}>
-      <summary>{headName(head.key)}: {head.payload.name}, saved {formatDateTime(head.payload.createdAt, 'UTC')} UTC</summary>
+    <div className="pf-conflict-copies">{heads.map(head => <article key={head.key} className={`pf-conflict-copy pf-stack${availability === head.key ? ' is-selected' : ''}`}>
+      <header className="pf-stack pf-stack--compact"><h4>{headName(head.key)}: {head.payload.name}</h4><p className="pf-secondary">Saved {formatDateTime(head.payload.createdAt, 'UTC')} UTC</p>{owned && <Button variant={availability === head.key ? 'primary' : 'secondary'} aria-pressed={availability === head.key} disabled={pending} onClick={() => { setAvailability(head.key); setPreview(null); }}>{availability === head.key ? 'Selected offer copy' : `Use offers from ${headName(head.key).toLowerCase()}`}</Button>}</header>
       <ContributionPreview draft={head.payload} />
       <p>{head.payload.grants.filter(grant => grant.validUntil > publisher.snapshot.blockTimestamp).length} active promises. {head.payload.custodyHolds.filter(hold => hold.status === 'outstanding').length} unresolved equipment holds.</p>
-      <details><summary>Record identifier</summary><p className="pf-contribution-identity">{head.key}</p></details>
-    </details>)}</div>
+      <details><summary>Advanced</summary><p className="pf-contribution-identity">Record: {head.key}</p></details>
+    </article>)}</div>
     {!owned && <p>Only the contribution owner can resolve these copies.</p>}
     {owned && <>
-      <Select label="Offers to use from now on" value={availability} disabled={pending} onChange={event => { setAvailability(event.target.value); setPreview(null); }}
-        options={[{ value: '', label: 'Choose a copy after reviewing its offers' }, ...heads.map(head => ({ value: head.key, label: `${headName(head.key)}: ${head.payload.name}` }))]} />
+      {!selected && <p>Compare the offers above and choose which copy to use from now on.</p>}
       {review.decisions.length > 0 && <section className="pf-stack"><h4>Project promises</h4>{review.decisions.map(group => <div className="pf-stack pf-stack--compact" key={group.key}>
         <Link href={routeHref({ name: 'project', projectRoot: group.source.projectRoot, tab: 'agreement' })}>Read this project’s agreement</Link>
         {group.liveGrants.flatMap(grant => grant.allocations.map(allocation => <p key={`${grant.id}:${allocation.id}`}>{allocation.quantity} {allocation.unit}, {intervalText(allocation.interval)}</p>))}
@@ -90,8 +89,8 @@ export function ResolveContributionConflict({ publisher, onRefresh }: { publishe
           options={[...(group.records.length > 1 ? [{ value: '', label: 'Choose a decision' }] : []), ...group.records.map(record => ({ value: record.headKey, label: `${record.decision.status === 'accepted' ? 'Keep recorded approval' : record.decision.status === 'declined' ? 'Keep recorded decline' : 'Keep recorded withdrawal'} from ${headName(record.headKey)}` })), { value: 'withdraw', label: 'Withdraw this plan’s promises now' }]} />
         {decisions[group.key] === 'withdraw' && <Textarea label="Reason for withdrawing" value={reasons[group.key] ?? ''} onChange={event => setReasons(previous => ({ ...previous, [group.key]: event.target.value }))} hint="This reason will be visible to the project. Equipment custody is kept." />}
       </div>)}</section>}
-      {selected && review.resources.some(group => group.records.length > 1) && <details><summary>Review resource capacities</summary><div className="pf-stack">{review.resources.filter(group => group.records.length > 1).map(group => <Select key={group.id} label={group.records[0]!.resource.name} value={resources[group.id] ?? ''} onChange={event => setResources(previous => ({ ...previous, [group.id]: event.target.value }))}
-        options={[{ value: '', label: 'Use the selected offer copy when available' }, ...group.records.map(record => ({ value: record.headKey, label: `${headName(record.headKey)}: ${record.resource.capacity} ${record.resource.unit}` }))]} />)}</div></details>}
+      {selected && review.resources.some(group => group.records.length > 1) && <section className="pf-stack"><h4>Check resource capacities</h4><p>The copies give different resource details. Choose the quantities you can provide while keeping existing promises.</p><div className="pf-contribution-fields">{review.resources.filter(group => group.records.length > 1).map(group => <Select key={group.id} label={group.records[0]!.resource.name} value={resources[group.id] ?? ''} disabled={pending} onChange={event => setResources(previous => ({ ...previous, [group.id]: event.target.value }))}
+        options={[{ value: '', label: 'Use the selected offer copy when available' }, ...group.records.map(record => ({ value: record.headKey, label: `${headName(record.headKey)}: ${record.resource.capacity} ${record.resource.unit}` }))]} />)}</div></section>}
       <Reasons reasons={problems} />
       {problems.some(reason => reason.path === 'attestations' || reason.path === 'custodyHolds') && <p>The copies disagree about the contents of the same work or custody statement. They cannot be combined safely here. No statement or return will be guessed.</p>}
       {error && <Notice tone="danger" role="alert">{error}</Notice>}

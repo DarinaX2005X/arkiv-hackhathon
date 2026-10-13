@@ -11,7 +11,7 @@ export function DemoRoute({ controls, onReset, ...slots }: RouteViewProps & Proj
   return <div className="pf-stack">
     <ProjectPage key={generation} projectRoot={SMALL_WORKS_PROJECT_ROOT} tab="plans" practice {...slots} guidance={<>
       {controls}
-      <details><summary>About this practice project</summary><div className="pf-stack"><p>The display boards and installation kit are already at the venue. Someone brings artworks while two people install the displays. One person cannot do both jobs at the same time.</p><div className="pf-actions"><Link href={routeHref({ name: 'contributions' })}>Offer help with this project</Link><Link href={routeHref({ name: 'new-project' })}>Start my own project</Link>{onReset && <Button variant="quiet" onClick={() => setResetOpen(true)}>Reset practice</Button>}</div></div></details>
+      <section className="pf-stack"><h2>Try planning an exhibition</h2><p>The display boards and installation kit are already at the venue. Someone brings artworks while two people install the displays. One person cannot do both jobs at the same time.</p><div className="pf-actions"><Link href={routeHref({ name: 'contributions', projectRoot: SMALL_WORKS_PROJECT_ROOT })}>Try offering help in practice</Link><Link href={routeHref({ name: 'new-project' })}>Start my own project</Link>{onReset && <Button variant="quiet" onClick={() => setResetOpen(true)}>Reset practice</Button>}</div></section>
       {error && <Notice tone="warning">{error}</Notice>}
     </>} />
     <Dialog open={resetOpen} title="Reset this practice?" closeLabel="Keep this practice" onClose={() => setResetOpen(false)} footer={<Button disabled={resetting} onClick={async () => {

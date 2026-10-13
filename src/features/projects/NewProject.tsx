@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
 import type { RouteViewProps } from '../../app/App';
-import { routeHref } from '../../app/routes';
+import { routeHref, routePath } from '../../app/routes';
 import { formatDateTime } from '../../app/time';
 import { createOperationIntent } from '../../data/operations';
 import type { CreateProjectCommand } from '../../data/types';
 import type { ProjectAggregate } from '../../domain/types';
 import { Button, Checkbox, Dialog, Link, Notice } from '../../ui';
 import { RecipeEditor, validateEditorDraft } from './editor';
+import { eventDetailsReady } from './editor/model';
 import { createProjectDrafts, DraftChangedError, draftScope, downloadText, type SavedProjectDraft } from './drafts';
 import { newProjectDraftForSharing, openNewProjectDraft, saveNewProjectDraft, startNewProjectDraft } from './draft-session';
 import { authorityFor, PROJECT_LIFETIME_SECONDS } from './selectors';
@@ -28,9 +29,12 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   const mounted = useRef(true), activeDraft = useRef(draft.id);
   activeDraft.current = draft.id;
   const [review, setReview] = useState(false), [publicAcknowledged, setPublicAcknowledged] = useState(false);
+  const [step, setStep] = useState<'event' | 'needs'>('event');
   const action = useRepositoryAction(`project-create:${draft.id}`);
   const validation = validateEditorDraft(draft.editor), authority = authorityFor(session.actor, session.mode, session.chainId);
   const ownerChanged = draft.scope !== currentScope;
+  const detailsReady = eventDetailsReady(draft.editor);
+  const signInHref = routeHref({ name: 'sign-in', returnTo: routePath({ name: 'new-project' }) });
   const waiting = action.state.status === 'submitting' || action.state.status === 'needs-verification';
   const [openError, setOpenError] = useState<string | null>(null);
   const save = (next: SavedProjectDraft) => {
@@ -81,7 +85,7 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   };
   const submit = async (command?: CreateProjectCommand) => {
     if (action.state.status === 'confirmed') return;
-    if (!ownsCurrentDraft() || !authority || (!command && !validation.recipe)) return;
+    if (session.mode !== 'public' || !ownsCurrentDraft() || !authority || (!command && !validation.recipe)) return;
     const origin = structuredClone(draft);
     const input = { recipe: validation.recipe!, lifetimeSeconds: PROJECT_LIFETIME_SECONDS };
     const next = command ?? { ...input, operation: createOperationIntent('create_project', authority, input, { now: runtime.now() }) };
@@ -104,26 +108,28 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
     setOpenError('The original publication is confirmed, but its project could not be read yet. Check it again; this form will not create a second project.');
   };
   return <div className="pf-stack project-create">
-    <header className="project-heading"><div><h1>Create a project</h1><p>A workshop, an online talk or a gathering in your neighborhood. Describe your event and the help that will make it happen.</p></div><Link href={routeHref({ name: 'workspace' })}>My projects</Link></header>
-    <ol className="project-steps" aria-label="Project creation"><li><span>1</span>Describe the event</li><li><span>2</span>Add dates and help</li><li><span>3</span>Review and share</li></ol>
+    <header className="project-heading"><div><h1>Create your event project</h1><p>Set the date and bring together the help you need. Your project is created publicly on Arkiv with your wallet.</p></div><Link href={routeHref({ name: 'workspace' })}>My projects</Link></header>
+    <nav className="project-creation-nav" aria-label="Project creation"><ol className="project-steps"><li aria-current={step === 'event' ? 'step' : undefined}><Button variant={step === 'event' ? 'primary' : 'quiet'} onClick={() => setStep('event')}>Event and date</Button></li><li aria-current={step === 'needs' ? 'step' : undefined}><Button variant={step === 'needs' ? 'primary' : 'quiet'} disabled={!detailsReady} onClick={() => setStep('needs')}>Place and help</Button></li><li>Review and create</li></ol></nav>
     {ownerChanged && <Notice tone="warning" title="This draft belongs to another account context"><p>Your original input is retained. Reconnect its account to continue editing or publishing. Connecting a different account does not transfer this draft.</p><Button variant="secondary" onClick={() => { const next = startNewProjectDraft(runtime); setDraftSession(next); runtime.session.selectDraft(next.draft.id); setOpenError(null); }}>Start a separate draft in this account</Button></Notice>}
     {!saveStatus.persisted && <Notice tone="warning">{copy.memoryOnly}</Notice>}
     {store.exportRecovery() !== null && <Notice tone="warning" title="Saved drafts need recovery"><p>The unreadable data is preserved and has not been replaced.</p><Button variant="secondary" onClick={() => downloadText('partfolk-drafts-recovery.txt', store.exportRecovery()!, 'text/plain')}>Export original data</Button></Notice>}
     {draftSession.recoveryText !== null && <Notice tone="warning" title="The saved draft location needs recovery"><p>The original location data is preserved. Export it before closing this page.</p><Button variant="secondary" onClick={() => downloadText('partfolk-draft-location-recovery.txt', draftSession.recoveryText!, 'text/plain')}>Export original draft location</Button></Notice>}
     <RecipeEditor value={validation.recipe ?? { title: '', outcome: '', timeZone: draft.editor.timeZone, variants: [], instructions: '' }} draft={draft.editor}
-      onDraftChange={editor => save({ ...draft, editor, updatedAt: runtime.now() })} onChange={() => {}} disabled={waiting || ownerChanged} />
-    <div className="pf-sheet pf-stack"><h2>Review your project</h2><p>{session.mode === 'public' ? 'Publishing lets contributors read your event details and offer their help.' : 'Keep preparing on this device or review a public copy to invite contributors.'}</p><div className="project-form-actions">
+      onDraftChange={editor => save({ ...draft, editor, updatedAt: runtime.now() })} onChange={() => {}} disabled={waiting || ownerChanged} section={step} />
+    <div className="pf-sheet pf-stack project-create-continuation"><h2>{step === 'event' ? 'Next, bring the plan together' : 'Create a shared starting point'}</h2><p>{step === 'event' ? 'Choose the place and describe at least one contribution. Contributors will offer their help and decide on the complete plan.' : 'Contributors can read the public project and offer help. After everyone agrees, you can publish the visitor page and open registration.'}</p><div className="project-form-actions">
+      {step === 'event' && <Button onClick={() => setStep('needs')} disabled={!detailsReady || waiting || ownerChanged}>Continue to place and help</Button>}
+      {step === 'needs' && <Button variant="secondary" onClick={() => setStep('event')}>Back to event and date</Button>}
       {session.mode === 'local' && onShareDraft && <Button onClick={() => {
         if (waiting || !ownsCurrentDraft()) return;
         const shared = newProjectDraftForSharing(runtime, draft);
         if (shared) onShareDraft(shared);
       }} disabled={!validation.valid || ownerChanged || waiting}
-        disabledReason={!validation.valid ? 'Complete the marked fields before sharing. Your draft is retained.' : ownerChanged ? 'Reconnect the account that owns this draft.' : undefined}>Share with contributors</Button>}
-      <Button variant="secondary" disabled={ownerChanged || waiting} onClick={() => save({ ...draft, updatedAt: runtime.now() })}>{copy.saveDraft}</Button>
-      <Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>{copy.exportDraft}</Button>
-      <Button variant={session.mode === 'local' && onShareDraft ? 'secondary' : 'primary'} onClick={() => { if (ownsCurrentDraft()) setReview(true); }} disabled={ownerChanged || !validation.valid || waiting || action.state.status === 'confirmed' || !runtime.repository || !authority} disabledReason={ownerChanged ? 'Reconnect the account that owns this draft.' : !authority ? session.mode === 'public' ? 'Connect your wallet on Tiramisu to publish. Your draft is retained.' : 'Choose your local organizer context to create a local project.' : !validation.valid ? 'Complete the marked fields first.' : undefined}>{session.mode === 'public' ? 'Review public project' : 'Create local project'}</Button>
+        disabledReason={!validation.valid ? 'Complete the marked fields before sharing. Your input is retained.' : ownerChanged ? 'Reconnect the account that owns this draft.' : undefined}>Continue as a public project</Button>}
+      {step === 'needs' && session.mode === 'public' && <Button onClick={() => { if (ownsCurrentDraft()) setReview(true); }} disabled={ownerChanged || !validation.valid || waiting || action.state.status === 'confirmed'}>Review public project</Button>}
     </div>
-    <p className="project-create-status" role="status">{saveStatus.persisted ? copy.saved : copy.memoryOnly}</p></div>
+    {step === 'event' && !detailsReady && <p className="pf-field-message">Add the event name, purpose, start and end before continuing.</p>}
+    {step === 'needs' && !validation.valid && <p className="pf-field-message">Complete the marked details before reviewing the public project.</p>}
+    <p className="project-create-status" role="status">{saveStatus.persisted ? 'Your unfinished input is saved automatically on this device. Nothing is published until you confirm with your wallet.' : copy.memoryOnly}</p></div>
     <ActionFeedback state={action.state} action={action} onReconcile={() => { void checkOriginal(); }} onResume={action.recoverableCommand ? () => { void submit(action.recoverableCommand as CreateProjectCommand); } : undefined} />
     {action.state.status === 'confirmed' && draft.projectRoot === null && <Button variant="secondary" disabled={ownerChanged || !authority} onClick={() => { void checkOriginal(); }}>Open the confirmed project</Button>}
     {openError && <Notice tone="warning"><p>{openError}</p>{!ownerChanged && <div className="pf-actions"><Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>Export my open copy</Button><Button variant="secondary" disabled={waiting} onClick={() => {
@@ -134,13 +140,14 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
       } catch (error) { setOpenError(error instanceof Error ? error.message : 'The saved draft could not be read. Your open copy is retained.'); }
     }}>Reload saved draft</Button></div>}</Notice>}
     <Link href={routeHref({ name: 'workspace' })}>Return to My projects</Link>
-    <Dialog open={review && !ownerChanged} title={session.mode === 'public' ? copy.publicPreview : 'Create this local project'} closeLabel="Keep editing" onClose={() => setReview(false)} footer={<Button onClick={() => { void submit(); }} disabled={ownerChanged || !validation.valid || !authority || waiting || action.state.status === 'confirmed' || (session.mode === 'public' && !publicAcknowledged)}>{session.mode === 'public' ? 'Publish project' : 'Create local project'}</Button>}>
+    <details className="project-recovery-tools"><summary>Advanced: input recovery</summary><p>Keep a backup of this unfinished input or recover it after a storage problem.</p><Button variant="secondary" onClick={() => downloadText('partfolk-project-draft.json', store.exportDraft(draft))}>Export input backup</Button></details>
+    <Dialog open={review && !ownerChanged} title={copy.publicPreview} closeLabel="Keep editing" onClose={() => setReview(false)} footer={authority && session.mode === 'public' ? <Button onClick={() => { void submit(); }} disabled={ownerChanged || !validation.valid || waiting || action.state.status === 'confirmed' || !publicAcknowledged}>Create public project</Button> : <Link className="pf-button pf-button--primary" href={signInHref} onClick={() => setReview(false)}>Sign in to create public project</Link>}>
       <div className="pf-stack"><h3>{draft.editor.title}</h3><p>{draft.editor.outcome}</p><p>{draft.editor.variants.length} date and place options. Project time zone: {draft.editor.timeZone}.</p>
-        <p>{session.mode === 'public' ? copy.publicNote : 'This creates a project in your local workspace. Other people have not offered or accepted anything.'}</p>
+        <p>{copy.publicNote}</p>
         <p>Acting as: {session.actor?.kind === 'wallet' ? session.actor.address : session.actor?.id ?? 'No account selected'}</p>
-        {validation.recipe?.variants.map(variant => <section className="pf-sheet pf-stack" key={variant.id}><h3>{variant.title}</h3><p>Place option: {variant.venueId}. Time zone: {variant.timeZone}.</p><ul>{variant.requirements.map(requirement => <li key={requirement.id}><strong>{requirement.title}</strong><p>{requirement.quantity} {requirement.unit}</p><p>{formatDateTime(requirement.interval.start, variant.timeZone)} – {formatDateTime(requirement.interval.end, variant.timeZone)}</p><p>Capability: {requirement.capability}</p>{requirement.instructions && <p>{requirement.instructions}</p>}</li>)}</ul>{variant.instructions && <p>{variant.instructions}</p>}</section>)}
+        {validation.recipe?.variants.map(variant => <section className="pf-sheet pf-stack" key={variant.id}><h3>{variant.title}</h3><p>Place option: {variant.venueId}. Time zone: {variant.timeZone}.</p><ul>{variant.requirements.map(requirement => <li key={requirement.id}><strong>{requirement.title}</strong><p>{requirement.quantity} {requirement.unit}</p><p>{formatDateTime(requirement.interval.start, variant.timeZone)} to {formatDateTime(requirement.interval.end, variant.timeZone)}</p><p>Skill or use: {requirement.capability}</p>{requirement.dependsOn.length > 0 && <p>Starts after: {requirement.dependsOn.map(id => variant.requirements.find(item => item.id === id)?.title ?? id).join(', ')}</p>}{requirement.instructions && <p>{requirement.instructions}</p>}</li>)}</ul>{variant.instructions && <p>{variant.instructions}</p>}</section>)}
         {validation.recipe?.instructions && <p>Instructions for everyone: {validation.recipe.instructions}</p>}
-        {session.mode === 'public' && <Checkbox label="I have reviewed these public details and the connected account." checked={publicAcknowledged} onChange={event => setPublicAcknowledged(event.target.checked)} />}
+        {authority ? <Checkbox label="I have reviewed these public details and the connected account." checked={publicAcknowledged} onChange={event => setPublicAcknowledged(event.target.checked)} /> : <p>Sign in with your wallet to create this project. Your input stays here while you connect.</p>}
       </div>
     </Dialog>
   </div>;

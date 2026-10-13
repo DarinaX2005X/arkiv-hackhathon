@@ -9,8 +9,10 @@ import type { InjectedWalletProvider } from '../data/wallet/types';
 import { COORDINATOR, KEYS, NOW, PUBLISHER, entityKey, readyFixture } from '../data/__tests__/arkiv-fixture';
 import { TIRAMISU_CHAIN_ID } from '../domain/types';
 import { WALLET_SESSION_KEY, type WalletSessionChannel, type WalletSessionMessage } from '../features/account/wallet-session';
+import { contributionDrafts, visitorDraftFingerprint } from '../features/contributions/drafts';
+import { startDraftContribution } from '../features/contributions/model';
 import { createDeskNavigation } from './navigation';
-import { deskPath, invitationStatus, parseDeskRoute, parsePublicTarget } from './routes';
+import { deskPath, deskSessionRoute, invitationStatus, parseDeskRoute, parsePublicTarget } from './routes';
 
 function memoryStorage(): StoragePort {
   const values = new Map<string, string>();
@@ -39,6 +41,10 @@ describe('Partner Desk invitation boundary', () => {
     }
     expect(parseDeskRoute('#/requests')).toEqual({ name: 'requests' });
     expect(parseDeskRoute('#/contributions')).toEqual({ name: 'contributions' });
+    expect(parseDeskRoute(`#/projects/${KEYS.project}/needs`)).toEqual({ name: 'project', projectRoot: KEYS.project, section: 'needs' });
+    const runSheet = parseDeskRoute(`#/projects/${KEYS.project}/runbook?activation=${KEYS.activation}`);
+    expect(parseDeskRoute(deskPath(runSheet))).toEqual(runSheet);
+    expect(deskSessionRoute(runSheet)).toEqual({ name: 'project', projectRoot: KEYS.project, tab: 'runbook' });
     expect(parsePublicTarget(KEYS.project, 'project')).toEqual({ name: 'project', projectRoot: KEYS.project, section: 'agreement' });
     expect(parsePublicTarget(KEYS.publisher, 'publisher')).toEqual({ name: 'publisher', publisherRoot: KEYS.publisher });
   });
@@ -49,6 +55,16 @@ describe('Partner Desk invitation boundary', () => {
     const offer = parseDeskRoute(`#/publishers/${KEYS.publisher}?offer=hall-weekday`);
     expect(offer).toEqual({ name: 'publisher', publisherRoot: KEYS.publisher, offerId: 'hall-weekday' });
     expect(parseDeskRoute(deskPath(offer))).toEqual(offer);
+  });
+  it('preserves a shared project in the offer editor and rejects unsafe return destinations', () => {
+    const route = parseDeskRoute(`#/contributions?projectRoot=${KEYS.project}&returnTo=${encodeURIComponent(`/projects/${KEYS.project}/needs`)}`);
+    expect(route).toEqual({ name: 'contributions', projectRoot: KEYS.project, returnTo: `/projects/${KEYS.project}/needs` });
+    expect(parseDeskRoute(deskPath(route))).toEqual(route);
+    expect(deskSessionRoute(route)).toEqual(route);
+    for (const input of [`#/contributions?projectRoot=local:example`, `#/contributions?projectRoot=${KEYS.project}&projectRoot=${KEYS.publisher}`,
+      `#/contributions?projectRoot=${KEYS.project}&returnTo=${encodeURIComponent('//outside.example')}`,
+      `#/contributions?projectRoot=${KEYS.project}&returnTo=${encodeURIComponent('/projects/local:example/needs')}`,
+      `#/contributions?projectRoot=${KEYS.project}&unknown=1`]) expect(parseDeskRoute(input), input).toEqual({ name: 'not-found' });
   });
   it('rejects local IDs, unsupported application routes, malformed and ambiguous inputs', () => {
     const invalid = ['#/projects/local:library/agreement', 'local:hall', '#/demo', '#/workspace', '#/projects/new', '#/%zz', 'javascript:alert(1)', '//evil.test/x',
@@ -101,6 +117,31 @@ function sessionChannels() {
 }
 
 describe('independent Desk runtime and invitation restoration', () => {
+  it('keeps unfinished guest offers and the invited project through the Desk wallet dialog handoff', async () => {
+    const storage = memoryStorage(); storage.setItem(WALLET_SESSION_KEY, JSON.stringify('signed-out'));
+    const wallet = fakeWallet(); const rpc = readyFixture().rpc;
+    const binding = createPublicRuntime({ storage, namespace: 'test:desk-handoff', provider: wallet.provider, request: rpc.request, now: () => NOW });
+    await binding.ready;
+    const route = parseDeskRoute(`#/contributions?projectRoot=${KEYS.project}&returnTo=${encodeURIComponent(`/projects/${KEYS.project}/needs`)}`);
+    binding.runtime.session.navigate(deskSessionRoute(route));
+    const drafts = contributionDrafts(binding.runtime);
+    const entered = startDraftContribution({ name: 'Oak', description: 'Loan a display kit', resources: [], offers: [] }, { kind: 'equipment', publisherKind: 'individual', id: 'kit' });
+    entered.editorWindows!['resource:resource-kit']![0]!.start = 'unfinished';
+    expect(drafts.session(null, 'new').update(entered)).toBe(true);
+    const visitor = drafts.getVisitorSnapshot().value!;
+    expect(visitor.destination).toBe(deskPath(route));
+    expect(await binding.connect()).toBe(true);
+    expect(binding.runtime.session.getSnapshot().destination).toBe(deskPath(route));
+    const actor = binding.runtime.session.getSnapshot().actor!;
+    expect(drafts.session(actor, 'new').getSnapshot().exists).toBe(false);
+    expect(drafts.adoptVisitor({ fingerprint: visitorDraftFingerprint(visitor), replaceExisting: false, replaceRecovery: false, pending: false })).toEqual({ ok: true });
+    expect(drafts.session(actor, 'new').getSnapshot()).toMatchObject({ saved: true, draft: entered });
+    binding.runtime.session.setAccount({ kind: 'wallet', address: COORDINATOR }, TIRAMISU_CHAIN_ID);
+    expect(drafts.session(binding.runtime.session.getSnapshot().actor, 'new').getSnapshot().exists).toBe(false);
+    expect(drafts.getVisitorSnapshot().value).toMatchObject({ owner: PUBLISHER, phase: 'adopted' });
+    expect(wallet.calls.some(method => /send|sign/i.test(method))).toBe(false);
+    binding.dispose();
+  });
   it('restores each client from its own live provider and keeps invitations through sign-out and reload', async () => {
     const storage = memoryStorage(); const deskWallet = fakeWallet(); const studioWallet = fakeWallet(COORDINATOR); const rpc = readyFixture().rpc;
     const channels = sessionChannels();

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
   <title id="title">Owner-authorized writes, independent public reads</title>
-  <desc id="desc">Each organizer, contributor and visitor uses their own wallet to authorize writes to Arkiv. Solid arrows run from the owners to shared public records. Dashed arrows run from Arkiv to Partfolk, the independently built Partner Desk and the read-only project verifier, showing data read directly by each client. The clients verify authorship and exact versions without a shared Partfolk application database.</desc>
+  <desc id="desc">Each organizer, contributor and visitor uses their own wallet to authorize writes to Arkiv. Solid arrows run from the owners to shared public records. Dashed arrows connect those records to Partfolk, the independently built Partner Desk and the read-only project verifier. Hosted reads pass through a read-only relay; independent clients can use direct RPC. The clients verify authorship and exact versions without a shared Partfolk application database.</desc>
   <defs>
     <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#173d30"/><stop offset="1" stop-color="#0b2b20"/></linearGradient>
     <marker id="write-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1L8 5L1 9" fill="none" stroke="#c9e99b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>

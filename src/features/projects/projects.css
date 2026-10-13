@@ -21,6 +21,12 @@
 .project-tabs a[aria-current='page'] { color: var(--brand-ink); border-color: var(--action); background: var(--selected-surface); }
 .project-plan ul, .project-plan ol { padding-left: var(--space-6); }
 .project-plan header > p { margin-top: var(--space-2); }
+.project-run-sheet { display: grid; gap: var(--space-5, 20px); }
+.project-run-sheet li > p { margin-top: var(--space-1, 4px); }
+.project-preferences, .project-offer-terms { border-top: 1px solid var(--border-quiet); padding-top: var(--space-5, 20px); }
+.project-offer-terms h4 { font-size: 1rem; }
+.project-offer-terms ul { margin: var(--space-2) 0 0; padding-left: var(--space-5, 20px); }
+.project-recovery > .pf-actions { align-items: flex-start; }
 .project-transfer { display: grid; gap: var(--space-3); }
 .project-transfer-form { padding-top: var(--space-4); }
 .project-page details > summary, .project-workspace details > summary { min-height: 44px; padding-block: var(--space-3); cursor: pointer; font-weight: 500; }
@@ -61,7 +67,15 @@
 .project-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .project-next p { color: var(--text-secondary); margin-top: var(--space-2); max-width: 65ch; }
 .project-create-status { color: var(--text-secondary); font-size: .9rem; }
-.project-create .project-form-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.project-create .project-form-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3); }
+.project-create .project-form-actions > * { flex: 0 1 auto; align-self: flex-start; }
+.project-creation-nav .project-steps { align-items: center; }
+.project-recovery-tools { padding: var(--space-4); }
+.project-recovery-tools > p { margin-block: var(--space-3); }
+.project-recovery-list { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; gap: var(--space-5); }
+.project-recovery-list > li { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-start; justify-content: space-between; }
+.project-recovery-list > li > div:first-child { flex: 1 1 16rem; min-width: 0; }
+.project-recovery-list h3 { font-size: 1.1rem; }
 .project-page :is(h1, h2, h3, p), .project-create :is(h1, h2, h3, p) { overflow-wrap: anywhere; }
 .project-steps { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); list-style: none; margin: 0; padding: 0; color: var(--text-secondary); }
 .project-steps li { display: inline-flex; align-items: center; gap: var(--space-2); }
