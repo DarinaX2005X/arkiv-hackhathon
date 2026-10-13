@@ -16,6 +16,7 @@ import { activeSource } from '../../src/domain/readiness';
 import type { EntityPayload, PublicEntityKey } from '../../src/domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../src/domain/types';
 import type { ChildMessage, ParentMessage, ProcessResult, ProcessRole, ProcessStart } from './support/process-messages';
+import { WALLET_SESSION_KEY } from '../../src/features/account/wallet-session';
 
 /** Narrow deterministic native create/delete responses. No real RPC or signer. */
 function ledger(mode: 'withdraw' | 'publication' = 'withdraw') {
@@ -173,7 +174,7 @@ describe('independent public client processes with a deterministic RPC ledger', 
     const fixture = ledger();
     const initialStudio = await runClient('studio-read', fixture);
     expect(initialStudio.packet.readiness).toMatchObject({ status: 'ready', acceptedApprovers: [KEYS.publisher], reasons: [] });
-    expect(initialStudio.walletMethods).toEqual([]);
+    expect(initialStudio.walletMethods.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
     // runClient has awaited process exit. There is no running Studio service or private-storage bridge.
     const desk = await runClient('desk-withdraw', fixture);
     expect(desk.ownPublisherRoots).toEqual([KEYS.publisher]);
@@ -194,9 +195,10 @@ describe('independent public client processes with a deterministic RPC ledger', 
       }, payload: { grants: [], decisions: [expect.objectContaining({ status: 'withdrawn' })] } } });
     }
     expect(canonicalJson(restartedStudio.packet)).toBe(canonicalJson(cli.packet));
-    expect(restartedStudio.walletMethods).toEqual([]);
-    expect(cli.walletMethods).toEqual([]);
-    expect(desk.storageKeys.every(key => key.startsWith('partfolk:partner-desk:'))).toBe(true);
+    expect(restartedStudio.walletMethods.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
+    expect(cli.walletMethods.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
+    expect(desk.storageKeys.every(key => key.startsWith('partfolk:partner-desk:')
+      || key === WALLET_SESSION_KEY || key === 'partfolk:wallet-session:storage-check')).toBe(true);
     expect(fixture.sent).toHaveLength(1);
     for (const role of ['studio-read', 'desk-withdraw', 'cli-read'] as const) {
       expect(fixture.calls.some(call => call.role === role && call.method === 'arkiv_query')).toBe(true);

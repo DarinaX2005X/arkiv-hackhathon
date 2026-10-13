@@ -1,6 +1,6 @@
 import { Component, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { AppProvider, useApp, useAppSession, type AppRuntime } from './context';
-import { parseRoute, routeHref, type Route } from './routes';
+import { parseRoute, routeFromLocation, routeHref, type Route } from './routes';
 import { BrandMark, Button, EmptyState, ErrorState, LoadingState, Notice } from '../ui';
 import { workDestination } from '../features/account/account';
 
@@ -18,11 +18,10 @@ function HashNavigation() {
   const { session } = useApp();
   useEffect(() => {
     const read = () => {
-      session.navigate(parseRoute(window.location.hash));
+      session.navigate(routeFromLocation(window.location));
       document.getElementById('main-content')?.focus({ preventScroll: true });
     };
-    if (window.location.hash) session.navigate(parseRoute(window.location.hash));
-    else if (session.getSnapshot().destination !== '/') window.location.hash = session.getSnapshot().destination;
+    session.navigate(routeFromLocation(window.location));
     window.addEventListener('hashchange', read);
     return () => window.removeEventListener('hashchange', read);
   }, [session]);

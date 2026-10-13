@@ -4,6 +4,7 @@ import { createMemoryStorage } from '../../data/local';
 import { COORDINATOR, KEYS, NOW, PUBLISHER, readyFixture } from '../../data/__tests__/arkiv-fixture';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { InjectedWalletProvider, RpcRequest } from '../../data/wallet/types';
+import { WALLET_SESSION_KEY, type WalletSessionChannel, type WalletSessionMessage } from '../../features/account/wallet-session';
 
 type Event = 'accountsChanged' | 'chainChanged' | 'disconnect';
 function deferred<T>() {
@@ -20,6 +21,7 @@ class FakeProvider implements InjectedWalletProvider {
   accountResponse: Promise<unknown> | null = null;
   accountFailure: unknown = null;
   switchFailure: unknown = null;
+  passiveResponse: Promise<unknown> | null = null;
   async request(args: RpcRequest): Promise<unknown> {
     this.calls.push(structuredClone(args));
     if (args.method === 'eth_requestAccounts') {
@@ -27,7 +29,7 @@ class FakeProvider implements InjectedWalletProvider {
       return this.accountResponse ?? [...this.accounts];
     }
     if (args.method === 'wallet_switchEthereumChain') { if (this.switchFailure) throw this.switchFailure; return null; }
-    if (args.method === 'eth_accounts') return [...this.accounts];
+    if (args.method === 'eth_accounts') return this.passiveResponse ?? [...this.accounts];
     if (args.method === 'eth_chainId') return this.chain;
     throw new Error(`The fake provider prohibits ${args.method}`);
   }
@@ -64,8 +66,9 @@ describe('public runtime connection boundary without browser automation', () => 
     expect(result.value.root.key).toBe(KEYS.project);
     expect(result.value.snapshot.source).toBe('arkiv');
     expect(fixture.rpc.calls.some(call => call.method === 'arkiv_query')).toBe(true);
-    expect(provider.calls).toEqual([]);
-    expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ mode: 'public', actor: null, chainId: null });
+    await publicBinding.ready;
+    expect(provider.calls.map(call => call.method)).toEqual(['eth_accounts', 'eth_chainId']);
+    expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ mode: 'public', actor: { kind: 'wallet', address: COORDINATOR }, chainId: TIRAMISU_CHAIN_ID });
     publicBinding.dispose();
   });
 
@@ -93,23 +96,22 @@ describe('public runtime connection boundary without browser automation', () => 
     publicBinding.dispose();
   });
 
-  it('connects only on request and clears authority on each account/network/disconnect event before reconnecting', async () => {
+  it('clears stale authority immediately on wallet events, then passively reads changed accounts and networks', async () => {
     const provider = new FakeProvider();
     const { binding: publicBinding } = binding(provider);
     const { draft, destination } = retainWork(publicBinding.runtime);
     expect(await publicBinding.connect()).toBe(true);
     expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ actor: { kind: 'wallet', address: COORDINATOR }, chainId: TIRAMISU_CHAIN_ID });
-    expect(provider.listenerCount()).toBe(3);
+    expect(provider.listenerCount()).toBe(6);
     for (const event of ['accountsChanged', 'chainChanged', 'disconnect'] as const) {
       if (event === 'accountsChanged') provider.accounts = [PUBLISHER];
       provider.emit(event, event === 'accountsChanged' ? [PUBLISHER] : event === 'chainChanged' ? '0x1' : { code: 4900 });
       expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ actor: null, chainId: null, destination, activeDraftId: 'my-draft' });
-      expect(provider.listenerCount()).toBe(0);
-      expect(publicBinding.getSnapshot().error).toMatch(/reconnect/i);
+      expect(provider.listenerCount()).toBe(3);
       expect(draft.peek()).toEqual({ text: 'My contribution terms' });
       expect(await publicBinding.connect()).toBe(true);
       expect(publicBinding.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
-      expect(provider.listenerCount()).toBe(3);
+      expect(provider.listenerCount()).toBe(6);
     }
     expect(provider.calls.every(call => !call.method.includes('sendTransaction'))).toBe(true);
     publicBinding.dispose();
@@ -162,12 +164,13 @@ describe('public runtime connection boundary without browser automation', () => 
     const reconnect = publicBinding.connect();
     expect(publicBinding.getSnapshot().connecting).toBe(true);
     expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
-    expect(provider.listenerCount()).toBe(0);
+    expect(provider.listenerCount()).toBe(3);
     pending.reject(Object.assign(new Error('User cancelled'), { code: 4001 }));
     expect(await reconnect).toBe(false);
     const cancelled = publicBinding.getSnapshot().error;
     provider.emit('disconnect', { code: 4900 });
-    expect(publicBinding.getSnapshot().error).toBe(cancelled);
+    expect(cancelled).toMatch(/cancelled/i);
+    expect(publicBinding.getSnapshot().error).toMatch(/disconnected/i);
     expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ destination, activeDraftId: 'my-draft', actor: null, chainId: null });
     expect(draft.peek()).toEqual({ text: 'My contribution terms' });
     publicBinding.dispose();
@@ -187,7 +190,7 @@ describe('public runtime connection boundary without browser automation', () => 
     expect(await connect).toBe(false);
     expect(publicBinding.runtime.session.getSnapshot()).toMatchObject({ destination, activeDraftId: 'my-draft', actor: null, chainId: null });
     expect(publicBinding.getSnapshot().connecting).toBe(false);
-    expect(provider.listenerCount()).toBe(0);
+    expect(provider.listenerCount()).toBe(cancel === 'dispose' ? 0 : 3);
     expect(draft.peek()).toEqual({ text: 'My contribution terms' });
     publicBinding.dispose();
   });
@@ -197,5 +200,101 @@ describe('public runtime connection boundary without browser automation', () => 
     expect(injectedProvider({ ethereum: provider })).toBe(provider);
     for (const scope of [null, {}, { ethereum: null }, { ethereum: { request: 'not-callable' } }]) expect(injectedProvider(scope)).toBeUndefined();
     expect(provider.calls).toEqual([]);
+  });
+
+  it('reload restores only the live provider account, ignoring saved account-shaped data and remembered destinations', async () => {
+    const storage = createMemoryStorage();
+    const provider = new FakeProvider();
+    const first = createPublicRuntime({ storage, namespace: 'refresh', provider, request: readyFixture().rpc.request });
+    await first.ready;
+    first.runtime.session.navigate({ name: 'events' });
+    first.runtime.session.selectDraft('keep-this');
+    first.dispose();
+    storage.setItem('old-wallet-address', PUBLISHER);
+    provider.accounts = [PUBLISHER];
+    const restored = createPublicRuntime({ storage, namespace: 'refresh', provider, request: readyFixture().rpc.request });
+    expect(restored.runtime.session.getSnapshot().actor).toBeNull();
+    expect(await restored.ready).toBe(true);
+    expect(restored.runtime.session.getSnapshot()).toMatchObject({ actor: { kind: 'wallet', address: PUBLISHER }, activeDraftId: 'keep-this' });
+    expect(provider.calls.every(call => ['eth_accounts', 'eth_chainId'].includes(call.method))).toBe(true);
+    restored.dispose();
+  });
+
+  it('explicit sign-out survives reload and wallet events until an explicit connection succeeds', async () => {
+    const storage = createMemoryStorage(); const provider = new FakeProvider();
+    const first = createPublicRuntime({ storage, namespace: 'signout', provider, request: readyFixture().rpc.request });
+    await first.ready; first.disconnect(); first.dispose(); provider.calls.length = 0;
+    const second = createPublicRuntime({ storage, namespace: 'signout', provider, request: readyFixture().rpc.request });
+    expect(await second.ready).toBe(false);
+    provider.emit('accountsChanged', [COORDINATOR]);
+    expect(await second.restore()).toBe(false);
+    expect(provider.calls).toEqual([]);
+    expect(second.runtime.session.getSnapshot().actor).toBeNull();
+    expect(await second.connect()).toBe(true);
+    expect(storage.getItem(WALLET_SESSION_KEY)).toBe('"enabled"');
+    second.dispose();
+  });
+
+  it('never prompts on a wrong-chain restore and passively resumes when the provider changes to Tiramisu', async () => {
+    const provider = new FakeProvider(); provider.chain = '0x1';
+    const { binding: publicBinding } = binding(provider);
+    expect(await publicBinding.ready).toBe(false);
+    expect(publicBinding.getSnapshot().error).toMatch(/another network/i);
+    expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
+    provider.chain = `0x${TIRAMISU_CHAIN_ID.toString(16)}`;
+    provider.emit('chainChanged', provider.chain);
+    await publicBinding.restore();
+    expect(publicBinding.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: COORDINATOR });
+    provider.accounts = [];
+    provider.emit('accountsChanged', []);
+    expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
+    await publicBinding.restore();
+    expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
+    expect(provider.calls.every(call => ['eth_accounts', 'eth_chainId'].includes(call.method))).toBe(true);
+    publicBinding.dispose();
+  });
+
+  it('shares sign-out and explicit sign-in between independent Studio and Desk runtimes without trusting broadcast identity', async () => {
+    const peers = new Set<(message: WalletSessionMessage) => void>();
+    const channel = (): WalletSessionChannel => {
+      let own: ((message: WalletSessionMessage) => void) | undefined;
+      return { publish(message) { for (const peer of peers) if (peer !== own) peer(message); },
+        subscribe(listener) { own = listener; peers.add(listener); return () => { peers.delete(listener); }; } };
+    };
+    const storage = createMemoryStorage(); const studioProvider = new FakeProvider(); const deskProvider = new FakeProvider();
+    deskProvider.accounts = [PUBLISHER];
+    const studio = createPublicRuntime({ storage, namespace: 'studio-sync', provider: studioProvider, sessionChannel: channel(), request: readyFixture().rpc.request });
+    const desk = createPublicRuntime({ storage, namespace: 'desk-sync', provider: deskProvider, sessionChannel: channel(), request: readyFixture().rpc.request });
+    await Promise.all([studio.ready, desk.ready]);
+    const { draft } = retainWork(desk.runtime);
+    studio.disconnect();
+    expect(desk.runtime.session.getSnapshot().actor).toBeNull();
+    expect(await desk.restore()).toBe(false);
+    expect(await studio.connect()).toBe(true);
+    await desk.restore();
+    expect(desk.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    expect(deskProvider.calls.every(call => ['eth_accounts', 'eth_chainId'].includes(call.method))).toBe(true);
+    expect(draft.peek()).toEqual({ text: 'My contribution terms' });
+    studio.dispose(); desk.dispose();
+  });
+
+  it('a late passive response cannot restore authority after sign-out', async () => {
+    const provider = new FakeProvider(); const pending = deferred<unknown>(); provider.passiveResponse = pending.promise;
+    const { binding: publicBinding } = binding(provider);
+    await Promise.resolve(); publicBinding.disconnect(); pending.resolve([COORDINATOR]);
+    expect(await publicBinding.ready).toBe(false);
+    expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
+    publicBinding.dispose();
+  });
+
+  it('storage write failures cannot restore or create wallet authority and do not prompt the provider', async () => {
+    const provider = new FakeProvider();
+    const storage = { getItem: () => null, setItem: () => { throw new Error('full'); }, removeItem: () => {} };
+    const publicBinding = createPublicRuntime({ storage, namespace: 'full-storage', provider, request: readyFixture().rpc.request });
+    expect(await publicBinding.ready).toBe(false);
+    expect(await publicBinding.connect()).toBe(false);
+    expect(publicBinding.runtime.session.getSnapshot().actor).toBeNull();
+    expect(provider.calls).toEqual([]);
+    publicBinding.dispose();
   });
 });

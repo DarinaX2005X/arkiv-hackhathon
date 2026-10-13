@@ -6,8 +6,9 @@ import { createPublicRuntime } from '../app/network';
 import type { StoragePort } from '../app/storage';
 import { createArkivRepository } from '../data/arkiv';
 import type { InjectedWalletProvider } from '../data/wallet/types';
-import { KEYS, NOW, PUBLISHER, entityKey, readyFixture } from '../data/__tests__/arkiv-fixture';
+import { COORDINATOR, KEYS, NOW, PUBLISHER, entityKey, readyFixture } from '../data/__tests__/arkiv-fixture';
 import { TIRAMISU_CHAIN_ID } from '../domain/types';
+import { WALLET_SESSION_KEY, type WalletSessionChannel, type WalletSessionMessage } from '../features/account/wallet-session';
 import { createDeskNavigation } from './navigation';
 import { deskPath, invitationStatus, parseDeskRoute, parsePublicTarget } from './routes';
 
@@ -15,12 +16,12 @@ function memoryStorage(): StoragePort {
   const values = new Map<string, string>();
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); }, removeItem: key => { values.delete(key); } };
 }
-function fakeWallet() {
+function fakeWallet(address = PUBLISHER) {
   const calls: string[] = []; const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const provider: InjectedWalletProvider = {
     request: async args => {
       calls.push(args.method);
-      if (args.method === 'eth_requestAccounts' || args.method === 'eth_accounts') return [PUBLISHER];
+      if (args.method === 'eth_requestAccounts' || args.method === 'eth_accounts') return [address];
       if (args.method === 'eth_chainId') return `0x${TIRAMISU_CHAIN_ID.toString(16)}`;
       if (args.method === 'wallet_switchEthereumChain') return null;
       throw new Error(`Unexpected wallet method: ${args.method}`);
@@ -90,34 +91,73 @@ describe('Partner Desk invitation boundary', () => {
   });
 });
 
+function sessionChannels() {
+  const peers = new Set<(message: WalletSessionMessage) => void>();
+  return (): WalletSessionChannel => {
+    let own: ((message: WalletSessionMessage) => void) | undefined;
+    return { publish(message) { for (const peer of peers) if (peer !== own) peer(message); },
+      subscribe(listener) { own = listener; peers.add(listener); return () => { peers.delete(listener); }; } };
+  };
+}
+
 describe('independent Desk runtime and invitation restoration', () => {
-  it('retains the destination through connection, disconnect, reload and unrelated Studio navigation', async () => {
-    const storage = memoryStorage(); const wallet = fakeWallet(); const rpc = readyFixture().rpc;
+  it('restores each client from its own live provider and keeps invitations through sign-out and reload', async () => {
+    const storage = memoryStorage(); const deskWallet = fakeWallet(); const studioWallet = fakeWallet(COORDINATOR); const rpc = readyFixture().rpc;
+    const channels = sessionChannels();
     const hash = `#/projects/${KEYS.project}/agreement?activation=${KEYS.activation}&proposal=${KEYS.proposal}`;
     const navigation = createDeskNavigation(storage, hash); navigation.remember();
-    const desk = createPublicRuntime({ storage, namespace: 'partfolk:partner-desk', provider: wallet.provider, request: rpc.request, now: () => NOW });
-    const studio = createPublicRuntime({ storage, namespace: 'partfolk:studio', provider: wallet.provider, request: rpc.request, now: () => NOW });
-    expect(wallet.calls).toEqual([]);
-    expect(await desk.connect()).toBe(true);
+    const desk = createPublicRuntime({ storage, namespace: 'partfolk:partner-desk', provider: deskWallet.provider, sessionChannel: channels(), request: rpc.request, now: () => NOW });
+    const studio = createPublicRuntime({ storage, namespace: 'partfolk:studio', provider: studioWallet.provider, sessionChannel: channels(), request: rpc.request, now: () => NOW });
+    expect(desk.runtime.session.getSnapshot().actor).toBeNull();
     expect(studio.runtime.session.getSnapshot().actor).toBeNull();
-    studio.runtime.session.navigate({ name: 'home' }); desk.disconnect();
+    await Promise.all([desk.ready, studio.ready]);
+    expect(deskWallet.calls).toEqual(['eth_accounts', 'eth_chainId']);
+    expect(studioWallet.calls).toEqual(['eth_accounts', 'eth_chainId']);
+    expect(desk.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    expect(studio.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: COORDINATOR });
+    studio.runtime.session.navigate({ name: 'home' });
+    desk.disconnect();
+    expect(desk.runtime.session.getSnapshot().actor).toBeNull();
+    expect(studio.runtime.session.getSnapshot().actor).toBeNull();
+    expect(await studio.restore()).toBe(false);
     expect(deskPath(navigation.getSnapshot())).toBe(hash.slice(1));
     expect(createDeskNavigation(storage, '').getSnapshot()).toEqual(navigation.getSnapshot());
     expect(createDeskNavigation(storage, '#/requests').getSnapshot()).toEqual({ name: 'requests' });
-    desk.dispose(); studio.dispose();
+    const restored = createPublicRuntime({ storage, namespace: 'partfolk:partner-desk', provider: deskWallet.provider, sessionChannel: channels(), request: rpc.request, now: () => NOW });
+    expect(await restored.ready).toBe(false);
+    expect(deskWallet.calls).toEqual(['eth_accounts', 'eth_chainId']);
+    expect(await desk.connect()).toBe(true);
+    await studio.restore();
+    expect(studio.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: COORDINATOR });
+    expect(studioWallet.calls.every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
+    expect(deskWallet.calls.filter(method => method === 'eth_requestAccounts')).toHaveLength(1);
+    expect([...deskWallet.calls, ...studioWallet.calls].some(method => /send|sign/i.test(method))).toBe(false);
+    desk.dispose(); studio.dispose(); restored.dispose();
   });
-  it('reads directly with no wallet and clears only its own account event listeners', async () => {
-    const storage = memoryStorage(); const wallet = fakeWallet(); const rpc = readyFixture().rpc;
-    const first = createPublicRuntime({ storage, namespace: 'test:desk', provider: wallet.provider, request: rpc.request, now: () => NOW });
-    const second = createPublicRuntime({ storage, namespace: 'test:studio', provider: wallet.provider, request: rpc.request, now: () => NOW });
+  it('reads without wallet authority and disposes only the departing client listeners', async () => {
+    const storage = memoryStorage(); storage.setItem(WALLET_SESSION_KEY, JSON.stringify('signed-out'));
+    const wallet = fakeWallet(); const rpc = readyFixture().rpc; const channels = sessionChannels();
+    const first = createPublicRuntime({ storage, namespace: 'test:desk', provider: wallet.provider, sessionChannel: channels(), request: rpc.request, now: () => NOW });
+    const second = createPublicRuntime({ storage, namespace: 'test:studio', provider: wallet.provider, sessionChannel: channels(), request: rpc.request, now: () => NOW });
+    await Promise.all([first.ready, second.ready]);
     expect((await first.runtime.repository!.loadProject(KEYS.project)).ok).toBe(true);
     expect(wallet.calls).toEqual([]);
-    expect(await first.connect()).toBe(true); expect(await second.connect()).toBe(true);
-    first.disconnect(); expect(second.runtime.session.getSnapshot().actor).toMatchObject({ kind: 'wallet', address: PUBLISHER });
-    wallet.emit('accountsChanged'); expect(second.runtime.session.getSnapshot().actor).toBeNull();
-    first.dispose(); second.dispose();
+    expect(first.runtime.session.getSnapshot().actor).toBeNull();
+    expect(await first.connect()).toBe(true);
+    await second.restore();
+    expect(second.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    const automaticStart = wallet.calls.length;
+    first.dispose();
+    expect(second.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    wallet.emit('accountsChanged');
+    expect(second.runtime.session.getSnapshot().actor).toBeNull();
+    await second.restore();
+    expect(second.runtime.session.getSnapshot().actor).toEqual({ kind: 'wallet', address: PUBLISHER });
+    expect(wallet.calls.slice(automaticStart).every(method => ['eth_accounts', 'eth_chainId'].includes(method))).toBe(true);
+    second.dispose();
     expect([...wallet.listeners.values()].every(set => set.size === 0)).toBe(true);
     expect(wallet.calls.some(method => /send|sign/i.test(method))).toBe(false);
+    expect(wallet.calls.filter(method => method === 'eth_requestAccounts')).toHaveLength(1);
     expect(rpc.calls.some(call => call.method === 'arkiv_query')).toBe(true);
   });
 });

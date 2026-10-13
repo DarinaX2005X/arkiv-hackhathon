@@ -57,6 +57,11 @@ export function routePath(route: Route): string {
   return Object.entries(simpleRoutes).find(([, name]) => name === route.name)?.[0] ?? '/';
 }
 export const routeHref = (route: Route): string => `#${routePath(route)}`;
+/** A blank landing URL must never inherit another visit's saved destination. */
+export function routeFromLocation(location: { pathname: string; search?: string; hash: string }): Route {
+  if (location.hash.startsWith('#/')) return parseRoute(location.hash);
+  return parseRoute(`${location.pathname || '/'}${location.search ?? ''}`);
+}
 /** Local IDs must never be presented as a public invitation. No navigation occurs here. */
 export function projectInvitation(baseUrl: string, projectRoot: PublicEntityKey): string {
   if (!isPublicEntityKey(projectRoot)) throw new TypeError('A public invitation requires a public project root.');

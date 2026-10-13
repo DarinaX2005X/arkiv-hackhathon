@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRoute, routeHref, routePath, safeReturnPath } from '../routes';
+import { parseRoute, routeFromLocation, routeHref, routePath, safeReturnPath } from '../routes';
 import { createSessionStore } from '../session';
 import type { StoragePort } from '../storage';
 
@@ -17,6 +17,18 @@ function memoryStorage(): StoragePort {
 }
 
 describe('service entry routes and safe continuation without rendering', () => {
+  it('lets the current URL choose landing or a deep link regardless of the saved last destination', () => {
+    const storage = memoryStorage(); const session = createSessionStore({ storage });
+    session.navigate({ name: 'events' }); session.selectDraft('keep-this-draft');
+    const restored = createSessionStore({ storage });
+    expect(restored.getSnapshot().destination).toBe('/events');
+    restored.navigate(routeFromLocation({ pathname: '/', hash: '' }));
+    expect(restored.currentRoute()).toEqual({ name: 'home' });
+    expect(restored.getSnapshot().activeDraftId).toBe('keep-this-draft');
+    expect(routeFromLocation({ pathname: '/', hash: `#${eventPath}` })).toEqual({ name: 'event', projectRoot: publicRoot });
+    expect(routeFromLocation({ pathname: eventPath, hash: '', search: '' })).toEqual({ name: 'event', projectRoot: publicRoot });
+    expect(routeFromLocation({ pathname: '/unknown-page', hash: '' })).toEqual({ name: 'not-found', path: '/unknown-page' });
+  });
   it('preserves a selected event and contribution target through account setup and a restored session', () => {
     const storage = memoryStorage();
     const session = createSessionStore({ storage });

@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 import { RootApp, ViewLoadBoundary, type RouteRegistry, type RouteViewProps } from './App';
 import { useAppSession } from './context';
-import { parseRoute, routeHref } from './routes';
-import { createStudioWorkspaces, LOCAL_COORDINATOR, type StudioWorkspaces } from './workspaces';
+import { parseRoute, routeFromLocation, routeHref } from './routes';
+import { createStudioWorkspaces, type StudioWorkspaces } from './workspaces';
 import { injectedProvider } from './network';
 import { isPublicEntityKey } from './ids';
 import { copyRecipeToPublicDraft } from './projectSharing';
@@ -119,14 +119,13 @@ export function createStudioRoutes(manager: StudioWorkspaces): RouteRegistry {
     else void manager.select('public', props.route).then(() => workspaceTour(manager.getSnapshot().runtime).start());
   }} />;
   const reuse = (template: RecipeTemplate) => {
-    const runtime = manager.runtimes.local;
-    runtime.session.setAccount(LOCAL_COORDINATOR);
-    const scope = draftScope('local', LOCAL_COORDINATOR);
+    const runtime = manager.runtimes.public;
+    const scope = draftScope('public', runtime.session.getSnapshot().actor);
     const drafts = createProjectDrafts(runtime, scope);
     const draft = { ...makeDraft(scope, undefined, runtime.now()), editor: templateToEditorDraft(template) };
     drafts.upsert(draft);
     runtime.session.selectDraft(draft.id);
-    void manager.select('local', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
+    void manager.select('public', { name: 'new-project' }).then(() => { window.location.hash = '/projects/new'; });
   };
   const Runbook = (props: Parameters<typeof ExecutionWorkspace>[0]) => <Suspense fallback={<LoadingState title="Opening the run sheet" />}><ExecutionWorkspace {...props} onReuse={reuse} /></Suspense>;
   const Organizer = ({ project, onRefresh }: ProjectPanelProps) => {
@@ -163,7 +162,7 @@ export function Studio({ manager }: { manager: StudioWorkspaces }) {
   const state = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const session = useSyncExternalStore(state.runtime.session.subscribe, state.runtime.session.getSnapshot, state.runtime.session.getSnapshot);
   useEffect(() => {
-    const follow = () => { void manager.followRoute(parseRoute(window.location.hash)); };
+    const follow = () => { void manager.followRoute(routeFromLocation(window.location)); };
     window.addEventListener('hashchange', follow);
     return () => window.removeEventListener('hashchange', follow);
   }, [manager]);
@@ -183,6 +182,6 @@ function routeRegistry(manager: StudioWorkspaces) {
 
 export async function bootstrapStudio(storage: StoragePort | null, scope: unknown = window) {
   const manager = createStudioWorkspaces({ storage, provider: injectedProvider(scope) });
-  await manager.followRoute(window.location.hash ? parseRoute(window.location.hash) : manager.initialRoute());
+  await manager.followRoute(routeFromLocation(window.location));
   return manager;
 }

@@ -73,12 +73,15 @@ describe('Studio workspace isolation without rendering', () => {
     [{ name: 'project', projectRoot: `0x${'1'.repeat(64)}`, tab: 'agreement' }, 'practice', 'public'],
     [{ name: 'new-project' }, 'practice', 'public'],
     [{ name: 'new-project' }, 'public', 'public'],
+    [{ name: 'new-project' }, 'local', 'public'],
+    [{ name: 'workspace' }, 'local', 'public'],
+    [{ name: 'home' }, 'practice', 'public'],
     [{ name: 'contributions' }, 'practice', 'practice'],
   ] as const)('selects route workspace %#', (route, current, expected) => {
     expect(workspaceForRoute(route as Route, current)).toBe(expected);
   });
 
-  it('follows a restored practice route by seeding once, then new-project leaves the practice namespace', async () => {
+  it('opens landing in public mode on a new visit, retaining practice only for its explicit URL', async () => {
     const { storage } = storagePort();
     storage.setItem('partfolk:studio:workspace', 'practice');
     const first = createStudioWorkspaces({ storage, request: neverNetwork, now: () => SMALL_WORKS_NOW });
@@ -87,9 +90,12 @@ describe('Studio workspace isolation without rendering', () => {
     expect((await first.practiceRepository.loadProject(SMALL_WORKS_PROJECT_ROOT)).ok).toBe(true);
     first.dispose();
     const restored = createStudioWorkspaces({ storage, request: neverNetwork, now: () => SMALL_WORKS_NOW });
-    expect(restored.initialRoute()).toEqual({ name: 'demo' });
+    expect(restored.initialRoute()).toEqual({ name: 'home' });
     await restored.followRoute(restored.initialRoute());
     expect(restored.getSnapshot().issue).toBeNull();
+    expect(restored.getSnapshot().kind).toBe('public');
+    await restored.followRoute({ name: 'demo' });
+    expect(restored.getSnapshot().kind).toBe('practice');
     await restored.followRoute({ name: 'new-project' });
     expect(restored.getSnapshot().kind).toBe('public');
     expect(restored.getSnapshot().runtime.session.currentRoute()).toEqual({ name: 'new-project' });
@@ -150,7 +156,7 @@ describe('Studio workspace isolation without rendering', () => {
     manager.dispose();
   });
 
-  it('preserves the local editor namespace and draft through sign-in, Help, reload and return', async () => {
+  it('preserves legacy local input through sign-in and reload without restoring the retired local product mode', async () => {
     const { storage } = storagePort();
     const manager = createStudioWorkspaces({ storage, request: neverNetwork });
     await manager.select('local', { name: 'new-project' });
@@ -167,7 +173,7 @@ describe('Studio workspace isolation without rendering', () => {
     const restored = createStudioWorkspaces({ storage, request: neverNetwork });
     await restored.followRoute(restored.initialRoute());
     await restored.followRoute({ name: 'new-project' });
-    expect(restored.getSnapshot().kind).toBe('local');
+    expect(restored.getSnapshot().kind).toBe('public');
     expect(restored.runtimes.local.session.getSnapshot().activeDraftId).toBe('local-ongoing');
     expect(restored.runtimes.local.drafts('local-ongoing', 'text', textDraft).load()).toMatchObject({ status: 'ready', value: { text: 'A real local draft' } });
     expect(restored.runtimes.public.session.getSnapshot().actor).toBeNull();
