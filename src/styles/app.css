@@ -35,7 +35,7 @@
 .pf-workspace-controls > summary::after { display: none; }
 .pf-workspace-summary { display: grid; gap: 1px; min-width: 0; }
 .pf-workspace-summary strong { font-weight: 600; }
-.pf-workspace-change { margin-inline-start: auto; color: var(--action); text-decoration: underline; text-underline-offset: 4px; font-weight: 500; white-space: nowrap; }
+.pf-workspace-change { margin-inline-start: auto; color: var(--action); text-decoration: none; font-weight: 500; white-space: nowrap; }
 .pf-workspace-bar > .pf-notice { flex-basis: 100%; }
 .pf-workspace-controls > p { margin: 0; }
 .pf-workspace-controls > summary { width: 100%; }

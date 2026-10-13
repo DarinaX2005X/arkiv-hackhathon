@@ -83,13 +83,9 @@ img, svg { max-width: 100%; }
 [hidden] { display: none !important; }
 :where(a:link, a:visited) {
   color: var(--action);
-  text-decoration-line: underline;
-  text-decoration-color: currentColor;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
-  text-decoration-skip-ink: auto;
+  text-decoration: none;
   overflow-wrap: anywhere;
-  transition: color var(--motion-hover) var(--motion-ease), text-decoration-color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease);
+  transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease);
 }
 :where(a:active) { color: var(--brand-ink); transition-duration: var(--motion-press); }
 :where(nav a) { transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease); }
@@ -166,7 +162,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-button-explanation { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: start; align-content: start; align-self: flex-start; gap: 8px; width: fit-content; min-width: 0; max-width: min(100%, 26rem); vertical-align: top; }
 .pf-button-explanation > .pf-button { width: fit-content; }
 .pf-button-explanation > .pf-field-message { max-width: 100%; }
-.pf-link:not(.pf-button) { color: var(--action); text-decoration: underline; text-underline-offset: 4px; overflow-wrap: anywhere; }
+.pf-link:not(.pf-button) { color: var(--action); text-decoration: none; overflow-wrap: anywhere; }
 
 .pf-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .pf-field-label { font-size: 16px; line-height: 22px; font-weight: 500; }
@@ -298,7 +294,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-diff-footer { margin-block-start: 16px; }
 
 @media (hover: hover) and (pointer: fine) {
-  :where(a:link, a:visited):hover { color: var(--action-hover); text-decoration-thickness: 2px; }
+  :where(a:link, a:visited):hover { color: var(--action-hover); }
   :where(nav a):hover { background-color: var(--surface-hover); }
   .pf-brand:hover { color: var(--action); }
   .pf-brand:hover .pf-brand-mark { transform: translateY(-1px) rotate(-7deg); }
@@ -306,7 +302,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
   .pf-button--secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-control); box-shadow: var(--shadow-control-hover); }
   .pf-button--quiet:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); }
   .pf-button--danger:hover:not(:disabled):not([aria-disabled='true']) { color: var(--danger-text); border-color: var(--danger-text); background: var(--danger-surface); }
-  .pf-link:not(.pf-button):hover { color: var(--action-hover); text-decoration-thickness: 2px; }
+  .pf-link:not(.pf-button):hover { color: var(--action-hover); }
   .pf-notice :where(a:not(.pf-button)):hover { color: inherit; }
   .pf-tab:hover:not(:disabled) { color: var(--brand-ink); background: var(--surface-hover); }
   .pf-tab[aria-selected='true']:hover { background: var(--selected-surface); box-shadow: var(--shadow-control-hover); }
