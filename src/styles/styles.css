@@ -124,7 +124,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-page--ambient { position: relative; isolation: isolate; }
 .pf-landing-page { max-width: 1280px; }
 /* Sheets establish their own light context in surfaces.css, including nested sheets. */
-.pf-sheet { background: var(--surface-work); border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet); padding: var(--sheet-padding); min-width: 0; box-shadow: var(--shadow-surface); }
+.pf-sheet { background: var(--surface-work); border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet); padding: var(--sheet-padding); min-width: 0; box-shadow: inset 0 1px 0 var(--surface-rim), var(--shadow-surface); }
 .pf-sheet--quiet { background: transparent; border: 0; border-radius: 0; padding-inline: 0; box-shadow: none; }
 .pf-action-surface {
   background: linear-gradient(140deg, var(--surface-dark-light), var(--surface-dark));
@@ -137,7 +137,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; min-width: 0; }
 .pf-actions > :where(.pf-button, .pf-button-explanation) { align-self: flex-start; }
 .pf-actions > :where(a:not(.pf-button)) { display: inline-flex; align-items: center; min-height: 48px; max-width: 100%; }
-.pf-actions > p { max-width: 58ch; padding-block: 12px; }
+.pf-actions > p { flex: 0 0 100%; max-width: 100%; padding: 0; }
 .pf-numeric { font-variant-numeric: tabular-nums; }
 .pf-secondary { color: var(--text-secondary); }
 .pf-brand-mark { flex: 0 0 24px; width: 24px; height: 24px; }
@@ -148,13 +148,15 @@ details > summary:active { background: var(--surface-inset); transition-duration
 
 .pf-button {
   display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+  align-self: flex-start; justify-self: start; flex: 0 1 auto; width: fit-content; height: fit-content;
   min-width: 44px; min-height: 48px; max-width: 100%; padding: 12px 20px;
   border: 1px solid transparent; border-radius: var(--radius-control);
   font-size: 16px; font-weight: 500; line-height: 22px; text-align: center;
   text-decoration: none; white-space: normal; overflow-wrap: anywhere;
   transition: background-color var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease), color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease), transform var(--motion-press) var(--motion-ease);
 }
-.pf-button--primary { background: linear-gradient(160deg, color-mix(in srgb, var(--action), white 8%), var(--action)); color: var(--on-action); border-color: color-mix(in srgb, var(--action), black 8%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 2px 3px rgb(20 61 49 / 12%), 0 7px 14px rgb(20 61 49 / 14%); }
+.pf-button > span { min-width: 0; }
+.pf-button--primary { background: linear-gradient(160deg, color-mix(in srgb, var(--action), white 7%), var(--action)); color: var(--on-action); border-color: color-mix(in srgb, var(--action), black 8%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 1px 2px rgb(20 61 49 / 10%), 0 4px 8px rgb(20 61 49 / 9%); }
 .pf-button--secondary { background: var(--surface-control); color: var(--action); border-color: var(--border-quiet); box-shadow: var(--shadow-control); }
 .pf-button--quiet { background: transparent; color: var(--action); }
 .pf-button--danger { background: var(--danger-action); color: var(--on-danger-action); box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%), 0 6px 12px rgb(163 56 49 / 14%); }
@@ -162,6 +164,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-button:active:not(:disabled):not([aria-disabled='true']) { transform: scale(.98); box-shadow: none; transition-duration: var(--motion-press); }
 .pf-button:disabled, .pf-button[aria-disabled='true'] { background: var(--surface-inset); border-color: var(--border-quiet); color: var(--text-secondary); box-shadow: none; }
 .pf-button-explanation { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: start; align-content: start; align-self: flex-start; gap: 8px; width: fit-content; min-width: 0; max-width: min(100%, 26rem); vertical-align: top; }
+.pf-button-explanation > .pf-button { width: fit-content; }
 .pf-button-explanation > .pf-field-message { max-width: 100%; }
 .pf-link:not(.pf-button) { color: var(--action); text-decoration: underline; text-underline-offset: 4px; overflow-wrap: anywhere; }
 
@@ -189,12 +192,44 @@ details > summary:active { background: var(--surface-inset); transition-duration
 .pf-checkbox:disabled + span { color: var(--text-secondary); }
 .pf-checkbox-field > .pf-field-message { margin-inline-start: 32px; }
 
-.pf-status { display: inline-block; width: fit-content; max-width: 100%; padding: 4px 8px; border-radius: var(--radius-label); font-size: 14px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
+.pf-search-select { position: relative; }
+.pf-search-select-control { position: relative; min-width: 0; }
+.pf-search-select-input { padding-inline-end: 48px; text-overflow: ellipsis; }
+.pf-search-select-control[data-clearable='true'] .pf-search-select-input { padding-inline-end: 92px; }
+.pf-search-select-control[data-invalid='true'] .pf-search-select-input { border-color: var(--danger-text); }
+.pf-search-select-tools { position: absolute; inset: 2px 2px auto auto; display: flex; align-items: center; }
+.pf-search-select-tool { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 8px; color: var(--text-secondary); background: transparent; transition: color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease); }
+.pf-search-select-tool svg, .pf-search-select-option svg { flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pf-search-select-tool:disabled { color: var(--text-secondary); }
+.pf-search-select-popover { position: absolute; inset: calc(100% + 6px) 0 auto; z-index: 30; min-width: 0; padding: 5px; border: 1px solid var(--border-quiet); border-radius: 14px; color: var(--text-primary); background: var(--surface-control); box-shadow: inset 0 1px 0 var(--surface-rim), var(--shadow-layer); animation: pf-search-appear var(--motion-reveal) var(--motion-ease); }
+.pf-search-select-popover[data-above='true'] { inset: auto 0 calc(100% + 6px); }
+.pf-search-select-list { display: grid; gap: 2px; max-height: var(--search-list-height, 288px); margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 4px; scrollbar-width: thin; list-style: none; }
+.pf-search-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 46px; padding: 11px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--text-primary); background: transparent; text-align: start; overflow-wrap: anywhere; }
+.pf-search-select-option > span { min-width: 0; }
+.pf-search-select-option-label { display: block; font-size: 16px; line-height: 22px; }
+.pf-search-select-option-description { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 14px; line-height: 20px; }
+.pf-search-select-option[aria-selected='true'] { color: var(--selected-text); background: var(--selected-surface); }
+.pf-search-select-option[data-active='true'] { border-color: var(--border-control); background: var(--surface-hover); }
+.pf-search-select-option[aria-disabled='true'] { color: var(--text-secondary); cursor: not-allowed; }
+.pf-search-select-empty { padding: 16px 12px; color: var(--text-secondary); font-size: 15px; }
+.pf-search-select-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 6px 5px 0; border-top: 1px solid var(--border-quiet); }
+.pf-search-select-pagination p { font-size: 13px; line-height: 20px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pf-search-select-pagination > div { display: flex; gap: 4px; margin-inline-start: auto; }
+.pf-search-select-pagination button { min-height: 44px; padding: 10px; border: 0; border-radius: 8px; color: var(--action); background: transparent; font-size: 14px; font-weight: 500; }
+.pf-search-select-pagination button:disabled { color: var(--text-secondary); opacity: .65; }
+@keyframes pf-search-appear { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (hover: hover) and (pointer: fine) {
+  .pf-search-select-tool:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
+  .pf-search-select-option:hover:not([aria-disabled='true']) { background: var(--surface-hover); border-color: var(--border-control); }
+  .pf-search-select-pagination button:hover:not(:disabled) { background: var(--surface-hover); }
+}
+
+.pf-status { display: inline-block; width: fit-content; max-width: 100%; padding: 4px 9px; border-radius: var(--radius-pill); font-size: 14px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
 .pf-status--neutral { color: var(--text-secondary); background: var(--surface-inset); }
 .pf-status--success { color: var(--success-text); background: var(--success-surface); }
 .pf-status--warning { color: var(--warning-text); background: var(--warning-surface); }
 .pf-status--danger { color: var(--danger-text); background: var(--danger-surface); }
-.pf-notice { padding: 20px 24px; border: 0; border-radius: var(--radius-control); background: var(--surface-soft); box-shadow: inset 0 1px 0 rgb(255 255 255 / 65%); }
+.pf-notice { padding: 20px 24px; border: 0; border-radius: var(--radius-control); background: var(--surface-soft); box-shadow: inset 0 1px 0 var(--surface-rim); }
 .pf-notice--success { color: var(--success-text); background: var(--success-surface); }
 .pf-notice--warning { color: var(--warning-text); background: var(--warning-surface); }
 .pf-notice--danger { color: var(--danger-text); background: var(--danger-surface); }
@@ -267,7 +302,7 @@ details > summary:active { background: var(--surface-inset); transition-duration
   :where(nav a):hover { background-color: var(--surface-hover); }
   .pf-brand:hover { color: var(--action); }
   .pf-brand:hover .pf-brand-mark { transform: translateY(-1px) rotate(-7deg); }
-  .pf-button--primary:hover:not(:disabled):not([aria-disabled='true']) { background: linear-gradient(160deg, color-mix(in srgb, var(--action-hover), white 12%), var(--action-hover)); color: var(--on-action); box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%), 0 3px 6px rgb(20 61 49 / 14%), 0 10px 20px rgb(20 61 49 / 18%); }
+  .pf-button--primary:hover:not(:disabled):not([aria-disabled='true']) { background: linear-gradient(160deg, color-mix(in srgb, var(--action-hover), white 8%), var(--action-hover)); color: var(--on-action); box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%), 0 2px 3px rgb(20 61 49 / 12%), 0 6px 12px rgb(20 61 49 / 12%); }
   .pf-button--secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-control); box-shadow: var(--shadow-control-hover); }
   .pf-button--quiet:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-hover); color: var(--text-primary); }
   .pf-button--danger:hover:not(:disabled):not([aria-disabled='true']) { color: var(--danger-text); border-color: var(--danger-text); background: var(--danger-surface); }

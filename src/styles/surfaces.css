@@ -38,6 +38,7 @@
   --border-control: #91ad9c;
   --border-quiet: #3e6253;
   --edge-light: #527361;
+  --surface-rim: rgb(255 255 255 / 8%);
   --action: var(--action-on-dark);
   --action-hover: #e7f6d0;
   --on-action: var(--on-action-on-dark);
@@ -76,6 +77,7 @@
   --border-control: #788e7e;
   --border-quiet: #cfdacc;
   --edge-light: #ffffff;
+  --surface-rim: rgb(255 255 255 / 85%);
   --action: var(--action-on-light);
   --action-hover: #124731;
   --on-action: var(--on-action-on-light);
