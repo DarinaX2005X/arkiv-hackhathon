@@ -32,7 +32,7 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
 
-https://github.com/user-attachments/assets/b6f73bb4-9288-4f80-9663-819b07ce80f3
+https://github.com/user-attachments/assets/1174efaf-9214-49f2-bccc-3b200d022e82
 
 **[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A completed [public proof](arkiv/evidence/product-proof.json) demonstrates contributor agreement, withdrawal and fresh consent on the network.
 
@@ -219,7 +219,7 @@ The verified source baseline passed TypeScript, unit/integration checks and both
 
 ## Current boundaries
 
-- **Release status:** the hosted application, public contributor-workflow proof and three synthetic catalogue events with participation evidence are available. A public demonstration video is not available. Browser and wallet UI acceptance is separate from the protocol proof.
+- **Release status:** the hosted application, public contributor-workflow proof, three synthetic catalogue events with participation evidence and the public demonstration video are available. Browser and wallet UI acceptance is separate from the protocol proof.
 - **Readiness is dated:** owners can withdraw, delete records or let them expire. Agreement is neither future availability nor proof of physical completion.
 - **Audience details are organizer-authored:** public schedule and location are entered separately from contributor duties. The current validator does not establish their semantic correspondence.
 - **Admission is bounded:** limited capacity and invitation lists support up to 512 entries. Waiters are not automatically promoted. Read and payload limits are defined in the [schema](arkiv/schema.md).
