@@ -48,6 +48,7 @@ export const helpTopics = [
     summary: 'One account for organizing, contributing and attending.',
     paragraphs: [
       'Connect your wallet when you want to publish or make a decision. Signing in alone does not publish anything or register you for an event. Your wallet identifies the account that owns a record; it does not verify a person’s identity.',
+      'Publishing and decisions use Arkiv Tiramisu testnet transactions. The connected wallet needs enough test GLM for the estimated network fee; Partfolk stops before opening a wallet send when a readable balance is too low.',
       'Use the account menu to return to your projects, contributions or events, switch to Desk, or sign out. Account and settings lets you add an optional label for this wallet on this device. The welcome tour is optional and can be replayed in Help.',
       'Return with the same wallet to find public projects, offers and decisions on Arkiv, including from another device. Unpublished drafts stay in this browser. Export drafts before changing devices and import them in My projects.',
       'Signing out, cancelling a connection or switching accounts keeps drafts and pending requests. Reconnect the wallet that started the work to continue its decisions. Public records stay public after sign-out.',

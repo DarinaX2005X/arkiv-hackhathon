@@ -13,6 +13,7 @@ import { EventFactIcon } from '../events/cover';
 import { availabilityCopy, eventDate, eventError, shortAddress, eventPlace, downloadEventCalendar } from '../events/presentation';
 import { browserEventStorage, useEventAction } from '../events/useEventAction';
 import { clearJoinTarget, joinTargetStore, prepareRegistration, prepareWithdrawal, registrationLifetime, targetForEvent, targetForWithdrawal, targetMatchesEvent, type JoinTarget, type WithdrawalTarget } from './intent';
+import { attendanceRequestCopy } from './status';
 
 export interface RegistrationPanelProps {
   repository: EventRepositoryContract | null;
@@ -59,7 +60,8 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
     : attendanceStatus(read.attendance, read.event, now, read.myEvent?.registeredRelease ?? null);
   const eligibility = registrationEligibility(read.event, session.actor ?? undefined, now);
   const retainedPlace = availability !== 'unverified' && read.event.state.status === 'unique' && read.event.state.entity.payload.admissions?.some(item => item.attendee.toLowerCase() === account?.toLowerCase());
-  const requested = ownStatus === 'pending' || ownStatus === 'waitlisted';
+  const requestCopy = attendanceRequestCopy(ownStatus);
+  const requested = requestCopy !== null;
   const canStart = !unverified && ['join', 'request', 'waitlist'].includes(eligibility.status);
   const requestLabel = eligibility.status === 'waitlist' ? 'Join waiting list' : eligibility.requiresApproval ? 'Request a place' : 'Join event';
   const signedIn = session.mode === 'public' && account !== null;
@@ -157,14 +159,14 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
 
   return <aside className={`pf-event-registration pf-surface-light${freshConfirmation ? ' pf-event-registration--confirmed' : ''}`} aria-labelledby="registration-title" aria-busy={submitting}>
     <div className="pf-event-registration-heading"><span className="pf-event-registration-icon"><EventFactIcon name={freshConfirmation ? 'check' : 'people'} /></span>
-      <h2 id="registration-title">{freshConfirmation ? eligibility.requiresApproval ? 'Your place is confirmed' : 'You’re registered' : requested ? ownStatus === 'waitlisted' ? 'You’re on the waiting list' : 'Request sent' : withdrawn ? 'You withdrew' : 'Take part in this event'}</h2></div>
+      <h2 id="registration-title">{freshConfirmation ? eligibility.requiresApproval ? 'Your place is confirmed' : 'You’re registered' : requestCopy?.title ?? (withdrawn ? 'You withdrew' : 'Take part in this event')}</h2></div>
     {freshConfirmation ? <><Notice tone="success" role="status">{eligibility.requiresApproval ? 'The organizer confirmed your place for this event version.' : 'Your registration is recorded for the event details shown here.'}</Notice>
       <p>Registered as <span title={account ?? undefined}>{account ? shortAddress(account) : 'your wallet'}</span>.</p>
       <Link href={routeHref({ name: 'my-events' })}>View my events</Link></>
-      : requested ? <><Notice tone="warning" role="status">{ownStatus === 'waitlisted' ? 'The organizer will confirm your place if one becomes available. You do not have a confirmed place yet.' : 'Your request is saved. The organizer must confirm your place before you are registered.'}</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></> : withdrawn ? <><Notice role="status">Your withdrawal is recorded. You can choose to join again if registration is open.</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></>
+      : requestCopy ? <><Notice tone="warning" role="status">{requestCopy.message}</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></> : withdrawn ? <><Notice role="status">Your withdrawal is recorded. You can choose to join again if registration is open.</Notice><Link href={routeHref({ name: 'my-events' })}>View my events</Link></>
         : <p>{eligibility.requiresApproval ? 'Request a place and wait for the organizer to confirm it.' : 'Review the event details, then confirm your registration.'}</p>}
     {availability !== 'open' && !requested && !(eligibility.status === 'request' && retainedPlace) && <Notice tone={availabilityCopy[availability].tone} title={availabilityCopy[availability].label}>{availabilityCopy[availability].explanation}</Notice>}
-    {availability !== 'unverified' && eligibility.status === 'invitation_required' && <Notice tone="warning" title="Invitation required">{signedIn ? 'This wallet is not on the event’s public invitation list. Use an invited wallet or contact the organizer.' : 'Sign in with an invited wallet to check your invitation.'}{!signedIn && <Link href={signInHref} onClick={chooseCurrent}>Sign in to check invitation</Link>}</Notice>}
+    {availability !== 'unverified' && eligibility.status === 'invitation_required' && !requested && <Notice tone="warning" title="Invitation required">{signedIn ? 'This wallet is not on the event’s public invitation list. Use an invited wallet or contact the organizer.' : 'Sign in with an invited wallet to check your invitation.'}{!signedIn && <Link href={signInHref} onClick={chooseCurrent}>Sign in to check invitation</Link>}</Notice>}
     {eligibility.status === 'request' && retainedPlace && !registered && !requested && <Notice>Your previous place remains reserved. Review the latest event details and request confirmation for this version.</Notice>}
     {eligibility.remaining !== null && availability !== 'unverified' && <p className="pf-event-capacity"><EventFactIcon name="people" /><span><strong>{eligibility.remaining}</strong> {eligibility.remaining === 1 ? 'place' : 'places'} currently unreserved</span></p>}
     {freshConfirmation && terms && <Button variant="secondary" onClick={() => downloadEventCalendar(terms, projectRoot)}>Add to calendar</Button>}

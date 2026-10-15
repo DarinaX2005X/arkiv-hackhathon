@@ -34,6 +34,7 @@ export const contributionErrors: Record<RepositoryErrorCode, string> = {
   stale_heads: 'Another update changed this contribution. Refresh and review it before trying again.', expired: 'This record expired. Review the recovery options.',
   incomplete: 'The current data is incomplete. Refresh before relying on it.', network: 'The network response was interrupted. Check the original operation.',
   rate_limited: 'The network is limiting requests. Keep the saved operation and check it again later.', rejected: 'The wallet request was rejected. Your input has been kept.',
+  insufficient_funds: 'Fund this wallet with test GLM on Arkiv Tiramisu, then retry the saved request.',
   storage: 'The operation could not be safely saved on this device. Keep this page open and export your draft.',
   reverted: 'The transaction did not apply. Refresh and review your input before starting another request.',
   payload_too_large: 'Reduce the size of this contribution before publishing.', unverified: 'The outcome is not yet verified. Check the original operation before sending anything else.',

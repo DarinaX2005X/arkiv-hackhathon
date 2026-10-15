@@ -69,6 +69,7 @@ export function repositoryErrorText(error: RepositoryError): string {
     incomplete: 'The read was incomplete. Last-known data is shown without current verification.',
     network: 'The network did not confirm the result. Check the original operation before trying again.',
     rate_limited: 'The network is busy. Keep your draft and try a fresh read shortly.',
+    insufficient_funds: 'Fund this wallet with test GLM on Arkiv Tiramisu, then retry the saved operation.',
     rejected: 'The wallet request was cancelled. Your input is retained.', storage: 'Your work could not be saved on this device. Export it before closing.',
     reverted: 'The transaction did not apply. Refresh the current records and review the change before creating another operation.',
     payload_too_large: 'This project exceeds the supported record size.', unverified: 'The result is not confirmed. Reconcile the original operation before another send.',

@@ -9,7 +9,7 @@ import type {
 export type RepositoryErrorCode =
   | 'invalid_input' | 'unauthorized' | 'wrong_chain' | 'not_connected' | 'not_found'
   | 'conflict' | 'stale_heads' | 'expired' | 'incomplete' | 'network' | 'rate_limited'
-  | 'rejected' | 'reverted' | 'storage' | 'payload_too_large' | 'unverified' | 'unsupported';
+  | 'insufficient_funds' | 'rejected' | 'reverted' | 'storage' | 'payload_too_large' | 'unverified' | 'unsupported';
 export interface RepositoryError {
   code: RepositoryErrorCode; reasons: DomainReason[]; retryable: boolean;
   /** Diagnostic only; translate the error code for product UI. */

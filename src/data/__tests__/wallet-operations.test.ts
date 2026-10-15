@@ -56,6 +56,7 @@ class FakeWallet implements InjectedWalletProvider {
 class FakeRpc implements RpcRequester {
   requests: RpcRequest[] = [];
   failPrice = false;
+  balance = 1_000_000n;
   async request(request: RpcRequest): Promise<unknown> {
     this.requests.push(request);
     switch (request.method) {
@@ -63,6 +64,7 @@ class FakeRpc implements RpcRequester {
       case 'eth_blockNumber': return '0x100';
       case 'eth_estimateGas': return '0x186a0';
       case 'eth_gasPrice': if (this.failPrice) throw new Error('Quote unavailable.'); return '0x2';
+      case 'eth_getBalance': return `0x${this.balance.toString(16)}`;
       default: throw new Error(`Unexpected public RPC method ${request.method}`);
     }
   }
@@ -126,6 +128,12 @@ describe('SDK native wallet gateway', () => {
     const unknown = await f.gateway.prepare(batch(), ACCOUNT);
     expect(unknown.estimatedCostWei).toBeNull(); expect(unknown.estimatedMaximumCostWei).toBeNull();
     expect(unknown.estimatePolicy).toBe('gas-only');
+  });
+  it('stops before a wallet send when the prepared-block balance cannot cover the estimate', async () => {
+    const f = fixture(); f.rpc.balance = 199_999n;
+    await expect(f.gateway.prepare(batch(), ACCOUNT)).rejects.toMatchObject({ kind: 'not_sent', code: 'insufficient_funds' });
+    expect(f.rpc.requests.at(-1)).toMatchObject({ method: 'eth_getBalance', params: [ACCOUNT, '0x100'] });
+    expect(f.wallet.sent()).toHaveLength(0);
   });
   it('checkpoints admission and returned hash in order, never entering the SDK receipt wait', async () => {
     const f = fixture(); const prepared = await f.gateway.prepare(batch(), ACCOUNT);

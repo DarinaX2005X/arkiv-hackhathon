@@ -64,6 +64,7 @@ export function eventError(error: RepositoryError): string {
     case 'rejected': return 'The wallet request was cancelled. Your selected event has been kept. Check the saved request before trying again.';
     case 'not_connected': case 'unauthorized': return 'Connect the wallet shown in this registration review before continuing.';
     case 'wrong_chain': return 'Switch your wallet to Tiramisu, then review this registration again.';
+    case 'insufficient_funds': return 'This wallet needs test GLM on Arkiv Tiramisu to cover the network fee. Fund it, then retry the saved request.';
     case 'storage': return 'The request could not be saved safely in this browser. No new request will be sent until recovery is available.';
     case 'reverted': return 'The transaction did not complete. Check the saved request, refresh the event and review your decision again.';
     case 'invalid_input': return 'Some details are no longer valid. Refresh the event and review the highlighted information.';

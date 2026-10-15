@@ -253,7 +253,7 @@ describe('independent native transaction verification with the installed SDK rea
 describe('public wallet error translation', () => {
   it.each([
     ['rejected', 'rejected'], ['not_connected', 'not_sent'], ['wrong_chain', 'not_sent'],
-    ['reverted', 'reverted'], ['storage', 'unverified'],
+    ['reverted', 'reverted'], ['storage', 'unverified'], ['insufficient_funds', 'not_sent'],
   ] as const)('preserves %s without exposing provider payloads', (code, kind) => {
     const failure = new WalletOperationError('UNSAFE PROVIDER PAYLOAD', { code, kind });
     const translated = repositoryError(new Error('Wrapper', { cause: failure }));

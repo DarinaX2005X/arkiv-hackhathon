@@ -193,11 +193,25 @@ export function createWalletGateway(options: {
         catch { /* A missing fee quote is explicitly represented, never reported as zero. */ }
       }
       const cap = params.gasPrice ?? params.maxFeePerGas;
+      const estimatedCost = price === null ? null : estimatedGas * price;
+      const estimatedMaximumCost = params.gas !== undefined && cap !== undefined ? params.gas * cap : null;
+      const requiredBalance = estimatedMaximumCost ?? estimatedCost;
+      if (requiredBalance !== null) {
+        let balance: bigint | null = null;
+        try {
+          balance = rpcInteger(await publicRpc.request({
+            method: 'eth_getBalance', params: [account, `0x${block.toString(16)}`],
+          }));
+        } catch { /* Balance diagnosis is best-effort; preparation still works when this optional read is unavailable. */ }
+        if (balance !== null && balance < requiredBalance) {
+          throw fail('This wallet needs test GLM on Arkiv Tiramisu to cover the estimated network fee.', 'insufficient_funds');
+        }
+      }
       return {
         batch, account, chainId: TIRAMISU_CHAIN_ID, transactionOptions, request: captured,
         estimatedGas: estimatedGas.toString() as DecimalString, preparedAtBlock: block.toString() as DecimalString,
-        estimatedCostWei: price === null ? null : (estimatedGas * price).toString() as DecimalString,
-        estimatedMaximumCostWei: params.gas !== undefined && cap !== undefined ? (params.gas * cap).toString() as DecimalString : null,
+        estimatedCostWei: estimatedCost === null ? null : estimatedCost.toString() as DecimalString,
+        estimatedMaximumCostWei: estimatedMaximumCost === null ? null : estimatedMaximumCost.toString() as DecimalString,
         estimatePolicy: params.gas !== undefined && cap !== undefined ? 'explicit-cap' : price === null ? 'gas-only' : 'estimate-only',
       };
     },

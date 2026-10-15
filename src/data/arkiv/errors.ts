@@ -51,6 +51,7 @@ export function repositoryError(error: unknown): RepositoryError {
         incomplete: 'The operation could not be completely verified.',
         network: 'The wallet or RPC could not complete this request.',
         rate_limited: 'The provider rate limit was reached.',
+        insufficient_funds: 'This wallet needs test GLM on Arkiv Tiramisu to cover the estimated network fee.',
         rejected: 'The wallet request was rejected. No transaction was submitted.',
         reverted: 'The transaction reverted. No entity changes were applied; gas may have been spent.',
         storage: 'The operation journal could not be saved. Retain the original operation for verification.',

@@ -55,4 +55,11 @@ describe('event read failure messages', () => {
   it('retains explicit saved-request recovery for a reverted transaction', () => {
     expect(eventError(error('reverted'))).toContain('Check the saved request');
   });
+
+  it('explains how to fund an unfunded Tiramisu wallet', () => {
+    const message = eventError(error('insufficient_funds'));
+    expect(message).toContain('test GLM');
+    expect(message).toContain('retry the saved request');
+    expect(message).not.toContain('ANON_COST_LIMITED');
+  });
 });

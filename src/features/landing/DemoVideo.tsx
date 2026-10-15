@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Dialog, Link } from '../../ui';
 import { landingCopy as copy } from './catalog';
 
-const videoUrl = '/media/partfolk-demo-e2717b64.mp4';
-const posterUrl = '/media/partfolk-demo-e2717b64.jpg';
+const videoUrl = '/media/partfolk-demo-74a88764.mp4';
+const posterUrl = '/media/partfolk-demo-74a88764.jpg';
 
 function DemoVideoDialog({ onClose }: { onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
