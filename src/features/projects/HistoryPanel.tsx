@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp, useAppSession } from '../../app/context';
 import { useRepositoryAction } from '../../app/actions';
 import { routeHref } from '../../app/routes';
@@ -25,6 +25,7 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
   const restored = useMemo(() => { if (!selected) return null; try { return restoreTerms(project, selected); } catch { return null; } }, [project, selected]);
   const input = planningInput(project), finalized = restored && input ? finalizePlan(restored, input.publishers, project.snapshot, completedWorkContext(project)) : null;
   const authority = authorityFor(session.actor, session.mode, session.chainId), owner = ownsProject(project, session.actor);
+  useEffect(() => { setSelected(null); setError(null); }, [session.actor, session.mode, session.chainId, project.root.key]);
   const open = project.state.status === 'unique' && project.state.entity.payload.lifecycle !== 'closed' && project.activation.status === 'unique';
   const waiting = action.state.status === 'submitting' || action.state.status === 'needs-verification';
   const publish = async (resume = false) => {
@@ -65,7 +66,7 @@ export function HistoryPanel({ project, onRefresh }: { project: ProjectAggregate
       </article>;
     })()}
     <ActionFeedback action={action} state={action.state} onReconcile={() => { void action.reconcile().then(() => onRefresh()); }} onResume={action.recoverableCommand ? () => { void publish(true); } : undefined} />
-    <Dialog open={selected !== null} title="Restore terms with fresh agreement" closeLabel="Keep current plan" onClose={() => setSelected(null)} footer={<Button onClick={() => { void publish(); }} disabled={!finalized?.ok || !authority || waiting}>Publish these terms as a new version</Button>}>
+    <Dialog open={selected !== null} title="Restore terms with fresh agreement" closeLabel="Keep current plan" onClose={() => setSelected(null)} footer={<Button onClick={() => { void publish(); }} disabled={!finalized?.ok || !authority || !owner || waiting}>Publish these terms as a new version</Button>}>
       <div className="pf-stack"><Notice>{copy.restoreNote} The editable project recipe remains separate from this active agreement.</Notice>
         {restored && <ProjectPlan project={project} plan={finalized?.ok ? finalized.value.plan : restored} />}
         {project.proposal && restored && <PlanDiff title="Changes from the current plan" labels={{ requirement: 'Requirement', before: 'Current plan', after: 'Restored terms' }} rows={comparePlans(project.proposal.payload.plan, restored, project)} />}

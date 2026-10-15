@@ -53,7 +53,7 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
     if (runtime.session.getSnapshot().activeDraftId !== opened.draft.id) runtime.session.selectDraft(opened.draft.id);
   }, [runtime, currentScope, session.activeDraftId]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { setReview(false); setPublicAcknowledged(false); }, [session.actor, session.mode]);
+  useEffect(() => { setReview(false); setPublicAcknowledged(false); }, [session.actor, session.mode, session.chainId]);
   const ownsCurrentDraft = () => {
     const current = runtime.session.getSnapshot();
     if (draft.scope !== draftScope(current.mode, current.actor) || activeDraft.current !== draft.id) return false;

@@ -67,9 +67,10 @@ describe('immediate catalog filters', () => {
   it('keeps independent filters responsive while an invalid date range is corrected', async () => {
     const event = await fixture();
     const parsed = catalogFiltersFromInput({ ...emptyCatalogFilters, search: 'book', from: '2026-10-11', to: '2026-10-09', countryCode: 'GB', city: 'Oxford', deadline: 'invalid' }, [event], 'UTC');
-    expect(parsed.dateError).toContain('end date'); expect(parsed.deadlineError).toContain('valid registration deadline');
+    expect(parsed.dateError).toContain('end date'); expect(parsed.dateErrorField).toBe('to'); expect(parsed.deadlineError).toContain('valid registration deadline');
     expect(parsed.filters).toEqual({ search: 'book', countryCode: 'GB', city: 'Oxford' });
     expect(filterCatalog([event], parsed.filters, NOW)).toEqual([event]);
+    expect(catalogFiltersFromInput({ ...emptyCatalogFilters, from: 'invalid' }, [event], 'UTC').dateErrorField).toBe('from');
   });
 
   it('treats deadline dates inclusively and excludes events without a deadline', async () => {

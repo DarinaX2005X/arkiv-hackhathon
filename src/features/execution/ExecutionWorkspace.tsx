@@ -35,7 +35,8 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
   const canAct = !blocked && source !== null && row.status !== 'evidence_unavailable';
   const remaining = duty.kind === 'task' ? 0 : duty.quantity - row.reportedQuantity;
   const quantityRaw = quantity ?? String(remaining), parsedQuantity = transferQuantity(quantityRaw, remaining);
-  useEffect(() => { setQuantity(undefined); setNote(''); setAckQuantities({}); setCorrectedQuantities({}); }, [session.actor]);
+  useEffect(() => { setQuantity(undefined); setNote(''); setAckQuantities({}); setCorrectedQuantities({}); },
+    [session.actor, session.mode, session.chainId]);
   return <article className="execution-duty" id={`runbook-duty-${duty.id}`} tabIndex={-1}>
     <div className="execution-duty-time"><time dateTime={new Date(duty.interval.start).toISOString()}>{formatDateTime(duty.interval.start, zone)}</time><span>until {formatDateTime(duty.interval.end, zone)}</span></div>
     <div className="pf-stack execution-duty-content"><header><div className="execution-duty-title"><StatusLabel>{duty.kind === 'task' ? 'Task' : duty.kind === 'handover' ? 'Handover' : 'Return'}</StatusLabel><h4>{duty.title}</h4></div><StatusLabel tone={row.status === 'evidence_unavailable' ? 'warning' : row.completed ? 'success' : row.status === 'not_reported' ? 'neutral' : 'warning'}>{rowLabels[row.status]}</StatusLabel></header>
@@ -108,7 +109,8 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
   }
   const completionFingerprint = useMemo(() => completionReviewFingerprint(project), [project]);
   const [reviewedFingerprint, setReviewedFingerprint] = useState('');
-  useEffect(() => { setProgressReview(null); setReleaseReview(null); setReviewedClosure(false); setError(''); }, [session.actor]);
+  useEffect(() => { setProgressReview(null); setReleaseReview(null); setReviewedClosure(false); setError(''); },
+    [session.actor, session.mode, session.chainId, selected?.key, source?.activationKey, source?.proposalHash]);
   async function withCurrentProject(expectedActor: Actor, perform: (fresh: ProjectAggregate, authority: WriteAuthority) => Promise<void>) {
     if (working.current || blocked || !runtime.repository) return;
     working.current = true; setChecking(true); setError('');
@@ -220,7 +222,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
     </section>
     <section className="pf-sheet pf-stack"><h2>Use the recipe again</h2><p>Prepare a new project in Partfolk with these needs and useful settings. Choose fresh dates and invite current contributions. Earlier assignments and agreements stay with this event.</p><Button variant="secondary" disabled={!state} onClick={reuse}>Use as a starting point</Button>{draftExport && <Button variant="secondary" onClick={() => { try { downloadText('partfolk-reused-draft.json', draftExport); } catch { setError('The draft download could not start. Keep this page open and try again.'); } }}>Download the unsaved new draft</Button>}</section>
     <ExecutionExports id={exportId} project={project} selectedProposalKey={selected?.key} />
-    <Dialog open={progressReview !== null} title={progressReview?.input.kind === 'transfer_acknowledgement' ? 'Review my receipt' : 'Review my report'} closeLabel="Cancel" onClose={() => { if (!blocked) setProgressReview(null); }} footer={<><Button variant="secondary" disabled={blocked} onClick={() => setProgressReview(null)}>Cancel</Button><Button disabled={blocked} onClick={() => void confirmProgress()}>{checking ? 'Checking current records…' : progressReview?.input.kind === 'transfer_acknowledgement' ? 'Publish my acknowledgement' : 'Publish my report'}</Button></>}>
+    <Dialog open={progressReview !== null} title={progressReview?.input.kind === 'transfer_acknowledgement' ? 'Review my receipt' : 'Review my report'} closeLabel="Cancel" onClose={() => { if (!blocked) setProgressReview(null); }} footer={<><Button variant="secondary" disabled={blocked} onClick={() => setProgressReview(null)}>Cancel</Button><Button disabled={blocked || !authority || !progressReview || !sameActor(authority.actor, progressReview.actor)} onClick={() => void confirmProgress()}>{checking ? 'Checking current records…' : progressReview?.input.kind === 'transfer_acknowledgement' ? 'Publish my acknowledgement' : 'Publish my report'}</Button></>}>
       {progressReview && <div className="pf-stack"><h3>{progressReview.duty.title}</h3><p>{progressReview.input.kind === 'task_report' ? `I report my task ${progressReview.input.status === 'done' ? 'done' : 'incomplete'}.` : progressReview.duty.kind !== 'task' ? `${progressReview.input.kind === 'transfer_acknowledgement' ? 'I received' : progressReview.duty.kind === 'return' ? 'I returned' : 'I handed over'} ${progressReview.input.quantity} ${progressReview.duty.unit}.` : ''}</p>
         {progressReview.input.kind === 'task_report' && progressReview.input.note && <p>{progressReview.input.note}</p>}
         {progressReview.input.kind === 'transfer_report' && <Notice>{progressReview.input.correctsReportId ? 'This corrects your report. The recipient must acknowledge the corrected quantity separately; earlier reports stay in history.' : 'The recipient must record their own acknowledgement. Your report alone does not confirm that the items were received.'}</Notice>}
@@ -228,7 +230,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
         <p className="pf-secondary">{session.mode === 'public' ? 'Your statement will be public. Confirm this action in your own wallet.' : 'This records your side of the transfer or task in this practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}<ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} />
       </div>}
     </Dialog>
-    <Dialog open={releaseReview !== null} title="Review my equipment release" closeLabel="Cancel" onClose={() => { if (!blocked) setReleaseReview(null); }} footer={<><Button variant="secondary" disabled={blocked} onClick={() => setReleaseReview(null)}>Cancel</Button><Button disabled={blocked} onClick={() => void confirmRelease()}>{checking ? 'Checking current records…' : 'Publish my owner release'}</Button></>}>
+    <Dialog open={releaseReview !== null} title="Review my equipment release" closeLabel="Cancel" onClose={() => { if (!blocked) setReleaseReview(null); }} footer={<><Button variant="secondary" disabled={blocked} onClick={() => setReleaseReview(null)}>Cancel</Button><Button disabled={blocked || !authority || !releaseReview || !sameActor(authority.actor, releaseReview.actor)} onClick={() => void confirmRelease()}>{checking ? 'Checking current records…' : 'Publish my owner release'}</Button></>}>
       {releaseReview && <div className="pf-stack"><h3>{releaseReview.title}</h3><p>{releaseReview.reason}</p><Notice tone="warning">You are releasing your equipment hold. This records your decision as owner; it does not confirm a physical return or another person’s receipt.</Notice><p className="pf-secondary">{session.mode === 'public' ? 'Your release and reason will be public. Your own wallet must approve this action.' : 'This release applies to the current practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}<ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} /></div>}
     </Dialog>
   </section>;

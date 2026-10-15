@@ -32,7 +32,8 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
   const [dialog, setDialog] = useState<Decision['status'] | null>(null); const [reviewedSource, setReviewedSource] = useState<SourcePlanRef | null>(null);
   const [reviewedOwner, setReviewedOwner] = useState<{ actor: Actor; publisherRoot: EntityKey } | null>(null);
   const [reason, setReason] = useState(''); const [deadline, setDeadline] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => { setDialog(null); setReviewedSource(null); setReviewedOwner(null); setReason(''); setError(''); }, [session.actor, selected]);
+  useEffect(() => { setDialog(null); setReviewedSource(null); setReviewedOwner(null); setReason(''); setError(''); },
+    [session.actor, session.mode, session.chainId, selected, source?.activationKey, source?.proposalKey, source?.proposalHash]);
   const timeZone = proposal?.payload.plan.variant.timeZone ?? 'UTC';
   const name = (key: EntityKey) => publisherName(project.publishers.find(p => p.root.key === key), key);
   const begin = (status: Decision['status']) => {
@@ -65,6 +66,8 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
   const changes = predecessor ? agreementDifference(predecessor.payload.plan, plan) : [];
   const ownObligations = plan.runbook.filter(o => o.publisherRoot === selected || (o.kind !== 'task' && (o.giver === selected || o.receiver === selected)));
   const pending = busy || action.state.status === 'submitting' || action.state.status === 'needs-verification';
+  const reviewAuthorityCurrent = Boolean(authority && reviewedOwner && selected === reviewedOwner.publisherRoot
+    && sameActor(authority.actor, reviewedOwner.actor));
   const canDecide = authority && selected && plan.requiredApprovers.includes(selected) && owner?.book.status === 'unique';
   const ownApproved = !!selected && hasVerifiedApproval(readiness, selected);
   const approvedCount = plan.requiredApprovers.filter(key => hasVerifiedApproval(readiness, key)).length;
@@ -107,7 +110,7 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
     {session.actor && !authority && <Notice tone="warning">Use the connected owner account on Tiramisu to publish a decision.</Notice>}
     {session.actor && authority && !selected && <Notice>Your current account does not control any required contribution in this project.</Notice>}
     {owner && owner.book.status !== 'unique' && <Notice tone="warning">Your availability book is {owner.book.status}. Resolve or recover it in My contributions, then review the plan again.</Notice>}
-    <Dialog open={dialog !== null} title={dialog === 'accepted' ? 'Confirm my contribution to this plan' : dialog === 'withdrawn' ? 'Withdraw my contribution' : 'Decline this plan'} closeLabel="Cancel" onClose={() => { if (!busy) setDialog(null); }} footer={<><Button variant="secondary" disabled={busy} onClick={() => setDialog(null)}>Cancel</Button><Button variant={dialog === 'withdrawn' ? 'danger' : 'primary'} disabled={pending} onClick={() => void submit()}>{busy ? 'Checking and submitting…' : dialog === 'accepted' ? 'Publish my approval' : dialog === 'withdrawn' ? 'Publish my withdrawal' : 'Publish my decision'}</Button></>}>
+    <Dialog open={dialog !== null} title={dialog === 'accepted' ? 'Confirm my contribution to this plan' : dialog === 'withdrawn' ? 'Withdraw my contribution' : 'Decline this plan'} closeLabel="Cancel" onClose={() => { if (!busy) setDialog(null); }} footer={<><Button variant="secondary" disabled={busy} onClick={() => setDialog(null)}>Cancel</Button><Button variant={dialog === 'withdrawn' ? 'danger' : 'primary'} disabled={pending || !reviewAuthorityCurrent} onClick={() => void submit()}>{busy ? 'Checking and submitting…' : dialog === 'accepted' ? 'Publish my approval' : dialog === 'withdrawn' ? 'Publish my withdrawal' : 'Publish my decision'}</Button></>}>
       <div className="pf-stack"><p>{name(selected as EntityKey)}, {plan.variant.title}</p>{dialog === 'accepted' ? <><p>I approve my obligations and the complete plan shown above. My approval applies only to this version of the plan.</p><Field label={`Approval valid until (${timeZone})`} type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)} hint="Must cover the end of all your duties. Renewing the stored record does not extend your approval." /></> : <><Notice tone="warning">{dialog === 'withdrawn' ? 'Your matching approval will be removed. The project will need a replacement or a new plan. Outstanding equipment custody remains visible until resolved.' : 'The coordinator and other participants will see that you declined. Your approval will not apply to this version of the plan.'}</Notice><p>Affected assignments: {plan.allocations.filter(a => a.publisherRoot === selected).map(a => plan.variant.requirements.find(r => r.id === a.requirementId)?.title ?? a.requirementId).join(', ') || 'Shared runbook obligations'}.</p></>}<Textarea label="Public reason (optional)" value={reason} onChange={e => setReason(e.target.value)} /><p className="pf-secondary">{session.mode === 'public' ? 'This decision and reason will be public. Your own wallet must approve the transaction.' : 'This is a synthetic local decision. Nothing is published to the network.'}</p>{error && <Notice tone="danger" role="alert">{error}</Notice>}<ActionFeedback action={action} onRefresh={onRefresh} /></div>
     </Dialog>
   </section>;

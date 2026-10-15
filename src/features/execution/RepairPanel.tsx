@@ -33,7 +33,7 @@ export function RepairPanel({ project, onRefresh, onReviewTransfer }: {
   const [checking, setChecking] = useState(false), working = useRef(false);
   const fingerprint = repairFingerprint(project, pins);
   useEffect(() => { controller.update(project, pins); }, [controller, project, pins, fingerprint]);
-  useEffect(() => { setReviewed(false); }, [fingerprint, session.actor]);
+  useEffect(() => { setReviewed(false); }, [fingerprint, session.actor, session.mode, session.chainId]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const checkpoint = useRepositoryAction(`execution-checkpoint:${project.root.key}`), proposalAction = useRepositoryAction(`execution-repair:${project.root.key}`);
   const input = repairInput(project), remaining = remainingWork(project), source = activeSource(project);

@@ -72,7 +72,9 @@ export function MyEvents({ repository, session }: MyEventsProps) {
   const incomplete = Boolean(result && result.snapshot.completeness !== 'complete');
   const stale = Boolean(result && !currentEventSnapshot(result.snapshot, now));
   const warnings = Boolean(result?.diagnostics.length);
-  const unverified = Boolean(error || pending || stale);
+  // Retain individually verified statuses during an ordinary refresh. A failed
+  // read marks the cached result stale, so mutations still require fresh data.
+  const unverified = Boolean(error || stale);
   const rows = result?.items.map(item => ({ item, status: unverified ? 'unverified' as const : myEventStatus(item, now) })) ?? [];
   const shown = rows.filter(row => matchesMyEventFilter(row.status, filter));
   return <section className="pf-events-page" aria-labelledby="my-events-title">

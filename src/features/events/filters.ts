@@ -29,6 +29,7 @@ export function validCatalogLocation(events: readonly EventAggregate[], countryC
 export function catalogFiltersFromInput(input: CatalogFilterInput, events: readonly EventAggregate[], timeZone: string): {
   filters: EventFilters;
   dateError?: string;
+  dateErrorField?: 'from' | 'to';
   deadlineError?: string;
 } {
   const dates = catalogueFilters(input.search, input.from, input.to, timeZone);
@@ -45,6 +46,7 @@ export function catalogFiltersFromInput(input: CatalogFilterInput, events: reado
   return {
     filters,
     ...(!dates.ok ? { dateError: `${dates.error} Date filters will apply when the range is valid.` } : {}),
+    ...(!dates.ok ? { dateErrorField: dates.field } : {}),
     ...(!deadline.ok ? { deadlineError: 'Choose a valid registration deadline date.' } : {}),
   };
 }

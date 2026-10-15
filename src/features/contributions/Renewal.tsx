@@ -27,7 +27,8 @@ export function KeepContributionAvailable({ publisher, onRefresh }: { publisher:
   const [days, setDays] = useState('90'); const [reviewed, setReviewed] = useState<{ key: EntityKey; actor: NonNullable<typeof session.actor>; target: 'root' | 'book'; days: number } | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const authority = writeAuthority(session.actor, session.mode, session.chainId);
-  useEffect(() => { setReviewed(null); setError(''); }, [actorScope(session.actor)]);
+  useEffect(() => { setReviewed(null); setError(''); },
+    [actorScope(session.actor), session.mode, session.chainId, publisher.root.key]);
   if (!ownsPublisher(publisher, session.actor)) return null;
   const pending = busy || action.state.status === 'submitting' || action.state.status === 'needs-verification';
   const review = () => {
@@ -65,7 +66,7 @@ export function KeepContributionAvailable({ publisher, onRefresh }: { publisher:
     {error && <Notice tone="danger" role="alert">{error}</Notice>}
     <ActionFeedback action={action} onRefresh={onRefresh} />
     <Dialog open={reviewed !== null} title="Keep my contribution available" closeLabel="Cancel" onClose={() => { if (!pending) setReviewed(null); }}
-      footer={<><Button variant="secondary" disabled={pending} onClick={() => setReviewed(null)}>Cancel</Button><Button disabled={pending} onClick={() => void submit()}>{busy ? 'Extending…' : 'Confirm extension'}</Button></>}>
+      footer={<><Button variant="secondary" disabled={pending} onClick={() => setReviewed(null)}>Cancel</Button><Button disabled={pending || !authority || !reviewed || !sameActor(authority.actor, reviewed.actor)} onClick={() => void submit()}>{busy ? 'Extending…' : 'Confirm extension'}</Button></>}>
       <div className="pf-stack">
         <p>Add about {reviewed?.days} days to {reviewed?.target === 'root' ? 'my contribution profile' : 'my current offers and promises'}.</p>
         <p>{session.mode === 'public' ? 'The network measures expiry in blocks, so this is an estimated duration. Your wallet will show the transaction before you approve it.' : 'This extends the saved local example.'}</p>

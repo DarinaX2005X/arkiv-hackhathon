@@ -74,24 +74,24 @@ export function eventError(error: RepositoryError): string {
 
 /** Date filters mean calendar dates in the explicitly displayed device zone. */
 export function catalogueFilters(search: string, from: string, to: string, timeZone: string):
-  { ok: true; filters: EventFilters } | { ok: false; error: string } {
+  { ok: true; filters: EventFilters } | { ok: false; error: string; field: 'from' | 'to' } {
   const filters: EventFilters = {};
   if (search.trim()) filters.search = search.trim();
   if (from) {
     const value = localDateTimeToUtc(`${from}T00:00`, timeZone, 'earlier');
-    if (!value.ok) return { ok: false, error: 'Choose a valid start date.' };
+    if (!value.ok) return { ok: false, error: 'Choose a valid start date.', field: 'from' };
     filters.from = value.utcMilliseconds;
   }
   if (to) {
     // The end is exclusive. Temporal handles the actual length of the calendar day.
     const date = /^\d{4}-\d{2}-\d{2}$/.test(to) ? new Date(`${to}T12:00:00Z`) : null;
-    if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== to) return { ok: false, error: 'Choose a valid end date.' };
+    if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== to) return { ok: false, error: 'Choose a valid end date.', field: 'to' };
     date.setUTCDate(date.getUTCDate() + 1);
     const value = localDateTimeToUtc(`${date.toISOString().slice(0, 10)}T00:00`, timeZone, 'earlier');
-    if (!value.ok) return { ok: false, error: 'Choose a valid end date.' };
+    if (!value.ok) return { ok: false, error: 'Choose a valid end date.', field: 'to' };
     filters.to = value.utcMilliseconds - 1;
   }
-  if (filters.from !== undefined && filters.to !== undefined && filters.from >= filters.to) return { ok: false, error: 'The end date must be on or after the start date.' };
+  if (filters.from !== undefined && filters.to !== undefined && filters.from >= filters.to) return { ok: false, error: 'The end date must be on or after the start date.', field: 'to' };
   return { ok: true, filters };
 }
 
@@ -124,5 +124,7 @@ export function eventCalendar(terms: AudienceTerms, eventId: string, now = Date.
 }
 export function downloadEventCalendar(terms: AudienceTerms, eventId: string, cancelled = false) {
   const url = URL.createObjectURL(new Blob([eventCalendar(terms, eventId, Date.now(), cancelled)], { type: 'text/calendar;charset=utf-8' }));
-  const link = document.createElement('a'); link.href = url; link.download = 'partfolk-event.ics'; link.click(); URL.revokeObjectURL(url);
+  const link = document.createElement('a'); link.href = url; link.download = 'partfolk-event.ics';
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

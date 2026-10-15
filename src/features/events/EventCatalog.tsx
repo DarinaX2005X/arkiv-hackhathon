@@ -24,7 +24,9 @@ export function EventCatalog({ repository }: EventCatalogProps) {
   const parsed = useMemo(() => catalogFiltersFromInput(input, events, zone), [input, events, zone]);
   const incomplete = Boolean(result && result.snapshot.completeness !== 'complete');
   const stale = Boolean(result && !currentEventSnapshot(result.snapshot, now));
-  const unverified = Boolean(error || pending || stale);
+  // A refresh does not invalidate an already fresh snapshot. Keep its cards and
+  // availability filters stable while the replacement read is in flight.
+  const unverified = Boolean(error || stale);
   const warnings = Boolean(result?.diagnostics.length);
   const visible = useMemo(() => filterCatalog(events, parsed.filters, now, unverified), [events, parsed.filters, now, unverified]);
   const filtered = Object.values(input).some(Boolean);
@@ -57,8 +59,8 @@ export function EventCatalog({ repository }: EventCatalogProps) {
       <div className="pf-event-filter-extra">
         <SearchSelect label="Country" value={input.countryCode} options={options.countries} placeholder="Every country" clearLabel="Clear country" onValueChange={changeCountry} disabled={input.format === 'online' || !options.countries.length} noResultsText="No country in this event list matches" />
         <SearchSelect label="City" value={input.city} options={options.cities} placeholder={input.countryCode ? 'Every city' : 'Choose country first'} clearLabel="Clear city" onValueChange={value => change('city', value)} disabled={input.format === 'online' || !input.countryCode || !options.cities.length} noResultsText="No city in this event list matches" />
-        <Field type="date" label="From date" value={input.from} onChange={event => change('from', event.target.value)} error={parsed.dateError} />
-        <Field type="date" label="Through date" value={input.to} onChange={event => change('to', event.target.value)} aria-invalid={Boolean(parsed.dateError)} />
+        <Field type="date" label="From date" value={input.from} onChange={event => change('from', event.target.value)} error={parsed.dateErrorField === 'from' ? parsed.dateError : undefined} />
+        <Field type="date" label="Through date" value={input.to} onChange={event => change('to', event.target.value)} error={parsed.dateErrorField === 'to' ? parsed.dateError : undefined} />
         <Field type="date" label="Deadline by" value={input.deadline} onChange={event => change('deadline', event.target.value)} error={parsed.deadlineError} hint="Registration deadlines on or before this date." />
       </div>
       <div className="pf-event-filter-foot"><p>Filters update as you choose. Calendar dates use {zone}.</p>

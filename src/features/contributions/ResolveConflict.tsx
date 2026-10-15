@@ -31,7 +31,8 @@ export function ResolveContributionConflict({ publisher, onRefresh }: { publishe
   const [resources, setResources] = useState<Record<string, string>>({}); const [reasons, setReasons] = useState<Record<string, string>>({});
   const [problems, setProblems] = useState<DomainReason[]>([]); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ input: ResolveBookInput; command: ReplaceBookCommand; actor: NonNullable<typeof session.actor> } | null>(null);
-  useEffect(() => { setPreview(null); setAvailability(''); setDecisions({}); setResources({}); setReasons({}); setError(''); }, [actorScope(session.actor), publisher.root.key]);
+  useEffect(() => { setPreview(null); setAvailability(''); setDecisions({}); setResources({}); setReasons({}); setError(''); },
+    [actorScope(session.actor), session.mode, session.chainId, publisher.root.key]);
   if (publisher.book.status !== 'conflict') return <ActionFeedback action={action} onRefresh={onRefresh} />;
   const heads = publisher.book.entities; const review = inspectBookConflict(publisher);
   const owned = ownsPublisher(publisher, session.actor); const pending = busy || action.state.status === 'submitting' || action.state.status === 'needs-verification';
@@ -98,7 +99,7 @@ export function ResolveContributionConflict({ publisher, onRefresh }: { publishe
     </>}
     <ActionFeedback action={action} onRefresh={onRefresh} />
     <Dialog open={preview !== null} title="Use this combined contribution" closeLabel="Cancel" onClose={() => { if (!pending) setPreview(null); }}
-      footer={<><Button variant="secondary" disabled={pending} onClick={() => setPreview(null)}>Cancel</Button><Button disabled={pending} onClick={() => void submit()}>{busy ? 'Saving…' : 'Save combined contribution'}</Button></>}>
+      footer={<><Button variant="secondary" disabled={pending} onClick={() => setPreview(null)}>Cancel</Button><Button disabled={pending || !authority || !preview || !sameActor(authority.actor, preview.actor)} onClick={() => void submit()}>{busy ? 'Saving…' : 'Save combined contribution'}</Button></>}>
       {preview && <div className="pf-stack">
         <ContributionPreview draft={preview.command.book} />
         <p>Keep {preview.command.book.grants.length} active promises, {preview.command.book.attestations.length} work statements and {preview.command.book.custodyHolds.length} equipment custody records.</p>

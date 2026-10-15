@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RepositoryError, RepositoryErrorCode } from '../../data/types';
 import type { AudienceTerms } from '../../domain/events';
-import { eventAdmissionLabel, eventDate, eventDayLabel, eventError, eventLocationLabel, eventTimeLabel } from './presentation';
+import { downloadEventCalendar, eventAdmissionLabel, eventDate, eventDayLabel, eventError, eventLocationLabel, eventTimeLabel } from './presentation';
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const error = (code: RepositoryErrorCode): RepositoryError => ({
   code, reasons: [], retryable: true, diagnostic: 'ANON_COST_LIMITED raw provider detail',
@@ -27,6 +29,18 @@ describe('compact event facts', () => {
     expect(eventTimeLabel(folded)).toBe('1:30 AM EDT to 1:30 AM EST');
     expect(eventDate(folded)).toContain('EDT');
     expect(eventDate(folded)).toContain('EST');
+  });
+  it('keeps the calendar URL alive through the attached download click', () => {
+    vi.useFakeTimers();
+    const click = vi.fn(), remove = vi.fn(), append = vi.fn();
+    const link = { href: '', download: '', click, remove };
+    const createObjectURL = vi.fn(() => 'blob:calendar'), revokeObjectURL = vi.fn();
+    vi.stubGlobal('document', { createElement: vi.fn(() => link), body: { append } });
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    downloadEventCalendar(terms, 'event-one');
+    expect(append).toHaveBeenCalledWith(link); expect(click).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.runAllTimers(); expect(revokeObjectURL).toHaveBeenCalledWith('blob:calendar');
   });
 });
 
