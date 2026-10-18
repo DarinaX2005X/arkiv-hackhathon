@@ -1,151 +1,241 @@
 # Building with Arkiv
 
-This report records observed behavior and reproducible tests. Unverified claims are not evidence of successful transactions.
+Partfolk uses Arkiv as the public source of contributor agreements and event registrations. This report separates SDK/RPC friction, protocol design lessons, application defects found with local fixtures, and confirmed testnet evidence.
 
-## Environment and start
+## Environment and reproduction
 
-- Date: 9 October 2026, Asia/Qyzylorda.
-- OS: Windows, PowerShell.
-- Node: 22.13.0. npm: 10.9.2. pnpm available: 10.32.1.
-- Network target: Tiramisu, chain ID 7738577.
-- Official guidance downloaded from Arkiv-Network/global-tour-stop-pre-devcon before concept selection.
-- Official `arkiv` and `arkiv-first-write` skills installed from Arkiv-Network/skills into the user's Codex skills directory and read directly.
-- No existing signer was configured at task start. A dedicated test signer was created locally and the first synthetic write was confirmed at 2026-10-09T13:19:10Z.
+- SDK: `@arkiv-network/sdk 0.8.1`; viem: `2.57.4`, pinned in [package.json](../package.json).
+- Runtime used: Node.js `22.13.0`, npm `10.9.2`, Windows / PowerShell. The project requires Node.js `>=22.12.0`.
+- Network: Tiramisu, chain ID `7738577`; official public JSON-RPC. The deployed node software version was not recorded.
+- Initial network observations: 9 October 2026. Agreement and event evidence: 11 October 2026. Application fixes and regression checks: 19 October 2026, Asia/Qyzylorda.
+- Local regression runner: Vitest `5.0.3` in the Node environment. These tests use fake RPC/wallet providers or callback fixtures; they do not launch a browser or send public transactions.
 
-## Initial version resolution
+Run commands from the repository root after `npm ci`. Direct Node invocations avoid a PowerShell npm-wrapper issue observed during development, where `npm run verify -- ...` lost forwarded option arguments.
 
-Surface: npm registry and official Arkiv skills.
+Live probes use current provider behavior, which may differ from the dated observations. A quota failure cannot confirm an unrelated query finding. Commands for fixed application issues verify the regression cases on the current code; they do not claim that the old failure still occurs.
 
-Expected: the supported 0.8.x SDK is available and matches current examples.
+## SDK and RPC friction
 
-Observed: `npm view @arkiv-network/sdk@0.8 version` reports 0.8.0 and 0.8.1. The official skills declare the checked range `>=0.8.1 <0.9` and use 0.8.1. The bootstrap pins 0.8.1 for reproducibility; installed declarations and real RPC behavior are checked next.
+### 1. Exported inequality predicate rejected by the node
 
-Reproduce: run the version command above, then compare `node_modules/@arkiv-network/sdk/package.json` and installed declarations with the official first-write skill.
+**Versions and evidence:** SDK 0.8.1, viem 2.57.4, public Tiramisu RPC; live read on 9 October 2026.
 
-Outcome: version selection verified. This is a successful setup observation, not a reported SDK defect.
+**Expected:** an exported SDK predicate is accepted by the node, or the SDK reports the unsupported operation with the original diagnostic.
 
-## Read-only network probe
+**Actual:** `ne('entity_type', 'probe')` renders `entity_type != str('probe')`. The node rejected it with code `-32002` and instructed the caller to use `NOT` over equality. The wrapper's generic resource-unavailable message was less useful than the node diagnostic.
 
-Surface: TypeScript SDK 0.8.1, viem 2.57.4, public Tiramisu JSON-RPC.
+**Reproduce:**
 
-Reproduce: `node scripts/probe-arkiv.mjs`. The probe limits its method set to reads, caps requests, never reads a key and never fetches unrelated payloads. Observed runs at 2026-10-09T12:46:16Z and 12:47:22Z exited successfully. The latter used snapshot block 350152. Future runs use a fresh block and may observe different public metadata.
+1. Run the bounded, read-only probe:
+   ```bash
+   node scripts/probe-arkiv.mjs
+   ```
+2. Inspect `checks.unsupportedNotEqualObservation`. The recorded behavior is `nodeAccepted: false`.
+3. Inspect the corresponding `requests[].rpcError` for the node code and message. The script treats this expected rejection as a finding, not a failed network check.
 
-Expected: chain 7738577, a consistent typed scoped query, complete cursor semantics and meaningful provider errors.
+**Resolution:** use supported predicates, including `not(eq(...))` where appropriate. Keep namespace/type/creator scoping: a complement also matches records missing the attribute.
 
-Observed: chain ID matched; block duration was 2 seconds in this response; project-scoped SDK query and raw filtered count both returned zero for the probe namespace. Two one-item cursor pages remained pinned to one block. Public metadata samples belong to unrelated authors and are **not project write evidence**. The probe reports that the bounded sample remains incomplete.
+**Suggested improvement:** align the builder's advertised operators with the node dialect and preserve the actionable node diagnostic at the main error boundary. [Probe source](../scripts/probe-arkiv.mjs)
 
-### Exported inequality predicate rejected by the node
+### 2. Creation-block filtering differs between SDK and raw RPC
 
-Expected: an exported SDK predicate can be used or fails with an actionable original message.
+**Versions and evidence:** SDK 0.8.1 expression validator and public Tiramisu RPC; source inspection and live raw query on 9 October 2026.
 
-Actual: `ne('entity_type', 'probe')` renders `entity_type != str('probe')`, but the node rejects it with code `-32002`: inequality is not supported; use `NOT` over equality. The viem/SDK wrapper's generic resource-unavailable text is less informative. The script retains the expected rejection as a finding, not a failed network check.
+**Expected:** the documented creation-block range can be expressed consistently through the SDK builder and raw RPC.
 
-Impact: application reads will use documented supported predicates and preserve useful sanitized node error context. A complement also matches records missing that attribute, so namespace/type/creator scopes remain necessary.
+**Actual:** raw RPC accepted a bounded `$createdAt` range using `u64`. SDK 0.8.1 rejected that field with `InvalidPredicateError`, stating that it cannot be filtered on.
 
-Suggested improvement: align the builder's advertised operators with the current node dialect and surface the node diagnostic at the primary error boundary.
+**Reproduce:**
 
-### Metadata filter differs between SDK and raw RPC
+1. Run this SDK-only check; no network connection is needed:
+   ```bash
+   node --input-type=module -e 'import { u64 } from "@arkiv-network/sdk/attr"; import { gte } from "@arkiv-network/sdk/query"; try { gte("$createdAt", u64(350152)); console.log("accepted"); } catch (error) { console.log(error.name + ": " + error.message); }'
+   ```
+   Expect `InvalidPredicateError`.
+2. Run `node scripts/probe-arkiv.mjs` without `--creator`. Inspect `checks.recentMetadataSample`: it sends the raw bounded range, selects metadata only and limits the result to one entity. A successful empty result also demonstrates that the node accepted the query.
+3. Compare with `node_modules/@arkiv-network/sdk/src/query/expression.ts`. The probe's raw query and this separate SDK check establish the two sides of the mismatch.
 
-Expected: a documented creation-block range is usable consistently through the builder and raw API.
+**Resolution:** Partfolk stores explicit typed application timestamps where builder range queries are needed. Creation block numbers and application timestamps remain distinct.
 
-Actual: current raw RPC accepts a bounded `$createdAt` u64 range; SDK 0.8.1's expression validator rejects this metadata name. This is verified by the probe and installed source. Store explicit typed application time when the builder needs it; do not confuse timestamps with block numbers.
+**Suggested improvement:** document and reconcile the builder/raw-RPC difference. [Probe source](../scripts/probe-arkiv.mjs) · [Typed application attributes](../src/data/arkiv/envelope.ts)
 
-### Readonly is not undeletable
+### 3. Mutation helpers combine preparation, sending and receipt processing
 
-Surface: installed `src/entity/flags.ts` and official native mutation documentation. This is a source/documentation finding, **not a live deletion test**.
+**Versions and evidence:** SDK 0.8.1 and viem 2.57.4; installed source, real SDK serialization with fake providers, and the successful first write.
 
-Expected risk during design: a reader might interpret readonly plus permissionless Lifetime Extension as preservation against the publisher.
+**Expected:** inspect exact mutation calldata and fee bounds before signing, record send identity durably, then verify confirmation independently.
 
-Actual contract: readonly fixes payload/attributes, while the current owner may still delete, transfer or extend the entity. Permissionless extension only adds permission to extend. There is no documented deletion-lock flag. We rejected a preservation-only product claim rather than promising a guarantee the protocol cannot provide.
+**Actual:** the ergonomic mutation action also prepares, signs, sends and processes the receipt. Estimate-only tooling needed a read-method allowlist, a signing guard and interception of `eth_estimateGas`. The injected-wallet path also needed to checkpoint the returned hash before receipt handling. A viem fallback from `eth_sendTransaction` to `wallet_sendTransaction` required guarding both methods against a second forwarded send after an uncertain response. No duplicated live transaction was observed.
 
-Suggested improvement: make the remaining owner powers prominent beside the flag examples.
+**Reproduce:**
 
-## Local signer preparation
+```bash
+node --test tests/first-write.test.mjs
+node node_modules/vitest/vitest.mjs run src/data/__tests__/wallet-operations.test.ts
+```
 
-`node scripts/create-demo-wallet.mjs` creates a dedicated local Tiramisu test wallet without sending transactions and only prints its public address. `.local/` is Git-ignored. Public demo address: `0x6267AB770266dA229130a2a75a52A9d578Fb0A5b`.
+The first suite exercises real SDK create serialization with a signer that must never be called during estimation. The second checks admission/hash checkpoint order, suppression of the internal SDK receipt wait, wallet-method fallback and recovery after a lost response. Both use local providers.
 
-Faucet authentication and CAPTCHA required a manual user action. The user confirmed delivery, and a read at 2026-10-09T13:05:52Z verified 10 test GLM. No real funds were requested or used.
+**Resolution:** capture the exact unsigned request, journal admission before forwarding, persist the provider hash immediately, and reconcile through official-RPC receipt verification. Explicit receipt waits disable replacement following with `checkReplacement: false`. An unresolved outcome does not authorize another send.
 
-## First write, confirmation and read-back
+**Suggested improvement:** expose a public prepare/estimate API returning the exact mutation request and fee bounds separately from submission and waiting. [Wallet gateway](../src/data/wallet/gateway.ts) · [Operation controller](../src/data/operations/controller.ts) · [Reconciliation](../src/data/operations/reconciliation.ts)
 
-Surface: SDK 0.8.1 `createEntity`, a dedicated local testnet signer, Tiramisu chain 7738577. Reproduction helper: `scripts/first-write.mjs`; guard tests: `node --test tests/first-write.test.mjs` (11 passed). The helper defaults to estimate/reconciliation and requires `--broadcast` for its single frozen synthetic operation.
+### 4. Aggregate queries can hit quota while chain reads still work
 
-Expected: estimate the exact SDK serialization without signing or sending; cap aggregate spend at 0.1 test GLM; persist send identity before network side effects; verify successful creation using the receipt plus creator-scoped, typed queries.
+**Versions and evidence:** SDK 0.8.1, viem 2.57.4 and public Tiramisu RPC; observed HTTP `429` with `ANON_COST_LIMITED` during aggregate verification.
 
-Observed: the guarded estimate returned 102698 gas. Admission used gas limit 123238. Transaction `0xd9a9eb50a203afc13c5a28df1707eca01c66fab19837eacb91c72e11c22b2ba3` succeeded at block 351105. Entity `0xfadef279e9b79b91409a85ba941aa5b03e7f7e48ee3cab28e97c0d3fa8d25050` matched the predicted key, immutable creator, initial owner, exact payload, typed attributes, creation flags and 30-day lifetime. Both the key query and creator-scoped seed query matched at the receipt block; the latter also matched at block 351106.
+**Expected:** complete entity data or an actionable limit error that distinguishes unavailable evidence from an empty result.
 
-Actual gas used: 101712. Actual total fee and observed account balance delta: 0.000101712000203424 test GLM. Public evidence is stored in [evidence/bootstrap.json](evidence/bootstrap.json); keys and signed bytes remain in Git-ignored local custody. This bootstrap entity demonstrates SDK behavior, not final product functionality.
+**Actual:** chain/block reads succeeded while `arkiv_query` was rate-limited. A working `eth_chainId` response therefore did not establish that an agreement could be verified.
 
-Elapsed from the task's practical setup start at approximately 12:39 UTC to confirmed read-back at 13:19 UTC: approximately 40 minutes, including parallel research and a manual faucet step. Do not interpret this as SDK installation or transaction latency alone.
+**Reproduce:**
 
-Observed friction: the SDK's ergonomic mutation method also performs preparation, signing and sending, so an estimate-only helper needs a read-method allowlist, a signing guard, and interception of `eth_estimateGas`. The first-write skill provides this pattern. A first-class public prepare/estimate API returning the exact mutation calldata and fee cap would make safe first-use tooling simpler. No write failure is claimed: the bounded first send succeeded.
+1. Run `node scripts/probe-arkiv.mjs` once and compare the recorded HTTP status of chain reads with query requests. The probe records quota headers and stops further network requests after a 429.
+2. The live failure depends on the provider's current quota state; a successful run does not reproduce it. Do not generate traffic just to exhaust the quota.
+3. Reproduce the application's handling deterministically:
+   ```bash
+   node node_modules/vitest/vitest.mjs run src/data/arkiv/read-policy.test.ts src/server/arkiv-read.test.ts
+   ```
+   Quota fixtures check cooldowns, `Retry-After`, bounded scheduling and recovery after the recorded delay.
 
-## Native consume-and-replace experiment
+**Resolution:** incomplete reads stay unverified. Honor cooldown information, then retry a bounded complete read. This finding does not establish a chain-wide outage or mutation failure.
 
-Surface: SDK0.8.1 executeBatch and official Tiramisu RPC. Observed9October2026; helper `scripts/probe-atomic-transition.mjs`, guards `tests/atomic-transition.test.mjs`. The helper admits only one frozen phase per explicit --broadcast invocation; default never signs or sends. Both phases combined have a0.003testGLM cap inside the overall0.1testGLM ceiling.
+**Suggested improvement:** make quota classification and retry guidance available through SDK errors without requiring callers to inspect transport internals. [Read policy](../src/data/arkiv/read-policy.ts) · [Hosted read service](../src/server/arkiv-read.ts)
 
-Expected: create readonly A; atomically create B and delete exact A; a stale create C/delete A estimate must decode the exact EntityNotFound(A) custom error. A generic RPC failure cannot count as passing evidence.
+## Protocol design lesson
 
-Observed: A creation succeeded at block352006, tx `0x0170cf0c6534e5b1bdaf470a8acc119f45949629283cd751e332f668f84069fd`. B creation/A deletion succeeded at block352065, tx `0x80e46f7b11e8e413f75a696484524b976f95bb4da695816ed56cd6737268925a`. A stale estimate returned selector0x66a89f2a with the exact deleted A key. The complete creator-scoped query at block352164 contained only the exact B payload and flags; no A or C. Actual probe fee0.000224464000448928testGLM; aggregate including bootstrap0.000326176000652352testGLM. Guard suite19/19 passed.
+### 5. Readonly records remain deletable by their owner
 
-Evidence: [atomic-transition.json](evidence/atomic-transition.json). No paid stale transaction was sent. A mined failed-batch rollback was NOT tested; all-or-none execution is the official protocol guarantee. This supports a same-owner current-book transition precondition, not a native patch CAS, resource truth or atomic agreement across multiple owners. Readonly A was in fact deleted in this experiment, extending the earlier source-only finding with a live observation.
+**Versions and evidence:** SDK 0.8.1 creation flags and native `executeBatch`; source inspection followed by a live consume-and-replace experiment on Tiramisu, 9 October 2026.
 
-Suggested documentation improvement: show a complete immutable current-state replacement example, explain the exact stale predecessor error and separate this pattern from multi-owner locking. The API exposed the necessary primitives successfully; no SDK mutation failure is claimed.
+**Expected during design:** readonly data plus permissionless Lifetime Extension might preserve evidence even if its publisher later wanted to remove it.
 
-## Public adapter and independent verifier
+**Actual:** readonly protects payload and attributes. The current owner can still delete, transfer or extend the entity; permissionless extension only broadens who can extend it. The initial source finding was subsequently confirmed by deleting readonly A while creating readonly B in one native batch. This is a protocol property, not an SDK defect.
 
-The Partfolk reader/writer uses SDK 0.8.1 with viem 2.57.4. The injected-wallet port, operation journal, scoped reader, and receipt verifier have been exercised with real SDK serialization against deterministic fake JSON-RPC responses. These are unit/contract checks, not additional live writes. UI and browser behavior remain user-owned verification.
+**Reproduce and inspect the evidence:**
 
-Observed in installed source and reproduced with a fake provider: a viem send path may try `wallet_sendTransaction` after `eth_sendTransaction`. The port guards both methods and permits at most one forwarded request after recording admission. A generic lost response must not trigger a fallback resend. A fake-provider test verifies this guard and immediate hash checkpointing. This is defensive integration behavior, not a claim of a duplicated real transaction.
+1. Open [atomic-transition.json](evidence/atomic-transition.json). A was created at block `352006`; B creation and A deletion succeeded together at `352065`. A stale create-C/delete-A estimate decoded `EntityNotFound(A)` with selector `0x66a89f2a`. The complete scoped read at `352164` contained only B.
+2. Run the local guard and serialization checks:
+   ```bash
+   node --test tests/atomic-transition.test.mjs
+   ```
+   The tests require the exact missing-A error; a generic RPC failure or a different missing key cannot pass.
+3. While the probe record remains available, inspect B independently:
+   ```bash
+   node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability atomic --json
+   ```
+   The output explicitly reports `productProof: false`. This reads an existing feasibility record; it does not repeat the writes.
 
-Observed in SDK mutation behavior: the ergonomic mutation action couples sending to receipt processing. The wallet boundary captures the provider hash and stops that internal wait so independent official-RPC verification owns the result. Its explicit receipt wait disables replacement following (`checkReplacement:false`); a different transaction must not silently become success for a frozen application intent.
+**Resolution:** Partfolk validates the availability of required evidence at every read. It also uses create-successor/delete-exact-predecessor batches for state replacement under one owner. This is not an atomic agreement across multiple owners or a guarantee of physical resource availability.
 
-Fault tests exposed and repaired verifier omissions around per-log transaction/block provenance, removed logs, duplicate created keys, and inconsistent block-number headers. The final verifier compares each event to its receipt and independently fetches the canonical header. These failures were deliberately constructed fixtures, not observed faults of the Tiramisu node.
+No paid stale transaction was sent, and mined failed-batch rollback was not tested. All-or-none execution is the protocol guarantee; the live experiment establishes successful replacement and rejection of the stale estimate.
 
-A later blind review added mined-revert fixtures for a two-transaction project initialization and proposal/request fan-out. A failed later transaction must not erase successful earlier phases. The adapter now reports partial reverts separately, retains prior confirmed keys, and allows an explicit resume to allocate a new attempt only for the proven failed phase after fresh validation. The old reverted transaction is retained and never resent. These are deterministic fault-injection tests, not paid failed transactions on Tiramisu.
+**Suggested improvement:** explain remaining owner powers beside readonly examples and include a complete consume-and-replace example with its stale-predecessor error. [Probe implementation](../scripts/probe-atomic-transition.mjs)
 
-Read behavior is conservative: one block for every page/reference; one bounded cursor restart without mixing accumulated pages; scoped conflict detection; exact creator/owner/readonly validation; no latest-revision selection; history gaps separate from current agreement confidence. Reader tests cover natural expiry, incomplete pages, scope poisoning, activation replay, missing historical proposals, and terminal closure.
+## Partfolk integration issues
 
-Read-only CLI observation on 9 October 2026: direct invocation `node node_modules/tsx/dist/cli.mjs src/cli/verify.ts --inspect-capability atomic --json` successfully read the historical B probe at block 353367 and explicitly returned `productProof:false`. On this Windows shell, the installed npm PowerShell wrapper dropped double-dash option arguments for an attempted `npm run verify -- --inspect-capability ...` invocation. The direct Node invocation avoids that wrapper. This CLI capability inspection is not a Partfolk project validation.
+The following application fixes were introduced in [492f090](https://github.com/DarinaX2005X/arkiv-hackhathon/commit/492f090); its parent `dc61f29` contains the earlier implementation. The commands run the committed regression fixtures against the fixed code. They are not reports of Arkiv consensus failures.
 
-## Query limits during aggregate verification
+### 6. Historical attendance checks amplified HTTP requests
 
-Surface: SDK 0.8.1 and the public Tiramisu RPC. Minimal check: compare `eth_chainId` with an exact-key `arkiv_query` for a known entity. Expected: complete entity data or an actionable limit error. Observed: chain/block reads succeeded while the query returned HTTP `429` with `ANON_COST_LIMITED`.
+**Versions and evidence:** Partfolk before/fixed at `492f090`, SDK 0.8.1, viem 2.57.4, Vitest 5.0.3; deterministic reader and hosted-service fixtures.
 
-Aggregate readers must treat this as unavailable evidence, never an empty result. Respect `Retry-After`, then retry a bounded complete read. Preserving quota codes and retry guidance in SDK errors would make read-budget exhaustion easier to diagnose. This condition does not establish a chain-wide outage or mutation failure.
+**Expected:** a supported roster of 512 attendees fits the hosted service's bounded read policy.
 
-## Live agreement and repair verification
+**Actual:** with each request in a distinct creation block, two historical-header passes made 1,024 separate HTTP requests, plus ordinary snapshot reads. The direct fixture completed, but the hosted path exhausted its HTTP burst allowance.
 
-The [completed public proof](evidence/product-proof.json) exercises SDK 0.8.1 on Tiramisu with synthetic owners and independently authored records. All 92 transactions are confirmed. Seven dated observations capture the agreement lifecycle and matching independent CLI reads.
+**Reproduce:**
 
-Expected: withdrawal invalidates readiness, and a changed or restored plan cannot inherit earlier consent. Observed: P1 was Ready with seven approvals at block 442076, then Changed with six after withdrawal at 442152. Repaired P2 and restored P3 each began with zero current approvals and became Ready only after seven fresh decisions. P3's final snapshot at block 444117 retains the complete P1 → P2 → P3 lineage. The independent verifier reproduced the recorded states at their exact blocks.
+```bash
+node node_modules/vitest/vitest.mjs run src/data/events/reader.test.ts -t "loads 512 distinct historical requests"
+```
 
-This establishes a real public contributor-agreement workflow, beyond the earlier primitive probes. It is dated evidence of synthetic consent, not a claim about current readiness, physical work, visitor registration or browser interaction.
+Both the direct and hosted cases construct 512 distinct inclusion blocks. On the fixed code, each roster load uses 32 batches of 32 historical headers, retains every required header check and completes the full roster. Ordinary snapshot headers are checked separately.
 
-## Public event participation verification
+**Resolution:** group exact historical-header calls into JSON-RPC batches of at most 32. This reduces HTTP requests, not the number of RPC operations. Snapshot rechecks, deadline timestamps, response identity validation and the 60-second freshness requirement remain. Separate per-IP and per-instance header-unit budgets still bound upstream work.
 
-The [event evidence export](evidence/test-events.json) records three published synthetic TEST EVENT releases on Tiramisu and nine attendance records across seven wallets. Production repository reads at blocks 446077, 446084 and 446092 verified the online, in-person and hybrid events respectively. The unlimited events had three and two going; the limited event had three admitted places and one waiter. Every current release starts its conditions with `[PARTFOLK TEST EVENT]`, an authored declaration rather than an independent certification.
+A separate bounded live read confirmed that the configured provider accepted a two-header JSON-RPC batch. The 512-attendee comparison is a local fixture, not a live 512-person event. [Reader fixture](../src/data/events/reader.test.ts) · [Service limits](../docs/operations.md)
 
-The event run added 43 confirmed native transactions with zero transferred value and no additional funding transactions. Combined with the original proof, the exported budget contains 135 confirmed transactions and cumulative accounted spend of 0.067061464022387640 test GLM against the 0.1 test GLM cap. This establishes dated synthetic registration evidence. It does not prove real attendance, browser interaction or continuing anonymous RPC availability; public query quotas can still block a complete read.
+### 7. Sequential and redundant reads delayed wallet interaction
 
-## Request amplification during attendance verification
+**Versions and evidence:** Partfolk before/fixed at `492f090`, SDK 0.8.1, viem 2.57.4, Vitest 5.0.3; controlled request gates and registration callback fixtures.
 
-Surface: Partfolk's event reader, SDK 0.8.1 and the hosted read service. This was an application integration issue, not an observed Arkiv consensus or SDK mutation failure.
+**Expected:** independent reads can overlap, and a complete, verified, fresh displayed snapshot need not be fetched again before the writer performs its own checks.
 
-Expected: a supported roster of 512 attendees can be verified within the service's bounded read policy. A deterministic fixture placed every request in a different creation block. Two independent historical-header passes then produced 1,024 separate HTTP requests, plus ordinary snapshot reads. Direct fixture reads completed, while the hosted path exhausted its HTTP burst allowance before completing the roster.
+**Actual:** a representative project read serialized ten requests into ten network stages. Registration also added an interface refresh before the writer's existing validations.
 
-Resolution: exact historical-header calls are grouped into batches of up to 32. The two passes now require 32 HTTP requests while retaining all 1,024 header checks. Snapshot rechecks, deadline timestamps, response identity validation and the 60-second freshness requirement remain intact. HTTP limits still apply, and separate per-IP and per-instance header-unit budgets bound upstream work; batching does not make individual RPC operations free. See [service limits](../docs/operations.md) and the [reader](../src/data/events/reader.test.ts), [transport](../src/data/arkiv/read-policy.test.ts) and [service](../src/server/arkiv-read.test.ts) regression tests.
+**Reproduce:**
 
-A bounded live read confirmed that the configured Tiramisu provider accepts a two-header standard JSON-RPC batch with matching IDs and hashes. The 512-attendee comparison is a deterministic fixture result, not a live 512-person event or a claim about provider-wide quotas. No new public transactions were sent for these checks.
+```bash
+node node_modules/vitest/vitest.mjs run src/data/__tests__/arkiv-reader.test.ts src/features/attendance/RegistrationPanel.test.ts
+```
 
-## Repeated reads before wallet interaction
+The reader's `overlaps only independent reads` fixture gates each request: chain/head, state/activation and proposal/publisher reads overlap, while dependent reads and the final canonical-header check wait. It still makes ten requests, arranged in seven stages. Registration fixtures expect `write → refresh` for a valid fresh snapshot and `refresh → write → refresh` when it needs refreshing. Changed account or terms still block the write.
 
-An ordinary project-read trace made ten HTTP requests in ten sequential network stages. Independent chain/head, state/activation and current proposal/publisher reads now overlap, reducing that trace to seven stages without removing evidence. Mandatory current scopes finish before optional history can spend the shared page budget. One live before/after observation measured 4.637 and 4.367 seconds; initial network timings differed, so those samples do not establish a reliable percentage improvement.
+**Resolution:** overlap independent reads, reserve the shared page budget for required current evidence before optional history, and reuse displayed evidence only while it remains complete, verified and fresh. Both writer validations and the read after confirmation remain.
 
-A separate deterministic registration trace made 37 requests inside the writer before wallet interaction: 16 for initial validation, five for unsigned preparation and 16 for the second validation. The interface previously added another full refresh before that work. It now reuses a displayed snapshot only while it is complete, verified and fresh, and rechecks the current account and exact reviewed terms. Both writer validations and the read after confirmation remain. The 37-request count excludes interface refreshes and receipt verification; it is not the cost of the entire click. [Registration tests](../src/features/attendance/RegistrationPanel.test.ts) cover freshness fallback, changed authority/terms, failure without resend and post-confirmation refresh.
+These fixtures establish ordering and omitted redundant work. They do not establish a live latency percentage. [Reader tests](../src/data/__tests__/arkiv-reader.test.ts) · [Registration tests](../src/features/attendance/RegistrationPanel.test.ts)
 
-## Journal settlement under contention
+### 8. Journal contention could hide a known pre-send failure
 
-A deterministic concurrency test exposed an application recovery defect: if a preflight read failed while another operation held the journal lock, recording that known pre-send failure could itself fail. The retained attempt then appeared unresolved despite no transaction having been sent.
+**Versions and evidence:** Partfolk before/fixed at `492f090`, Vitest 5.0.3; deterministic operation-controller fault injection. No live transaction failed in this test.
 
-Journal settlement now waits for its lock and rechecks the exact attempt before recording the result. Wallet submission admission remains fail-fast; waiting to record evidence does not queue another send. Storage failures or contradictory evidence remain unverified, and earlier confirmed steps are retained. [Operation-attempt tests](../src/data/__tests__/operation-attempts.test.ts) cover concurrent settlement, the preparation boundary and recovery after reload. These are local fault-injection checks, not failed live transactions.
+**Expected:** when preflight fails before a native operation starts, the journal records that no transaction was sent.
+
+**Actual:** if another operation held the journal lock, recording the known pre-send failure could also fail. The retained attempt then appeared unresolved despite no send.
+
+**Reproduce:**
+
+```bash
+node node_modules/vitest/vitest.mjs run src/data/__tests__/operation-attempts.test.ts
+```
+
+The contention fixture holds one operation inside preparation, fails another operation's preflight read, then releases the lock. Expect the original read error, `rejected-before-native` state, complete preflight no-send evidence and zero sends during that sequence. Additional cases cover contention at the preparation boundary, storage failures and recovery after reload.
+
+**Resolution:** settlement waits for its lock and rechecks the exact attempt before recording evidence. Wallet submission admission remains fail-fast; waiting to settle the journal does not queue another send. Storage failures or contradictory evidence remain unverified, and previously confirmed steps are retained. [Operation-attempt tests](../src/data/__tests__/operation-attempts.test.ts) · [Controller](../src/data/operations/controller.ts)
+
+## Evidence and setup notes
+
+### Confirmed agreement and registration workflows
+
+The [product proof](evidence/product-proof.json) contains 92 confirmed transactions and seven matching application/independent-CLI observations:
+
+| Snapshot | Block | Agreement | Current approvals |
+| --- | --- | --- | --- |
+| P1 awaiting | 441275 | Awaiting approval | 0/7 |
+| P1 ready | 442076 | Ready | 7/7 |
+| P1 after withdrawal | 442152 | Changed | 6/7 |
+| Repaired P2 awaiting | 442583 | Awaiting approval | 0/7 |
+| P2 ready | 443753 | Ready | 7/7 |
+| Restored P3 awaiting | 443916 | Awaiting approval | 0/7 |
+| P3 ready | 444117 | Ready | 7/7 |
+
+Reproduce the final dated state, then substitute another block from the table:
+
+```bash
+node node_modules/tsx/dist/cli.mjs src/cli/verify.ts 0xf4e900fa56b9989f196b53cee9a7ed2abb1bbc5acc9179e47e7b11e32c7887a7 --block 444117
+```
+
+Expect `ready`, 7/7 approvals and complete history within the verified P1 → P2 → P3 lineage. These are historical snapshots; current readiness can change as grants expire.
+
+The [event evidence](evidence/test-events.json) records three published synthetic TEST EVENT releases, read at blocks `446077`, `446084` and `446092`. There are nine attendance records across seven wallets: the unlimited events had three and two going; the limited event had three admitted places and one waiter. The event run added 43 confirmed native transactions with zero transferred value and no additional funding transactions. Its cumulative budget includes the earlier proof: 135 confirmed transactions and accounted spend of `0.067061464022387640` test GLM against the `0.1` test GLM cap.
+
+These are dated public records of synthetic agreements and registrations. They do not establish physical attendance, browser interaction or continuing anonymous RPC availability.
+
+### Setup and first native writes
+
+On 9 October 2026, `npm view @arkiv-network/sdk@0.8 version` returned 0.8.0 and 0.8.1. The project pinned 0.8.1 after checking official guidance and installed declarations. This was a successful setup observation.
+
+A dedicated local test signer was funded with 10 test GLM after a manual faucet step. The first write was confirmed at `2026-10-09T13:19:10Z`, block `351105`. The estimate was 102,698 gas; actual gas was 101,712 and the fee was `0.000101712000203424` test GLM. Receipt and query read-back matched the predicted key, creator, owner, payload, typed attributes, flags and 30-day lifetime. [Bootstrap evidence](evidence/bootstrap.json) · [Guarded helper](../scripts/first-write.mjs)
+
+The roughly 40 minutes from practical setup to read-back included research and the manual faucet step; it is not a transaction-latency measurement. The later atomic probe spent `0.000224464000448928` test GLM within its `0.003` cap. Bootstrap plus atomic probe spend was `0.000326176000652352` test GLM. Both helpers default to estimate/reconciliation; their guarded broadcast paths are separate from the read-only and local-test commands above.
+
+### Additional local verification
+
+Receipt and writer fixtures check per-log transaction/block provenance, removed logs, duplicate created keys, canonical headers, and partial reverts across multi-transaction operations:
+
+```bash
+node node_modules/vitest/vitest.mjs run src/data/__tests__/arkiv-verification.test.ts src/data/__tests__/arkiv-writer.test.ts
+```
+
+A failed later phase must retain successful earlier phases. A deliberate resume validates current state and allocates a new attempt only for the proven failed phase; the reverted transaction is retained rather than resent. These are constructed fault cases, not observed Tiramisu node faults or paid failed transactions. Visual and browser verification remains user-owned.
