@@ -1,8 +1,8 @@
 import { isIP } from 'node:net';
 import { hexToBytes, toEventSelector, toFunctionSelector } from 'viem';
 import type { Hex } from 'viem';
-import { MAX_HEADER_BATCH_SIZE } from '../data/arkiv/read-policy';
-import { MAX_EVENT_RESERVATIONS } from '../domain/events/types';
+import { MAX_HEADER_BATCH_SIZE } from '../data/arkiv/read-policy.js';
+import { MAX_EVENT_RESERVATIONS } from '../domain/events/types.js';
 
 const UPSTREAM = 'https://rpc.tiramisu.db-chain.testnet.arkiv.network';
 const NATIVE = '0x4400000000000000000000000000000000000044';

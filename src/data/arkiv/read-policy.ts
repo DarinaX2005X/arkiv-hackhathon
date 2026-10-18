@@ -1,5 +1,5 @@
-import { TIRAMISU_CHAIN_ID } from '../../domain/types';
-import { ArkivRepositoryError } from './errors';
+import { TIRAMISU_CHAIN_ID } from '../../domain/types.js';
+import { ArkivRepositoryError } from './errors.js';
 
 export interface RpcRead { method: string; params?: readonly unknown[] | object }
 export type RpcRequest = ((request: RpcRead, options?: { signal?: AbortSignal }) => Promise<unknown>) & {

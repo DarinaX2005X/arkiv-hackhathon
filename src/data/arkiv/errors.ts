@@ -1,6 +1,6 @@
 import type { DomainReason, ReasonCode } from '../../domain/types';
 import type { RepositoryError, RepositoryErrorCode, Result } from '../types';
-import { WalletOperationError } from '../wallet/types';
+import { WalletOperationError } from '../wallet/types.js';
 
 export class ArkivRepositoryError extends Error {
   readonly detail: RepositoryError;
