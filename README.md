@@ -32,8 +32,6 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
 
-<img src="docs/screenshots/partfolk-home.jpg" alt="Partfolk home with event discovery, creation and the shared event scene" width="960">
-
 <p align="center">
   <a href="https://partfolk.vercel.app/media/partfolk-demo-v2.mp4">
     <img src="public/media/partfolk-demo-v2.jpg" alt="Partfolk demo v2 — from creating an event through contributor agreement and publication" width="960">
@@ -46,6 +44,10 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 </p>
 
 **[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A completed [public proof](arkiv/evidence/product-proof.json) demonstrates contributor agreement, withdrawal and fresh consent on the network.
+
+<img src="docs/screenshots/partfolk-home.jpg" alt="Partfolk home with event discovery, creation and the shared event scene" width="960">
+
+## About project
 
 <img src="docs/assets/event-ecosystem.svg" alt="Organizers coordinate an event, contributors bring time, space and equipment, and visitors choose to join. All roles belong to the same ecosystem." width="960">
 
