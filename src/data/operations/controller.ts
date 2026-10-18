@@ -122,12 +122,22 @@ export function createOperationController(options: {
           return result;
         } catch (caught) {
           if (!frame.nativeBoundaryEntered) {
-            await store.runExclusive(accountScope, async () => {
-              const current = store.getAttempt(operation.id);
-              if (!current || current.attemptId !== frame.attemptId || current.state !== 'preflight'
-                || current.nativeStepIds.length || store.list().some(record => record.operation.id === operation.id)) throw unresolvedAttempt();
-              store.putAttemptCAS({ ...current, revision: current.revision + 1, state: 'rejected-before-native', settledAt: Math.max(now(), current.startedAt) }, current.revision);
-            });
+            try {
+              // Another operation may hold the journal during unsigned preparation or a
+              // wallet prompt. Finishing this failed read must wait for that lock without
+              // queuing a send or leaving a known no-send attempt permanently unresolved.
+              await store.runExclusive(accountScope, async () => {
+                const current = store.getAttempt(operation.id);
+                if (!current || current.attemptId !== frame.attemptId || current.state !== 'preflight'
+                  || current.nativeStepIds.length || store.list().some(record => record.operation.id === operation.id)) throw unresolvedAttempt();
+                store.putAttemptCAS({ ...current, revision: current.revision + 1, state: 'rejected-before-native', settledAt: Math.max(now(), current.startedAt) }, current.revision);
+              }, { wait: true });
+            } catch (checkpointFailure) {
+              throw new WalletOperationError('The failed operation could not be checkpointed. Retain its journal before trying again.', {
+                kind: 'unverified', code: checkpointFailure instanceof WalletOperationError ? checkpointFailure.code : 'storage',
+                cause: new AggregateError([caught, checkpointFailure], 'Preflight and journal settlement failed.'),
+              });
+            }
           }
           throw caught;
         } finally { activeAttempts.delete(operation.id); }
@@ -136,10 +146,12 @@ export function createOperationController(options: {
     async beforeNativeAttempt(operationId, step) {
       assertOperationId(operationId); assertOperationId(step.id);
       const frame = activeAttempts.get(operationId);
-      if (frame) frame.nativeBoundaryEntered = true;
       const attempt = store.getAttempt(operationId);
       if (!attempt) throw unresolvedAttempt();
-      await store.runExclusive(scope(attempt.operation), async () => { markNative(operationId, step); });
+      await store.runExclusive(scope(attempt.operation), async () => {
+        if (frame) frame.nativeBoundaryEntered = true;
+        markNative(operationId, step);
+      });
     },
     getAttempt: operationId => store.getAttempt(operationId),
     async prepareStep(input, resolveTransactionOptions) {
@@ -149,8 +161,10 @@ export function createOperationController(options: {
       const accountScope = scope(operation);
       if (operation.inputHash !== hashCanonical(operation.input)) throw error('The operation input hash does not match its input.');
       const frame = activeAttempts.get(operation.id);
-      if (frame) frame.nativeBoundaryEntered = true;
-      return store.runExclusive(accountScope, async () => {
+      let entered = false;
+      try { return await store.runExclusive(accountScope, async () => {
+        entered = true;
+        if (frame) frame.nativeBoundaryEntered = true;
         markNative(operation.id, step, operation);
         const existing = store.get(operation.id, step.id);
         if (existing) {
@@ -187,7 +201,33 @@ export function createOperationController(options: {
           save(record);
           throw failure;
         }
-      });
+      }); } catch (caught) {
+        // beforeNativeAttempt can have saved this step just before another operation
+        // acquired the account lock. No unsigned preparation ran in this call. Retain
+        // that observed refusal as a native no-send checkpoint instead of stranding a
+        // native-started marker with no step. Existing send evidence is never replaced.
+        if (!entered && frame?.boundarySteps.has(step.id) && caught instanceof WalletOperationError
+          && caught.kind === 'not_sent' && caught.code === 'conflict') {
+          try {
+            await store.runExclusive(accountScope, async () => {
+              const attempt = store.getAttempt(operation.id);
+              if (!attempt || attempt.attemptId !== frame.attemptId || attempt.state !== 'native-started'
+                || !attempt.nativeStepIds.includes(step.id) || binding(attempt.operation) !== binding(operation)) throw unresolvedAttempt();
+              if (store.get(operation.id, step.id)) return;
+              save({ version: 1, revision: 1, operation,
+                step: { ...step, status: 'failed-before-send', transactionHash: null, confirmedKeys: [] },
+                batch, prepared: null, admission: null, submissionHash: null, receipt: null,
+                error: { kind: 'not_sent', code: caught.code, message: caught.message } });
+            }, { wait: true });
+          } catch (checkpointFailure) {
+            throw new WalletOperationError('The preparation refusal could not be checkpointed. Retain its journal before trying again.', {
+              kind: 'unverified', code: checkpointFailure instanceof WalletOperationError ? checkpointFailure.code : 'storage',
+              cause: new AggregateError([caught, checkpointFailure], 'Preparation admission and journal settlement failed.'),
+            });
+          }
+        }
+        throw caught;
+      }
     },
 
     async submitStep(operationId, stepId) {

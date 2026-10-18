@@ -127,3 +127,25 @@ This establishes a real public contributor-agreement workflow, beyond the earlie
 The [event evidence export](evidence/test-events.json) records three published synthetic TEST EVENT releases on Tiramisu and nine attendance records across seven wallets. Production repository reads at blocks 446077, 446084 and 446092 verified the online, in-person and hybrid events respectively. The unlimited events had three and two going; the limited event had three admitted places and one waiter. Every current release starts its conditions with `[PARTFOLK TEST EVENT]`, an authored declaration rather than an independent certification.
 
 The event run added 43 confirmed native transactions with zero transferred value and no additional funding transactions. Combined with the original proof, the exported budget contains 135 confirmed transactions and cumulative accounted spend of 0.067061464022387640 test GLM against the 0.1 test GLM cap. This establishes dated synthetic registration evidence. It does not prove real attendance, browser interaction or continuing anonymous RPC availability; public query quotas can still block a complete read.
+
+## Request amplification during attendance verification
+
+Surface: Partfolk's event reader, SDK 0.8.1 and the hosted read service. This was an application integration issue, not an observed Arkiv consensus or SDK mutation failure.
+
+Expected: a supported roster of 512 attendees can be verified within the service's bounded read policy. A deterministic fixture placed every request in a different creation block. Two independent historical-header passes then produced 1,024 separate HTTP requests, plus ordinary snapshot reads. Direct fixture reads completed, while the hosted path exhausted its HTTP burst allowance before completing the roster.
+
+Resolution: exact historical-header calls are grouped into batches of up to 32. The two passes now require 32 HTTP requests while retaining all 1,024 header checks. Snapshot rechecks, deadline timestamps, response identity validation and the 60-second freshness requirement remain intact. HTTP limits still apply, and separate per-IP and per-instance header-unit budgets bound upstream work; batching does not make individual RPC operations free. See [service limits](../docs/operations.md) and the [reader](../src/data/events/reader.test.ts), [transport](../src/data/arkiv/read-policy.test.ts) and [service](../src/server/arkiv-read.test.ts) regression tests.
+
+A bounded live read confirmed that the configured Tiramisu provider accepts a two-header standard JSON-RPC batch with matching IDs and hashes. The 512-attendee comparison is a deterministic fixture result, not a live 512-person event or a claim about provider-wide quotas. No new public transactions were sent for these checks.
+
+## Repeated reads before wallet interaction
+
+An ordinary project-read trace made ten HTTP requests in ten sequential network stages. Independent chain/head, state/activation and current proposal/publisher reads now overlap, reducing that trace to seven stages without removing evidence. Mandatory current scopes finish before optional history can spend the shared page budget. One live before/after observation measured 4.637 and 4.367 seconds; initial network timings differed, so those samples do not establish a reliable percentage improvement.
+
+A separate deterministic registration trace made 37 requests inside the writer before wallet interaction: 16 for initial validation, five for unsigned preparation and 16 for the second validation. The interface previously added another full refresh before that work. It now reuses a displayed snapshot only while it is complete, verified and fresh, and rechecks the current account and exact reviewed terms. Both writer validations and the read after confirmation remain. The 37-request count excludes interface refreshes and receipt verification; it is not the cost of the entire click. [Registration tests](../src/features/attendance/RegistrationPanel.test.ts) cover freshness fallback, changed authority/terms, failure without resend and post-confirmation refresh.
+
+## Journal settlement under contention
+
+A deterministic concurrency test exposed an application recovery defect: if a preflight read failed while another operation held the journal lock, recording that known pre-send failure could itself fail. The retained attempt then appeared unresolved despite no transaction having been sent.
+
+Journal settlement now waits for its lock and rechecks the exact attempt before recording the result. Wallet submission admission remains fail-fast; waiting to record evidence does not queue another send. Storage failures or contradictory evidence remain unverified, and earlier confirmed steps are retained. [Operation-attempt tests](../src/data/__tests__/operation-attempts.test.ts) cover concurrent settlement, the preparation boundary and recovery after reload. These are local fault-injection checks, not failed live transactions.

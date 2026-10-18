@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LocalRepository } from '../../data/local';
+import { activeSource, sameSource } from '../../domain/readiness';
+import type { ProjectAggregate } from '../../domain/types';
 import { Button } from '../../ui';
 import { loadGuidedPractice, runGuidedPracticeAction } from './guided';
 import type { GuidedPracticeState, GuidedStage } from './guided';
@@ -22,7 +24,7 @@ const copy: Record<GuidedStage, { title: string; body: string; button?: string; 
   ready: { title: 'Everyone has agreed to this plan',
     body: 'Each contributor has agreed to their part in the same complete plan. Next, see what happens when Oak becomes unavailable.',
     button: 'Let Oak withdraw', step: 3 },
-  changed: { title: 'Oak withdrew. The plan needs an update.',
+  changed: { title: 'Oak withdrew. The plan needs an update',
     body: 'The old agreement no longer makes the plan ready. Juniper can join Willow to install, freeing Cedar to bring the artworks.',
     button: 'Add Juniper and update the plan', step: 4 },
   repair_awaiting_agreement: { title: 'The new plan needs fresh agreement',
@@ -33,6 +35,24 @@ const copy: Record<GuidedStage, { title: string; body: string; button?: string; 
   manual: { title: 'Continue with your saved sample',
     body: 'Your sample has moved beyond this guided path. Its saved plan and decisions are available in the full project.', step: 0 },
 };
+
+/** Show the saved assignment and its owner's current decision together. */
+export function practiceAssignmentRows(project: ProjectAggregate) {
+  const plan = project.proposal?.payload.plan, source = activeSource(project);
+  if (!plan) return [];
+  return ['transport', 'installation', 'hosting'].flatMap(id => {
+    const requirement = plan.variant.requirements.find(item => item.id === id);
+    if (!requirement) return [];
+    const owners = [...new Set(plan.allocations.filter(item => item.requirementId === id).map(item => item.publisherRoot))].map(key => {
+      const publisher = project.publishers.find(item => item.root.key === key);
+      const book = publisher?.book.status === 'unique' ? publisher.book.entity.payload : null;
+      const decision = source ? book?.decisions.find(item => sameSource(item, source)) : null;
+      const status = !book ? 'unverified' as const : decision?.status === 'withdrawn' || decision?.status === 'declined' ? decision.status : null;
+      return { key, name: book?.name ?? 'Contributor unavailable', status };
+    });
+    return owners.length ? [{ id, title: requirement.title, owners }] : [];
+  });
+}
 
 /** A shortcut through real local owner operations, explicitly presented as fictional sample decisions. */
 export function GuidedPractice({ repository, onRefresh, now, onOpenProject, refreshKey }: GuidedPracticeProps) {
@@ -72,6 +92,7 @@ export function GuidedPractice({ repository, onRefresh, now, onOpenProject, refr
   const words = state ? copy[state.stage] : null;
   const resumedBeforePlan = state?.stage === 'blocked' && !state.initialImpossible;
   const agreement = state?.stage === 'awaiting_agreement' || state?.stage === 'repair_awaiting_agreement';
+  const assignments = state ? practiceAssignmentRows(state.project) : [];
   return <section className="guided-practice" aria-labelledby="guided-practice-title" aria-busy={busy || undefined}>
     <div className="guided-practice-intro"><h2 id="guided-practice-title">Try the exhibition</h2>
       <p>Sample decisions on this device. You play the fictional contributors.</p>
@@ -80,7 +101,11 @@ export function GuidedPractice({ repository, onRefresh, now, onOpenProject, refr
       {words ? <>
         <h3>{resumedBeforePlan ? 'Continue finding a plan for the sample' : words.title}</h3>
         <p>{resumedBeforePlan ? 'Your added offers are saved. Continue to find and publish the complete plan.' : words.body}</p>
-        {state!.changes.length > 0 && <ul className="guided-practice-changes">{state!.changes.map(change => <li key={change}>{change}</li>)}</ul>}
+        {assignments.length > 0 && <ul className="guided-practice-result">{assignments.map(row => <li key={row.id}>
+          <span className="guided-practice-result-label">{row.title}</span><span className="guided-practice-result-value">{row.owners.map((owner, index) => <span key={owner.key}>
+            {index > 0 ? ' and ' : ''}{owner.name}{owner.status && <strong className="guided-practice-result-status">{owner.status === 'withdrawn' ? 'Withdrew; replacement needed' : owner.status === 'declined' ? 'Declined; replacement needed' : 'Availability needs checking'}</strong>}
+          </span>)}</span>
+        </li>)}</ul>}
         {agreement && <p className="guided-practice-owners">This plays a separate sample decision for {new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(state!.names)}.</p>}
         {state!.action && words.button && <div className="guided-practice-action"><Button onClick={() => { void act(); }} pending={busy} pendingLabel="Saving this step…">{words.button}</Button><span>Step {words.step} of 5</span></div>}
       </> : <p>Reading your saved practice…</p>}

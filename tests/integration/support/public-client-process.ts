@@ -27,14 +27,24 @@ globalThis.fetch = async () => { fetchAttempts++; throw new Error('HTTP is forbi
 // lock until its asynchronous action settles; every child owns its own isolated storage.
 // It supplies only the lock primitive, with no browser, DOM, rendering or UI automation.
 const heldLocks = new Set<string>();
+const waitingLocks = new Map<string, (() => void)[]>();
 const nodeLocks = {
-  async request<T>(name: string, options: { mode: 'exclusive'; ifAvailable: true },
+  async request<T>(name: string, options: { mode: 'exclusive'; ifAvailable?: true },
     callback: (lock: { name: string; mode: 'exclusive' } | null) => Promise<T>): Promise<T> {
-    if (options.mode !== 'exclusive' || options.ifAvailable !== true) throw new Error('Unexpected lock request.');
-    if (heldLocks.has(name)) return callback(null);
-    heldLocks.add(name);
+    if (options.mode !== 'exclusive' || (options.ifAvailable !== undefined && options.ifAvailable !== true)) throw new Error('Unexpected lock request.');
+    if (heldLocks.has(name)) {
+      if (options.ifAvailable) return callback(null);
+      await new Promise<void>(resolve => {
+        const waiting = waitingLocks.get(name) ?? [];
+        waiting.push(resolve); waitingLocks.set(name, waiting);
+      });
+    } else heldLocks.add(name);
     try { return await callback({ name, mode: 'exclusive' }); }
-    finally { heldLocks.delete(name); }
+    finally {
+      const waiting = waitingLocks.get(name), next = waiting?.shift();
+      if (!waiting?.length) waitingLocks.delete(name);
+      if (next) next(); else heldLocks.delete(name);
+    }
   },
 };
 const nodeNavigator = globalThis.navigator ?? {};

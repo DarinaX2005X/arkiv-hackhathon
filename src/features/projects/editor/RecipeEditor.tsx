@@ -23,6 +23,8 @@ export interface RecipeEditorProps {
   onValidityChange?: (valid: boolean) => void;
   /** Creation uses two visible steps; existing project editing shows both. */
   section?: 'event' | 'needs';
+  /** Creation reveals empty-field errors after interaction or an attempted next step. */
+  validationRequested?: boolean;
 }
 
 const humanReview = 'Helpful details for the people taking part.';
@@ -39,24 +41,32 @@ function needsOccurrence(value: string, timeZone: string): boolean {
 
 function newId(prefix: string): string { return `${prefix}-${globalThis.crypto.randomUUID()}`; }
 
-function ScheduleFields({ variant, path, errors, onChange }: { variant: EditorVariantDraft; path: string; errors: Record<string, string>; onChange: (patch: Partial<EditorScheduleDraft>) => void }) {
+function ScheduleFields({ variant, path, errors, onChange, onTouch }: { variant: EditorVariantDraft; path: string; errors: Record<string, string>; onChange: (patch: Partial<EditorScheduleDraft>) => void; onTouch: (path: string) => void }) {
   const schedule = variantSchedule(variant);
   return <div className="pf-recipe-grid pf-recipe-schedule">
-    <div className="pf-recipe-fields"><LocalDateField label="Starts" value={schedule.startLocal} error={errors[`${path}.schedule.startLocal`]} onChange={startLocal => onChange({ startLocal, startDisambiguation: 'reject' })} />
+    <div className="pf-recipe-fields" onBlurCapture={() => onTouch(`${path}.schedule.startLocal`)}><LocalDateField label="Starts" value={schedule.startLocal} error={errors[`${path}.schedule.startLocal`]} onChange={startLocal => onChange({ startLocal, startDisambiguation: 'reject' })} />
       {needsOccurrence(schedule.startLocal, variant.timeZone) && <Select label="Which repeated start time?" value={schedule.startDisambiguation} options={occurrences} onChange={event => onChange({ startDisambiguation: event.target.value as TimeDisambiguation })} />}</div>
-    <div className="pf-recipe-fields"><LocalDateField label="Ends" value={schedule.endLocal} error={errors[`${path}.schedule.endLocal`]} onChange={endLocal => onChange({ endLocal, endDisambiguation: 'reject' })} />
+    <div className="pf-recipe-fields" onBlurCapture={() => onTouch(`${path}.schedule.endLocal`)}><LocalDateField label="Ends" value={schedule.endLocal} error={errors[`${path}.schedule.endLocal`]} onChange={endLocal => onChange({ endLocal, endDisambiguation: 'reject' })} />
       {needsOccurrence(schedule.endLocal, variant.timeZone) && <Select label="Which repeated end time?" value={schedule.endDisambiguation} options={occurrences} onChange={event => onChange({ endDisambiguation: event.target.value as TimeDisambiguation })} />}</div>
   </div>;
 }
 
-export function RecipeEditor({ value, onChange, disabled = false, draft: controlledDraft, onDraftChange, onValidityChange, section }: RecipeEditorProps) {
+export function RecipeEditor({ value, onChange, disabled = false, draft: controlledDraft, onDraftChange, onValidityChange, section, validationRequested = false }: RecipeEditorProps) {
   const baseId = useId();
   const [localDraft, setLocalDraft] = useState(() => controlledDraft ?? recipeToEditorDraft(value));
   const valueKey = JSON.stringify(value);
   const lastValueKey = useRef(valueKey);
   const draft = controlledDraft ?? localDraft;
   const validation = useMemo(() => validateEditorDraft(draft), [draft]);
-  const errors = validation.errors;
+  const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
+  const touchKey = (path: string) => path.replace(/^variants\[(\d+)\](?:\.requirements\[(\d+)\])?/, (_, variantIndex: string, requirementIndex?: string) => {
+    const variant = draft.variants[Number(variantIndex)];
+    return `variant:${variant?.id ?? variantIndex}${requirementIndex === undefined ? '' : `:need:${variant?.requirements[Number(requirementIndex)]?.id ?? requirementIndex}`}`;
+  });
+  const errors = validationRequested ? validation.errors : Object.fromEntries(Object.entries(validation.errors).filter(([path]) => touched.has(touchKey(path))));
+  const touch = (path: string) => { const key = touchKey(path); setTouched(previous => previous.has(key) ? previous : new Set([...previous, key])); };
+  const fieldValue = (value: unknown, path: string): unknown => path.replace(/\[(\d+)\]/g, '.$1').split('.').reduce<unknown>((current, key) =>
+    current !== null && typeof current === 'object' ? (current as Record<string, unknown>)[key] : undefined, value);
 
   useEffect(() => {
     if (controlledDraft || valueKey === lastValueKey.current) return;
@@ -71,6 +81,11 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
     if (!controlledDraft) setLocalDraft(next);
     onDraftChange?.(next);
     const result = validateEditorDraft(next);
+    setTouched(previous => {
+      const changed = Object.keys({ ...validation.errors, ...result.errors }).filter(path =>
+        fieldValue(draft, path) !== undefined && JSON.stringify(fieldValue(draft, path)) !== JSON.stringify(fieldValue(next, path))).map(touchKey);
+      return changed.some(path => !previous.has(path)) ? new Set([...previous, ...changed]) : previous;
+    });
     onValidityChange?.(result.valid);
     if (result.recipe) {
       lastValueKey.current = JSON.stringify(result.recipe);
@@ -90,10 +105,12 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
     {section !== 'needs' && <section className="pf-sheet pf-recipe-outline"><h2>Your event</h2><p className="pf-secondary">Start with a name, the date and what people will come together to do.</p><fieldset className="pf-recipe-fieldset" disabled={disabled}>
       <legend className="pf-visually-hidden">Event details</legend>
       <div className="pf-recipe-fields">
-        <Field label="Event name" placeholder="Community workshop, online talk, film night…" value={draft.title} error={errors.title} onChange={event => change({ ...draft, title: event.target.value })} autoComplete="off" />
-        <Textarea label="What will happen?" hint="A short description of the event and the result you want." placeholder="Bring neighbors together to learn bicycle repairs." value={draft.outcome} error={errors.outcome} rows={2} onChange={event => change({ ...draft, outcome: event.target.value })} />
-        <TimeZoneField label="Event time zone" hint="Dates use this clock time. Each alternative can have its own zone." value={draft.timeZone} error={errors.timeZone} onChange={timeZone => change({ ...draft, timeZone, variants: draft.variants.map(variant => variant.timeZone === draft.timeZone ? { ...variant, timeZone } : variant) })} />
-        {draft.variants[0] && <div className="pf-recipe-fields"><h3>When are you planning it?</h3><ScheduleFields variant={draft.variants[0]} path="variants[0]" errors={errors} onChange={patch => change(updateVariantSchedule(draft, draft.variants[0]!.id, patch))} /><p className="pf-field-message">New needs start with these times. Adjust setup, transport or cleanup times below. You will review guest hours before publishing the visitor page.</p></div>}
+        <Field label="Event name" placeholder="Community workshop, online talk, film night…" value={draft.title} error={errors.title} onBlur={() => touch('title')} onChange={event => change({ ...draft, title: event.target.value })} autoComplete="off" />
+        <Textarea label="What will happen?" hint="A short description of the event and the result you want." placeholder="Bring neighbors together to learn bicycle repairs." value={draft.outcome} error={errors.outcome} rows={2} onBlur={() => touch('outcome')} onChange={event => change({ ...draft, outcome: event.target.value })} />
+        <TimeZoneField label="Event time zone" hint="New date options start in this zone. Each option can use a different zone." value={draft.timeZone} error={errors.timeZone} onChange={timeZone => change({ ...draft, timeZone, variants: draft.variants.map(variant => variant.timeZone === draft.timeZone ? { ...variant, timeZone } : variant) })} />
+        {draft.variants[0] && <div className="pf-recipe-fields"><h3>When are you planning it?</h3>
+          {draft.variants[0].timeZone !== draft.timeZone && <TimeZoneField label="Time zone for these dates" hint="These dates use this zone. Changing it keeps the clock times you entered." value={draft.variants[0].timeZone} error={errors['variants[0].timeZone']} onChange={timeZone => changeVariant(draft.variants[0]!.id, { timeZone })} />}
+          <ScheduleFields variant={draft.variants[0]} path="variants[0]" errors={errors} onTouch={touch} onChange={patch => change(updateVariantSchedule(draft, draft.variants[0]!.id, patch))} /><p className="pf-field-message">New needs start with these times. Adjust setup, transport or cleanup times below. You will review guest hours before publishing the visitor page.</p></div>}
         {!draft.variants.length && <Button variant="secondary" onClick={() => change(addVariant(draft, newId('variant')))}>Add event dates</Button>}
         <Textarea label="Instructions for everyone (optional)" hint={humanReview} value={draft.instructions} error={errors.instructions} rows={2} onChange={event => change({ ...draft, instructions: event.target.value })} />
       </div>
@@ -119,11 +136,11 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
           <fieldset className="pf-recipe-fieldset" disabled={disabled}>
             <legend className="pf-visually-hidden">Option details</legend>
             <div className="pf-recipe-grid">
-              <Field label="Option name" placeholder="Saturday afternoon or online session" value={variant.title} error={errors[`${path}.title`]} onChange={event => changeVariant(variant.id, { title: event.target.value })} />
-              <Field label="Venue or online meeting space" placeholder="Community hall or online" hint="Use a recognizable name. Guest location and joining details are added when you publish the event page." value={variant.venueId} error={errors[`${path}.venueId`]} onChange={event => changeVariant(variant.id, { venueId: event.target.value })} />
+              <Field label="Option name" placeholder="Saturday afternoon or online session" value={variant.title} error={errors[`${path}.title`]} onBlur={() => touch(`${path}.title`)} onChange={event => changeVariant(variant.id, { title: event.target.value })} />
+              <Field label="Venue or online meeting space" placeholder="Community hall or online" hint="Use a recognizable name. Guest location and joining details are added when you publish the event page." value={variant.venueId} error={errors[`${path}.venueId`]} onBlur={() => touch(`${path}.venueId`)} onChange={event => changeVariant(variant.id, { venueId: event.target.value })} />
               <TimeZoneField label="Time zone for these dates" hint="Changing the zone keeps the clock times you entered." value={variant.timeZone} error={errors[`${path}.timeZone`]} onChange={timeZone => changeVariant(variant.id, { timeZone })} />
             </div>
-            {variantIndex > 0 && <ScheduleFields variant={variant} path={path} errors={errors} onChange={patch => change(updateVariantSchedule(draft, variant.id, patch))} />}
+            {variantIndex > 0 && <ScheduleFields variant={variant} path={path} errors={errors} onTouch={touch} onChange={patch => change(updateVariantSchedule(draft, variant.id, patch))} />}
             <Textarea label="Option notes (optional)" hint={humanReview} value={variant.instructions} error={errors[`${path}.instructions`]} rows={2} onChange={event => changeVariant(variant.id, { instructions: event.target.value })} />
           </fieldset>
 
@@ -144,23 +161,23 @@ export function RecipeEditor({ value, onChange, disabled = false, draft: control
                   <legend className="pf-visually-hidden">Requirement details</legend>
                   <div className="pf-recipe-grid">
                     <Select label="Kind of help" value={needPresets.some(preset => preset.value === requirement.capability && preset.kind === requirement.kind && preset.unit === requirement.unit) ? requirement.capability : 'custom'} options={[{ value: 'custom', label: 'Choose help or describe my own' }, ...needPresets.map(preset => ({ value: preset.value, label: preset.label }))]} onChange={event => { const preset = needPresets.find(item => item.value === event.target.value); if (preset) changeRequirement(variant.id, requirement.id, { kind: preset.kind, capability: preset.value, unit: preset.unit, title: requirement.title || preset.label }); else changeRequirement(variant.id, requirement.id, { capability: '' }); }} />
-                    <Field label="Give this need a name" placeholder="Help guests join the online workshop" value={requirement.title} error={errors[`${itemPath}.title`]} onChange={event => changeRequirement(variant.id, requirement.id, { title: event.target.value })} />
-                    <Field label={`How many ${requirement.unit || 'units'}?`} hint="Use a whole number." type="text" inputMode="numeric" value={requirement.quantity} error={errors[`${itemPath}.quantity`]} onChange={event => changeRequirement(variant.id, requirement.id, { quantity: event.target.value })} />
+                    <Field label="Give this need a name" placeholder="Help guests join the online workshop" value={requirement.title} error={errors[`${itemPath}.title`]} onBlur={() => touch(`${itemPath}.title`)} onChange={event => changeRequirement(variant.id, requirement.id, { title: event.target.value })} />
+                    <Field label={`How many ${requirement.unit || 'units'}?`} hint="Use a whole number." type="text" inputMode="numeric" value={requirement.quantity} error={errors[`${itemPath}.quantity`]} onBlur={() => touch(`${itemPath}.quantity`)} onChange={event => changeRequirement(variant.id, requirement.id, { quantity: event.target.value })} />
                   </div>
                   <div className="pf-recipe-grid">
-                    <div className="pf-recipe-fields">
+                    <div className="pf-recipe-fields" onBlurCapture={() => touch(`${itemPath}.startLocal`)}>
                       <LocalDateField label="Needed from" hint={`Times use ${variant.timeZone || 'the option’s time zone'}.`} value={requirement.startLocal} error={errors[`${itemPath}.startLocal`]} onChange={startLocal => changeRequirement(variant.id, requirement.id, { startLocal, startDisambiguation: 'reject' })} />
                       {needsOccurrence(requirement.startLocal, variant.timeZone) && <Select label="Which repeated start time?" value={requirement.startDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { startDisambiguation: event.target.value as TimeDisambiguation })} />}
                     </div>
-                    <div className="pf-recipe-fields">
+                    <div className="pf-recipe-fields" onBlurCapture={() => touch(`${itemPath}.endLocal`)}>
                       <LocalDateField label="Needed until" hint="Include any setup or packing time." value={requirement.endLocal} error={errors[`${itemPath}.endLocal`]} onChange={endLocal => changeRequirement(variant.id, requirement.id, { endLocal, endDisambiguation: 'reject' })} />
                       {needsOccurrence(requirement.endLocal, variant.timeZone) && <Select label="Which repeated end time?" value={requirement.endDisambiguation} options={occurrences} onChange={event => changeRequirement(variant.id, requirement.id, { endDisambiguation: event.target.value as TimeDisambiguation })} />}
                     </div>
                   </div>
                   <section className="pf-recipe-fields"><h5>Matching and task order</h5><div className="pf-recipe-grid">
                     <Select label="Contribution type" value={requirement.kind} options={[{ value: 'person', label: 'Person' }, { value: 'place', label: 'Place' }, { value: 'equipment', label: 'Equipment' }]} onChange={event => { const kind = event.target.value as ResourceKind; changeRequirement(variant.id, requirement.id, { kind, unit: kind === 'person' ? 'person' : kind === 'place' ? 'space' : 'item' }); }} />
-                    <Field label="Skill or use to match" hint="Use the same term as a contributor’s offer, for example translation or catering." value={requirement.capability} error={errors[`${itemPath}.capability`]} onChange={event => changeRequirement(variant.id, requirement.id, { capability: event.target.value })} />
-                    <Field label="Unit to match" hint="Use the offer’s unit, for example person, space or chair." value={requirement.unit} error={errors[`${itemPath}.unit`]} onChange={event => changeRequirement(variant.id, requirement.id, { unit: event.target.value })} />
+                    <Field label="Skill or use to match" hint="Use the same term as a contributor’s offer, for example translation or catering." value={requirement.capability} error={errors[`${itemPath}.capability`]} onBlur={() => touch(`${itemPath}.capability`)} onChange={event => changeRequirement(variant.id, requirement.id, { capability: event.target.value })} />
+                    <Field label="Unit to match" hint="Use the offer’s unit, for example person, space or chair." value={requirement.unit} error={errors[`${itemPath}.unit`]} onBlur={() => touch(`${itemPath}.unit`)} onChange={event => changeRequirement(variant.id, requirement.id, { unit: event.target.value })} />
                   </div><fieldset className="pf-recipe-dependencies" aria-describedby={errors[`${itemPath}.dependsOn`] ? dependencyErrorId : undefined}>
                     <legend className="pf-field-label">Starts after these requirements</legend>
                     <p className="pf-field-message">Selected requirements must finish before this one starts.</p>

@@ -32,7 +32,7 @@ export function EventScene() {
   } as CSSProperties;
 
   return <div ref={scene} className="pf-event-scene" data-playing="false" style={materials}>
-    <svg className="pf-event-art" viewBox="0 0 720 610" width="720" height="610" role="img" aria-labelledby={`${id}-title ${id}-description`} focusable="false">
+    <svg className="pf-event-art" viewBox="0 0 1100 450" width="1100" height="450" role="img" aria-labelledby={`${id}-title ${id}-description`} focusable="false">
       <title id={`${id}-title`}>An event brought together from everyone’s contributions</title>
       <desc id={`${id}-description`}>A dimensional gathering space connects to an online session and an equipment case. A separate signed agreement sits beside each contribution. People can come together while each contributor retains control of their part.</desc>
       <defs>
@@ -45,15 +45,12 @@ export function EventScene() {
       </defs>
 
       {/* The far and middle planes are part of a single architectural stage. */}
-      <path className="pf-event-far-plane" d="m35 280 292-162 368 202v75L400 562 35 360Z" />
-      <ellipse className="pf-event-light" cx="403" cy="294" rx="292" ry="246" />
-      <path className="pf-event-ground-shadow" d="m49 422 282-160 369 197-294 139Z" />
-      <path className="pf-event-base-side" d="m32 362 298-164 366 204v21L398 590 32 384Z" />
-      <path className="pf-event-base" d="m32 362 298-164 366 204-298 167Z" />
-      <path className="pf-event-base-edge" d="m33 362 365 207 296-167" />
+      <ellipse className="pf-event-stage-shadow" cx="565" cy="348" rx="490" ry="82" />
+      <path className="pf-event-stage" d="M41 308c0-81 220-146 492-146s513 65 513 146v17c0 62-231 112-503 112S41 387 41 325Z" />
+      <ellipse className="pf-event-stage-top" cx="543" cy="306" rx="502" ry="132" />
 
       {/* The room has an open arch, floor, edge thickness and a receiving wall. */}
-      <g className="pf-event-room">
+      <g className="pf-event-room" transform="translate(82 7) scale(.84)">
         <path className="pf-event-contact" d="m67 329 194-106 204 113-197 111Z" />
         <path className="pf-event-room-edge" fillRule="evenodd" d="M74 302V134q0-11 9-16L232 35q10-5 10 6v168ZM112 293V139q0-41 37-61a47 47 0 0 1 70 42v115Z" />
         <path className="pf-event-paper" fillRule="evenodd" d="M85 308V139q0-9 8-13l145-81q8-4 8 6v168l-27 16V120a47 47 0 0 0-70-42q-37 20-37 61v154Z" />
@@ -80,7 +77,7 @@ export function EventScene() {
       </g>
 
       {/* A freestanding monitor is a physical object, not a simulated app. */}
-      <g className="pf-event-online">
+      <g className="pf-event-online" transform="translate(376 -4) scale(.88)">
         <path className="pf-event-contact" d="m410 332 93-50 153 81-93 52Z" />
         <path className="pf-event-screen-foot-side" d="m451 321 74-40 97 54v10l-74 41-97-55Z" />
         <path className="pf-event-paper" d="m451 321 74-40 97 54-74 41Z" />
@@ -101,8 +98,7 @@ export function EventScene() {
       </g>
 
       {/* Physical links remain on the receiving plane; no floating UI badges. */}
-      <path className="pf-event-connection" d="m367 402 68 38 50-28m-50 28-82 46" />
-      <g className="pf-event-resource">
+      <g className="pf-event-resource" transform="translate(126 -100) scale(.92)">
         <path className="pf-event-contact" d="m472 432 70-38 105 58-70 40Z" />
         <g transform="translate(478 381)">
           <path className="pf-event-case-side" d="m0 18 53-30 94 52v47l-54 30L0 65Z" />
@@ -123,11 +119,11 @@ export function EventScene() {
       {/* Each owned contribution carries a separate agreement on the shared
           receiving plane. No central sheet stands in for all three authors. */}
       <g className="pf-event-agreements">
-        <Agreement x={194} y={435} />
-        <Agreement x={447} y={333} />
-        <Agreement x={364} y={464} />
+        <Agreement x={268} y={361} />
+        <Agreement x={789} y={349} />
+        <Agreement x={517} y={354} />
       </g>
-      <g className="pf-event-secondary-object pf-event-plant" transform="translate(79 381)">
+      <g className="pf-event-secondary-object pf-event-plant" transform="translate(125 327)">
         <ellipse className="pf-event-contact" cx="0" cy="20" rx="29" ry="10" />
         <path className="pf-event-room-edge" d="M-20-10h40L15 20q-15 9-30 0Z" />
         <ellipse className="pf-event-paper" cy="-10" rx="20" ry="11" />
@@ -135,6 +131,15 @@ export function EventScene() {
         <path className="pf-event-stem" d="M0-11v-82m0 42-20-22m20 39 18-31" />
         <path className="pf-event-leaf" d="M0-60Q-26-68-29-96-3-92 0-60Zm0-18q-7-34 13-43 9 26-13 43Zm1 38q4-33 29-39-2 31-29 39Z" />
       </g>
+      <g className="pf-event-shared-table" transform="translate(452 241)">
+        <path className="pf-event-contact" d="m-15 60 94-52 107 60-94 52Z" />
+        <path className="pf-event-leg" d="M0 5v58m87-13v58m-8-144v58m92 7v58" />
+        <path className="pf-event-room-edge" d="m-11-5 90-50 110 61v12L99 68-11 7Z" />
+        <path className="pf-event-paper" d="m-11-5 90-50 110 61-90 50Z" />
+        <path className="pf-event-mint" d="m24-4 44-25 60 33-45 25Z" />
+        <path className="pf-event-caption" d="m51-7 33 18m-21-24 33 18" />
+      </g>
+      <g transform="translate(0 2)"><Person x={514} y={323} coat="mint" /><Person x={645} y={292} coat="cream" /></g>
     </svg>
   </div>;
 }

@@ -7,10 +7,11 @@ import type { PublishPlanCommand } from '../../data/types';
 import { createOperationIntent } from '../../data/operations';
 import { finalizePlan, offerFits } from '../../domain/validation';
 import { completedWorkContext } from '../../domain/execution';
-import { Button, Dialog, Field, Link, Notice, PlanDiff, Select, Textarea } from '../../ui';
+import { activeSource, deriveReadiness } from '../../domain/readiness';
+import { Button, Dialog, Field, Link, Notice, PlanDiff, Select, StatusLabel, Textarea } from '../../ui';
 import { createPlanningController } from './planning';
 import { authorityFor, comparePlans, ownsProject, planningFingerprint, planningInput, publisherName, publishPlanInput, solverSummary } from './selectors';
-import { projectsCopy as copy, reasonText } from './catalog';
+import { agreementLabels, projectsCopy as copy, reasonText } from './catalog';
 import { ActionFeedback } from './ActionFeedback';
 import { ProjectPlan } from './ProjectPlan';
 import { PlanReviewEditor } from './PlanReview';
@@ -95,17 +96,20 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
     if (canContinue()) await onRefresh();
   };
   const usefulHelp = state.result?.reasons.filter(reason => reason.params?.additionalHelpSufficient === true) ?? [];
-  return <section className="pf-sheet pf-stack">
-    <header><h2>Find a plan everyone can take on</h2><p>We check who is available, what they can offer, and whether every part of your project is covered.</p></header>
+  const source = activeSource(project);
+  const currentPlan = source && project.proposal?.key === source.proposalKey && project.proposal.payload.proposalHash === source.proposalHash ? project.proposal.payload.plan : null;
+  const readiness = deriveReadiness(project, runtime.now());
+  const currentTitle = readiness.status === 'ready' ? 'Agreed plan' : readiness.status === 'awaiting_approval' ? 'Plan awaiting agreement' : 'Current proposed plan';
+  const search = <section className="project-plan-search pf-stack pf-surface-light">
+    <header className="project-plan-search-heading"><div><h2>{currentPlan ? 'Find another arrangement' : 'Find a plan everyone can take on'}</h2><p>Match the saved needs with available offers, then review each assignment.</p></div><Button variant={selected ? 'secondary' : 'primary'} onClick={() => { setReviewOpen(false); void controller.run(); }} disabled={!input || waiting} {...(state.running ? { pending: true as const, pendingLabel: copy.searching } : { pending: false as const })}>{selected ? 'Check for other plans' : copy.search}</Button></header>
     {hasUnsavedNeeds && <Notice tone="warning" title="Your needs editor contains changes"><p>This search uses the currently saved needs. Save or discard the editor changes before proposing a plan.</p><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'needs' })}>Return to the needs editor</Link></Notice>}
-    <section className="pf-stack project-preferences"><h3>Preferred assignments</h3><p>Choose someone for a particular job when you have a preference. The search will keep this assignment and tell you if it prevents a complete plan.</p>
+    <details className="project-preferences"><summary>Preferred assignments{pins.length > 0 ? ` (${pins.length})` : ''}</summary><div className="pf-stack"><p>Choose someone for a particular job when you have a preference. The search will keep this assignment and tell you if it prevents a complete plan.</p>
       <div className="project-grid"><Select label="Requirement" value={pinRequirement} options={[{ value: '', label: 'Choose a requirement' }, ...requirements.map(requirement => ({ value: requirement.id, label: requirement.title }))]} onChange={event => { setPinRequirement(event.target.value); setPinOffer(''); }} />
         <Select label="Contributor offer" value={pinOffer} options={[{ value: '', label: 'Choose an eligible offer' }, ...choices]} onChange={event => setPinOffer(event.target.value)} />
         <Field label="Quantity for this assignment" value={pinQuantity} inputMode="numeric" onChange={event => setPinQuantity(event.target.value)} /></div>
       <Button variant="secondary" onClick={() => { const choice = choices.find(item => item.value === pinOffer); const quantity = Number(pinQuantity); if (!selectedRequirement || !choice || !/^\d+$/.test(pinQuantity) || quantity < 1 || quantity > selectedRequirement.quantity) { setFormError('Choose an offer and a positive whole quantity within the requirement.'); return; } setPins([...pins.filter(pin => !(pin.requirementId === pinRequirement && pin.publisherRoot === choice.publisherRoot && pin.offerId === choice.offerId)), { requirementId: pinRequirement, publisherRoot: choice.publisherRoot, offerId: choice.offerId, quantity }]); setFormError(null); }}>Keep this assignment</Button>
       {pins.length > 0 && <ul>{pins.map((pin, index) => <li key={`${pin.requirementId}:${pin.publisherRoot}:${pin.offerId}`}>{requirements.find(item => item.id === pin.requirementId)?.title ?? pin.requirementId}: {publisherName(project, pin.publisherRoot)} supplies {pin.quantity ?? 1}<Button variant="quiet" onClick={() => setPins(pins.filter((_, i) => i !== index))}>Remove preference</Button></li>)}</ul>}
-    </section>
-    <div className="pf-actions"><Button variant={selected ? 'secondary' : 'primary'} onClick={() => { setReviewOpen(false); void controller.run(); }} disabled={!input || waiting} {...(state.running ? { pending: true as const, pendingLabel: copy.searching } : { pending: false as const })}>{selected ? 'Check for other plans' : copy.search}</Button></div>
+    </div></details>
     {formError && <Notice tone="warning">{formError}</Notice>}{state.failure && <Notice tone="warning">{state.failure}</Notice>}
     {reviewStore.exportRecovery() !== null && <Notice tone="warning" title="A saved proposal review needs recovery"><p>Its original data is preserved.</p><Button variant="secondary" onClick={() => downloadText('partfolk-plan-review-recovery.txt', reviewStore.exportRecovery()!, 'text/plain')}>Export original review data</Button></Notice>}
     {state.stale && <Notice tone="warning">{copy.staleResult}</Notice>}
@@ -115,15 +119,15 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
       </Notice>
       {usefulHelp.length > 0 && <Notice title="Here is what would help"><ul>{usefulHelp.map((reason, index) => <li key={index}>Adding {reason.params?.missing ?? 1} {String(reason.params?.requirementTitle ?? reason.requirementId ?? 'additional contribution')} would make {String(reason.params?.variantId ?? 'this option')} work.</li>)}</ul></Notice>}
       {state.result.reasons.length > 0 && <section className="pf-stack pf-stack--compact"><h3>What needs attention</h3><ul>{state.result.reasons.map((reason, index) => <li key={index}>{reason.requirementId && <strong>{requirements.find(item => item.id === reason.requirementId)?.title ?? reason.requirementId}: </strong>}{reasonText(reason)}{typeof reason.params?.publisherName === 'string' && <span> {reason.params.publisherName} cannot cover the overlapping duties alone.</span>}</li>)}</ul></section>}
-      {state.result.candidates.length > 0 && <Select label="Choose a plan" value={String(state.selected)} onChange={event => {
+      {state.result.candidates.length > 0 && <Select label="Choose a plan to propose" value={String(state.selected)} onChange={event => {
         controller.select(Number(event.target.value));
         const candidate = controller.candidate();
         if (reviewDraft && fingerprint && candidate) reviewStore.save({ fingerprint, plan: candidate.plan, explanation });
         setReviewOpen(false);
       }} options={state.result.candidates.map((candidate, index) => ({ value: String(index), label: `${index + 1}. ${candidate.plan.variant.title} with ${candidate.plan.requiredApprovers.map(root => publisherName(project, root)).join(', ')}` }))} />}
       {selected && <>
-        <Button onClick={openReview} disabled={state.stale || state.running || waiting || !owner || !authority || hasUnsavedNeeds} disabledReason={hasUnsavedNeeds ? 'Save or discard the needs editor changes first.' : !owner ? 'The project coordinator proposes a plan.' : !authority ? 'Select the coordinator account to continue.' : undefined}>{copy.preview}</Button>
-        <ProjectPlan project={project} plan={selected.plan} />
+        <div className="project-plan-propose"><p>This is a new proposal. Everyone must review and agree to this version before it can be used.</p><Button onClick={openReview} disabled={state.stale || state.running || waiting || !owner || !authority || hasUnsavedNeeds} disabledReason={hasUnsavedNeeds ? 'Save or discard the needs editor changes first.' : !owner ? 'The project coordinator proposes a plan.' : !authority ? 'Select the coordinator account to continue.' : undefined}>{copy.preview}</Button></div>
+        <ProjectPlan project={project} plan={selected.plan} title="Plan to propose" />
         {state.result.candidates.length > 1 && <section className="pf-stack"><h3>Compare another complete plan</h3><Select label="Compare against" value={String(comparisonIndex)} options={state.result.candidates.map((candidate, index) => ({ value: String(index), label: `${index + 1}. ${candidate.plan.variant.title}`, disabled: index === state.selected }))} onChange={event => setCompareIndex(Number(event.target.value))} /><PlanDiff title="Assignment comparison" labels={{ requirement: 'Requirement', before: 'Selected plan', after: 'Comparison plan' }} rows={comparePlans(selected.plan, state.result.candidates[comparisonIndex]?.plan ?? selected.plan, project)} /></section>}
       </>}
       <details><summary>Advanced: about this search</summary><p>{state.result.candidates.length} complete plans found after checking {state.result.nodesVisited} possibilities. When replacing a plan, the search first keeps compatible contributors, then the date and place, then assignments.</p>{state.result.optimality === 'not_proven' && <p>The search did not check every possible repair. Any plan shown passed the full checks.</p>}</details>
@@ -132,7 +136,7 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
     <Dialog open={reviewOpen && owner && reviewDraft !== null} title="Review the plan with everyone’s part" closeLabel="Keep reviewing later" onClose={() => setReviewOpen(false)} footer={<Button disabled={!finalized?.ok || state.stale || waiting || !authority || !owner || hasUnsavedNeeds} onClick={() => { void publish(); }}>{copy.propose}</Button>}>
       {reviewPlan && <div className="pf-stack"><p>Everyone in this plan will review this version and agree again, including people whose assignments have stayed the same.</p>
         {!savedReview && <Notice tone="warning">This review is only retained in memory. Export your work before closing the page.</Notice>}
-        <ProjectPlan project={project} plan={finalized?.ok ? finalized.value.plan : reviewPlan} />
+        <ProjectPlan project={project} plan={finalized?.ok ? finalized.value.plan : reviewPlan} title="Plan to propose" />
         <PlanReviewEditor project={project} plan={reviewPlan} disabled={waiting || !owner} onChange={plan => { if (!fingerprint || !input) return; const result = finalizePlan(plan, input.publishers, project.snapshot, completedWorkContext(project)); reviewStore.save({ fingerprint, plan: result.ok ? result.value.plan : plan, explanation }); }} />
         {finalized && !finalized.ok && <Notice tone="warning" title="Review these plan terms"><ul>{finalized.reasons.map((reason, index) => <li key={index}>{reasonText(reason)}</li>)}</ul></Notice>}
         <Textarea label="Explain this version to contributors" value={explanation} onChange={event => { if (reviewDraft) reviewStore.save({ ...reviewDraft, explanation: event.target.value }); }} hint="This note is public. It does not replace the full agreed terms." disabled={waiting || !owner} />
@@ -142,5 +146,9 @@ export function PlansPanel({ project, onRefresh, autoSolve = false }: { project:
         {formError && <Notice tone="warning">{formError}</Notice>}
       </div>}
     </Dialog>
+  </section>;
+  return <section className="project-planning pf-stack">
+    {currentPlan && <section className="project-current-plan"><div className="project-current-plan-status"><StatusLabel tone={readiness.status === 'ready' ? 'success' : readiness.status === 'unverified' || readiness.status === 'conflict' || readiness.status === 'changed' ? 'warning' : 'neutral'}>{agreementLabels[readiness.status]}</StatusLabel><div className="pf-actions"><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' })}>Review people and decisions</Link><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'needs' })}>Edit project needs</Link></div></div><ProjectPlan project={project} plan={currentPlan} title={currentTitle} /></section>}
+    {currentPlan ? <details className="project-alternative-plans"><summary>Explore a different plan</summary><p>New assignments need fresh agreement. The current plan stays above for reference.</p>{search}</details> : search}
   </section>;
 }

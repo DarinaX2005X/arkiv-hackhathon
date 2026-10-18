@@ -32,6 +32,7 @@ export function SearchSelect({
   const root = useRef<HTMLDivElement>(null);
   const control = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
   const optionNodes = useRef(new Map<string, HTMLButtonElement>());
   const restoringFocus = useRef(false);
   const [open, setOpen] = useState(false);
@@ -158,7 +159,12 @@ export function SearchSelect({
 
   useEffect(() => {
     if (!expanded || !active) return;
-    optionNodes.current.get(active.value)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const viewport = list.current, option = optionNodes.current.get(active.value);
+    if (!viewport || !option) return;
+    // Keep the active option visible without scrolling the page or a parent dialog.
+    const viewportBounds = viewport.getBoundingClientRect(), optionBounds = option.getBoundingClientRect();
+    if (optionBounds.top < viewportBounds.top) viewport.scrollTop += optionBounds.top - viewportBounds.top;
+    else if (optionBounds.bottom > viewportBounds.bottom) viewport.scrollTop += optionBounds.bottom - viewportBounds.bottom;
   }, [expanded, active]);
 
   return <div ref={root} className={['pf-field', 'pf-search-select', className].filter(Boolean).join(' ')}
@@ -190,7 +196,7 @@ export function SearchSelect({
       </div>
       {expanded && <div className="pf-search-select-popover" data-above={placement.above}
         style={{ '--search-list-height': `${placement.height}px` } as CSSProperties}>
-        <ul id={`${id}-list`} className="pf-search-select-list" role="listbox" aria-labelledby={`${id}-label`}>
+        <ul ref={list} id={`${id}-list`} className="pf-search-select-list" role="listbox" aria-labelledby={`${id}-label`}>
           {page.options.map((option, index) => <li role="presentation" key={option.value}>
             <button type="button" role="option" id={`${id}-option-${page.offset + index}`} tabIndex={-1} disabled={option.disabled}
               aria-selected={option.value === value} aria-disabled={option.disabled || undefined}

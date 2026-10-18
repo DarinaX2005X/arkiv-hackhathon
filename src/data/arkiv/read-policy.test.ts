@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { eq } from '@arkiv-network/sdk/query';
 import { createArkivReadClient, HOSTED_READ_RPC, OFFICIAL_RPC } from './client';
 import { readResponseTooLarge, repositoryError } from './errors';
-import { classifyReadFailure, createReadPolicy, providerRetryAt, READ_NETWORK_COOLDOWN_MS, READ_RATE_LIMIT_COOLDOWN_MS } from './read-policy';
+import { classifyReadFailure, createReadPolicy, MAX_HEADER_BATCH_SIZE, providerRetryAt, readBlockHeaders, READ_NETWORK_COOLDOWN_MS, READ_RATE_LIMIT_COOLDOWN_MS } from './read-policy';
 import type { RpcRead, RpcRequest } from './read-policy';
 
 const hash = (digit: string) => `0x${digit.repeat(64)}`;
@@ -13,6 +13,94 @@ const page = () => ({ data: [], blockNumber: '0x64' });
 const flush = async () => { for (let index = 0; index < 8; index++) await Promise.resolve(); };
 
 describe('one bounded public read policy', () => {
+  it('schedules bounded header batches as independent fresh reads within the shared concurrency limit', async () => {
+    const source: RpcRequest = vi.fn<RpcRequest>(), releases: ((value: unknown[]) => void)[] = [];
+    source.readBlockHeaders = vi.fn<NonNullable<RpcRequest['readBlockHeaders']>>(() => new Promise(resolve => releases.push(resolve)));
+    const policy = createReadPolicy(source, { maxConcurrent: 1, maxQueued: 1 });
+    const heights = Array.from({ length: MAX_HEADER_BATCH_SIZE }, (_value, index) => BigInt(index));
+    const first = readBlockHeaders(policy.request, heights), recheck = readBlockHeaders(policy.request, heights);
+    await expect(readBlockHeaders(policy.request, heights)).rejects.toMatchObject({ detail: { code: 'network' } });
+    await flush(); expect(source.readBlockHeaders).toHaveBeenCalledTimes(1);
+    const headers = heights.map(number => ({ number: `0x${number.toString(16)}`, hash: hash('1') }));
+    releases[0]!(headers); expect(await first).toEqual(headers);
+    await flush(); expect(source.readBlockHeaders).toHaveBeenCalledTimes(2);
+    const changed = headers.map(header => ({ ...header, hash: hash('2') }));
+    releases[1]!(changed); expect(await recheck).toEqual(changed); expect(source).not.toHaveBeenCalled();
+    await expect(readBlockHeaders(policy.request, [...heights, 33n])).rejects.toMatchObject({ detail: { code: 'invalid_input' } });
+    await expect(readBlockHeaders(policy.request, [])).rejects.toMatchObject({ detail: { code: 'invalid_input' } });
+    expect(source.readBlockHeaders).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the ordinary bounded scheduler for custom transports without a header-batch capability', async () => {
+    let active = 0, peak = 0;
+    const source = vi.fn<RpcRequest>(async args => {
+      active++; peak = Math.max(peak, active); await Promise.resolve(); active--;
+      return { number: (args.params as unknown[])[0], hash: hash('1') };
+    });
+    const policy = createReadPolicy(source, { maxConcurrent: 3 });
+    const heights = Array.from({ length: MAX_HEADER_BATCH_SIZE }, (_value, index) => BigInt(index));
+    const result = await readBlockHeaders(policy.request, heights);
+    expect(peak).toBeLessThanOrEqual(3); expect(source).toHaveBeenCalledTimes(MAX_HEADER_BATCH_SIZE);
+    expect(result.map(header => (header as { number: string }).number)).toEqual(heights.map(number => `0x${number.toString(16)}`));
+  });
+
+  it('cancels an in-flight header batch and rejects a partial custom batch', async () => {
+    const source: RpcRequest = vi.fn<RpcRequest>(); let signal: AbortSignal | undefined;
+    source.readBlockHeaders = vi.fn<NonNullable<RpcRequest['readBlockHeaders']>>((_heights, options) => {
+      signal = options?.signal; return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+    });
+    const policy = createReadPolicy(source), owner = new AbortController();
+    const pending = readBlockHeaders(policy.request, [1n, 2n], { signal: owner.signal }).then(() => null, repositoryError);
+    await flush(); expect(signal?.aborted).toBe(false); owner.abort();
+    expect(signal?.aborted).toBe(true); expect(await pending).toMatchObject({ code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }] });
+    source.readBlockHeaders = vi.fn(async () => [{ number: '0x1', hash: hash('1') }]);
+    await expect(readBlockHeaders(policy.request, [1n, 2n])).rejects.toMatchObject({ detail: { code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }] } });
+  });
+
+  it('shares batch quota failures with ordinary reads and never retries a rate-limited batch', async () => {
+    const source: RpcRequest = vi.fn<RpcRequest>();
+    source.readBlockHeaders = vi.fn(async () => { throw { status: 429, headers: { 'Retry-After': '7' } }; });
+    const policy = createReadPolicy(source, { now: () => 1_000 });
+    await expect(readBlockHeaders(policy.request, [1n, 2n])).rejects.toMatchObject({ detail: { code: 'rate_limited' } });
+    expect(policy.cooldownRemainingMs()).toBe(7_000);
+    await expect(policy.request(query)).rejects.toMatchObject({ detail: { code: 'rate_limited' } });
+    expect(source.readBlockHeaders).toHaveBeenCalledTimes(1); expect(source).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ jsonrpc: '2.0', id: 1, result: {} }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 1, result: {} }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 3, result: {} }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: '2', result: {} }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '1.0', id: 2, result: {} }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 2, result: {}, error: { code: -32005, message: 'error' } }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 2, error: { code: 'invalid', message: 'error' } }],
+    [{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 2, result: {} }, { jsonrpc: '2.0', id: 3, result: {} }],
+    { jsonrpc: '2.0', id: 1, result: {} },
+  ].map(body => ({ body })))('rejects malformed standard HTTP batch response association without returning a partial list: %#', async ({ body }) => {
+    vi.resetModules();
+    const { createArkivReadClient: createHttpClient } = await import('./client');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(body));
+    try {
+      await expect(readBlockHeaders(createHttpClient(undefined, { transport: 'direct' }).request, [1n, 2n]))
+        .rejects.toMatchObject({ detail: { code: 'unverified', reasons: [{ code: 'incomplete_snapshot' }] } });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { fetch.mockRestore(); }
+  });
+
+  it('fails a complete HTTP header batch when any associated request has a provider error', async () => {
+    vi.resetModules();
+    const { createArkivReadClient: createHttpClient } = await import('./client');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([
+      { jsonrpc: '2.0', id: 2, error: { code: -32005, message: 'Header unavailable.' } },
+      { jsonrpc: '2.0', id: 1, result: { number: '0x1', hash: hash('1') } },
+    ]));
+    try {
+      await expect(readBlockHeaders(createHttpClient(undefined, { transport: 'direct' }).request, [1n, 2n])).rejects.toMatchObject({ name: 'RpcRequestError' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { fetch.mockRestore(); }
+  });
+
   it('coalesces matching requests across clients and does not wrap an already shared request twice', async () => {
     let complete: (value: unknown) => void = () => {};
     const source = vi.fn<RpcRequest>(() => new Promise(resolve => { complete = resolve; }));

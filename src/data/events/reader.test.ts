@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { stringToHex, toHex } from 'viem';
 import { audienceHash, deriveEventAvailability, attendanceStatus, canAdmitAttendance, registrationEligibility, EVENTS_PROTOCOL } from '../../domain/events';
 import type { AttendanceState, AudienceTerms, EventPayload, EventRelease, EventState } from '../../domain/events';
@@ -10,6 +10,8 @@ import { COORDINATOR, KEYS, NOW, PUBLISHER, STRANGER, entityKey, rawEntity, read
 import type { RawAttribute, RawEntity, ReadRpcFixture } from '../__tests__/arkiv-fixture';
 import { EventReader } from './reader';
 import { EventRepository } from './repository';
+import { ARKIV_READ_LIMITS, createArkivReadHandler } from '../../server/arkiv-read';
+import { MAX_HEADER_BATCH_SIZE } from '../arkiv/read-policy';
 
 const RELEASE = entityKey(101); const STATE = entityKey(102); const ATTENDANCE = entityKey(103);
 const eventBase = (operationId: string) => ({ protocol: EVENTS_PROTOCOL, schemaVersion: 1 as const, operationId, createdAt: NOW - 1_000 });
@@ -93,6 +95,112 @@ async function rejects(task: Promise<unknown>, code: DomainReason['code']) {
 }
 
 describe('complete authenticated admission rosters', () => {
+  it.each(['direct', 'hosted'] as const)('loads 512 distinct historical requests through the real %s HTTP transport within the hosted rate budget', async transport => {
+    vi.resetModules();
+    const [{ createArkivReadClient, HOSTED_READ_RPC, OFFICIAL_RPC }, { EventReader: HttpEventReader }] = await Promise.all([
+      import('../arkiv/client'), import('./reader'),
+    ]);
+    const f = structuredFixture(); f.rpc.block = 1_000;
+    f.release.terms.registration!.capacity = { kind: 'limited', limit: 512 };
+    f.release.terms.registration!.deadline = NOW + 100_000;
+    f.release.audienceHash = audienceHash(f.release.terms); f.state.audienceHash = f.release.audienceHash;
+    f.save(); f.rpc.remove(ATTENDANCE);
+    for (let index = 0; index < 512; index++) {
+      const attendee = `0x${(index + 1_000).toString(16).padStart(40, '0')}` as AccountAddress;
+      f.rpc.put(rawEvent(entityKey(20_000 + index), { ...f.attendance, attendee, operationId: `attendance-${index}`,
+        audienceHash: f.release.audienceHash }, attendee, { createdAt: toHex(200 + index) }));
+    }
+    let clock = NOW, headerCalls = 0;
+    const batchSizes: number[] = [];
+    const reply = async (rpc: { id: number; method: string; params: unknown[] }) => {
+      let result: unknown;
+      if (rpc.method === 'eth_getBlockByNumber') {
+        headerCalls++; const height = Number(BigInt(rpc.params[0] as string));
+        result = { number: toHex(height), hash: entityKey(30_000 + height),
+          timestamp: toHex(NOW / 1_000 - (1_000 - height)), transactions: [] };
+      } else result = await f.rpc.request(rpc);
+      return { jsonrpc: '2.0', id: rpc.id, result };
+    };
+    const provider = vi.fn<typeof globalThis.fetch>(async (_url, options) => {
+      const body = JSON.parse(options?.body as string);
+      if (Array.isArray(body)) return Response.json((await Promise.all(body.map(reply))).reverse());
+      return Response.json(await reply(body));
+    });
+    const handler = createArkivReadHandler({ accessKey: () => 'synthetic-test-key', fetch: provider, now: () => clock });
+    // Node's Request needs an absolute URL; browsers already resolve this same-origin path.
+    const NativeRequest = globalThis.Request;
+    vi.stubGlobal('Request', class extends NativeRequest {
+      constructor(input: RequestInfo | URL, options?: RequestInit) {
+        super(typeof input === 'string' && input.startsWith('/') ? `https://partfolk.test${input}` : input, options);
+      }
+    });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+      clock += 10;
+      expect(new URL(String(url), 'https://partfolk.test').href).toBe(new URL(transport === 'direct' ? OFFICIAL_RPC : HOSTED_READ_RPC, 'https://partfolk.test').href);
+      const body = JSON.parse(options?.body as string);
+      if (Array.isArray(body)) batchSizes.push(body.length);
+      return transport === 'hosted' ? handler(new Request(String(url), options)) : provider(url, options);
+    });
+    try {
+      const request = createArkivReadClient(undefined, { transport }).request;
+      const instance = new HttpEventReader({ request, now: () => clock });
+      const refreshes = transport === 'hosted' ? 4 : 1;
+      for (let refresh = 0; refresh < refreshes; refresh++) {
+        // Exercise the sustained 15-second cadence, not merely the initial token burst.
+        clock = NOW + refresh * 15_000; const startedRequests = fetch.mock.calls.length;
+        const event = await instance.loadEvent(KEYS.project);
+        expect(event.roster?.entries).toHaveLength(512); expect(event.snapshot.freshness).toBe('fresh');
+        expect(deriveEventAvailability(event, clock)).toBe('open');
+        expect(event.roster!.entries[0]!.inclusionTimestamp).toBe(NOW - 800_000);
+        expect(event.roster!.entries.at(-1)!.inclusionTimestamp).toBe(NOW - 289_000);
+        expect(canAdmitAttendance(event, event.roster!.entries.at(-1)!, clock)).toBe(true);
+        expect(headerCalls).toBe((refresh + 1) * 1_026);
+        expect(fetch.mock.calls.length - startedRequests).toBeLessThan(ARKIV_READ_LIMITS.ipBurst);
+      }
+      expect(batchSizes).toEqual(Array(refreshes * 32).fill(MAX_HEADER_BATCH_SIZE));
+      expect(provider.mock.calls.length).toBe(fetch.mock.calls.length);
+      expect(clock - NOW).toBeLessThan(60_000);
+    } finally { fetch.mockRestore(); vi.unstubAllGlobals(); }
+  });
+
+  it.each(['changed-hash', 'changed-time', 'missing', 'wrong-number', 'future-time'] as const)
+  ('rejects %s inclusion evidence in a header batch without a partial roster', async problem => {
+    const f = structuredFixture(); f.rpc.row(ATTENDANCE).createdAt = toHex(99); let passes = 0;
+    const request: RpcRequest = args => f.rpc.request(args);
+    request.readBlockHeaders = async () => {
+      passes++;
+      const block = { number: toHex(99), hash: entityKey(999), timestamp: toHex(NOW / 1_000 - 1) };
+      if (problem === 'missing') return [null];
+      if (problem === 'wrong-number') block.number = toHex(98);
+      if (problem === 'future-time') block.timestamp = toHex(NOW / 1_000 + 1);
+      if (passes === 2 && problem === 'changed-hash') block.hash = entityKey(998);
+      if (passes === 2 && problem === 'changed-time') block.timestamp = toHex(NOW / 1_000 - 2);
+      return [block];
+    };
+    await rejects(new EventReader({ request, now: () => NOW }).loadEvent(KEYS.project), 'incomplete_snapshot');
+    expect(passes).toBe(problem.startsWith('changed') ? 2 : 1);
+  });
+
+  it('uses batched creation times to admit a timely historical request after deadline and reject one included at deadline', async () => {
+    const f = structuredFixture(); f.release.terms.registration!.deadline = NOW - 1_000;
+    f.release.audienceHash = audienceHash(f.release.terms); f.state.audienceHash = f.release.audienceHash;
+    f.attendance.audienceHash = f.release.audienceHash; f.attendance.createdAt = NOW - 100_000; f.save();
+    f.rpc.row(ATTENDANCE).createdAt = toHex(98);
+    f.rpc.put(rawEvent(entityKey(120), { ...f.attendance, attendee: PUBLISHER, operationId: 'at-deadline' }, PUBLISHER, { createdAt: toHex(99) }));
+    const request: RpcRequest = args => f.rpc.request(args);
+    const batches: bigint[][] = [];
+    request.readBlockHeaders = async heights => {
+      batches.push([...heights]);
+      return heights.map(height => ({ number: toHex(height), hash: entityKey(Number(height)),
+        timestamp: toHex(NOW / 1_000 - (100 - Number(height))) }));
+    };
+    const event = await new EventReader({ request, now: () => NOW }).loadEvent(KEYS.project);
+    expect(batches).toEqual([[98n, 99n], [98n, 99n]]);
+    expect(event.roster?.entries.map(entry => entry.inclusionTimestamp)).toEqual([NOW - 2_000, NOW - 1_000]);
+    expect(canAdmitAttendance(event, event.roster!.entries[0]!, NOW)).toBe(true);
+    expect(canAdmitAttendance(event, event.roster!.entries[1]!, NOW)).toBe(false);
+  });
+
   it('reuses the authenticated current inclusion block and still detects a final canonical change', async () => {
     const f = structuredFixture();
     const event = await reader(f.rpc).instance.loadEvent(KEYS.project);

@@ -2,7 +2,11 @@ import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import { ArkivRepositoryError } from './errors';
 
 export interface RpcRead { method: string; params?: readonly unknown[] | object }
-export type RpcRequest = (request: RpcRead, options?: { signal?: AbortSignal }) => Promise<unknown>;
+export type RpcRequest = ((request: RpcRead, options?: { signal?: AbortSignal }) => Promise<unknown>) & {
+  /** Optional standard JSON-RPC batching, restricted to exact block headers. */
+  readBlockHeaders?: (blockNumbers: readonly bigint[], options?: { signal?: AbortSignal }) => Promise<unknown[]>;
+};
+export const MAX_HEADER_BATCH_SIZE = 32;
 export const READ_METHODS: ReadonlySet<string> = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber',
   'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getTransactionCount', 'eth_getLogs',
   'eth_getBalance', 'eth_gasPrice', 'eth_maxPriorityFeePerGas', 'eth_estimateGas', 'eth_call', 'arkiv_query']);
@@ -105,6 +109,18 @@ function stable(value: unknown): string {
 function hexBlock(value: unknown): string | null {
   return typeof value === 'string' && /^0x[\da-f]+$/i.test(value) ? BigInt(value).toString() : null;
 }
+export function validateHeaderBatch(blockNumbers: readonly bigint[]): void {
+  if (!Array.isArray(blockNumbers) || !blockNumbers.length || blockNumbers.length > MAX_HEADER_BATCH_SIZE
+    || blockNumbers.some(number => typeof number !== 'bigint' || number < 0n || number >= 2n ** 64n)) {
+    throw new ArkivRepositoryError('invalid_input', 'invalid_input', 'An exact bounded block-header batch is required.');
+  }
+}
+/** Custom transports without HTTP batching still use the endpoint's ordinary bounded scheduler. */
+export async function readBlockHeaders(request: RpcRequest, blockNumbers: readonly bigint[], options?: { signal?: AbortSignal }): Promise<unknown[]> {
+  validateHeaderBatch(blockNumbers);
+  return request.readBlockHeaders ? request.readBlockHeaders(blockNumbers, options)
+    : Promise.all(blockNumbers.map(number => request({ method: 'eth_getBlockByNumber', params: [`0x${number.toString(16)}`, false] }, options)));
+}
 interface Flight { promise: Promise<unknown>; controller: AbortController; consumers: number }
 interface CachedPage { value: unknown; block: string; epoch: number; expiresAt: number; bytes: number }
 interface QueuedRead { run: () => void; reject: (error: unknown) => void; signal: AbortSignal; abort: () => void }
@@ -150,10 +166,10 @@ export function createReadPolicy(underlying: RpcRequest, options: ReadPolicyOpti
     } };
     queue.push(waiting); signal.addEventListener('abort', waiting.abort, { once: true });
   });
-  const run = async (args: RpcRead, signal: AbortSignal): Promise<unknown> => {
+  const run = async (args: RpcRead, signal: AbortSignal, perform: () => Promise<unknown> = () => underlying(args, { signal })): Promise<unknown> => {
     for (let attempt = 0; ; attempt++) {
       checkSignal(signal); checkCooldown();
-      try { return await underlying(args, { signal }); }
+      try { return await perform(); }
       catch (error) {
         checkSignal(signal);
         const failure = classifyReadFailure(error, now());
@@ -180,6 +196,17 @@ export function createReadPolicy(underlying: RpcRequest, options: ReadPolicyOpti
     signal?.addEventListener('abort', abort, { once: true });
     flight.promise.then(value => finish(() => resolve(structuredClone(value))), error => finish(() => reject(error)));
   });
+  const observeHeader = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    const header = value as { number?: unknown; hash?: unknown };
+    const number = hexBlock(header.number);
+    if (number !== null && typeof header.hash === 'string' && /^0x[\da-f]{64}$/i.test(header.hash)) {
+      const oldHash = hashes.get(number);
+      if (oldHash && oldHash !== header.hash) invalidate();
+      hashes.delete(number); hashes.set(number, header.hash);
+      while (hashes.size > 256) hashes.delete(hashes.keys().next().value!);
+    }
+  };
   const request: RpcRequest = (args, requestOptions) => {
     if (!READ_METHODS.has(args.method)) return Promise.reject(new ArkivRepositoryError('unsupported', 'unsupported', 'This connection only supports reading public information.'));
     try { checkSignal(requestOptions?.signal); checkCooldown(); } catch (error) { return Promise.reject(error); }
@@ -202,16 +229,7 @@ export function createReadPolicy(underlying: RpcRequest, options: ReadPolicyOpti
     const flight: Flight = { controller, consumers: 0, promise: Promise.resolve() };
     flight.promise = schedule(() => run(args, controller.signal), controller.signal).then(value => {
       checkSignal(controller.signal);
-      if (args.method === 'eth_getBlockByNumber' && value && typeof value === 'object') {
-        const header = value as { number?: unknown; hash?: unknown };
-        const number = hexBlock(header.number);
-        if (number !== null && typeof header.hash === 'string' && /^0x[\da-f]{64}$/i.test(header.hash)) {
-          const oldHash = hashes.get(number);
-          if (oldHash && oldHash !== header.hash) invalidate();
-          hashes.delete(number); hashes.set(number, header.hash);
-          while (hashes.size > 256) hashes.delete(hashes.keys().next().value!);
-        }
-      }
+      if (args.method === 'eth_getBlockByNumber') observeHeader(value);
       if (block !== null && hash && generation === epoch && hashes.get(block) === hash && value && typeof value === 'object') {
         const page = value as { data?: unknown; blockNumber?: unknown; cursor?: unknown };
         if (Array.isArray(page.data) && hexBlock(page.blockNumber) === block && (page.cursor === undefined || typeof page.cursor === 'string')) {
@@ -223,6 +241,25 @@ export function createReadPolicy(underlying: RpcRequest, options: ReadPolicyOpti
     }).finally(() => { if (flights.get(key) === flight) flights.delete(key); });
     flights.set(key, flight);
     return join(flight, requestOptions?.signal);
+  };
+  request.readBlockHeaders = async (blockNumbers, requestOptions) => {
+    validateHeaderBatch(blockNumbers); checkSignal(requestOptions?.signal); checkCooldown();
+    if (!underlying.readBlockHeaders) return Promise.all(blockNumbers.map(number => request({
+      method: 'eth_getBlockByNumber', params: [`0x${number.toString(16)}`, false],
+    }, requestOptions)));
+    const controller = new AbortController();
+    // One bounded HTTP batch occupies one concurrency slot. Every invocation starts a new
+    // provider read; a completion/reorg check never joins an earlier batch or settled cache.
+    const flight: Flight = { controller, consumers: 0, promise: Promise.resolve() };
+    flight.promise = schedule(() => run({ method: 'eth_getBlockByNumber' }, controller.signal,
+      () => underlying.readBlockHeaders!(blockNumbers, { signal: controller.signal })), controller.signal).then(value => {
+      checkSignal(controller.signal);
+      if (!Array.isArray(value) || value.length !== blockNumbers.length) {
+        throw new ArkivRepositoryError('unverified', 'incomplete_snapshot', 'The block-header batch was incomplete.');
+      }
+      value.forEach(observeHeader); return value;
+    });
+    return await join(flight, requestOptions?.signal) as unknown[];
   };
   return { request, invalidate, cooldownRemainingMs };
 }

@@ -39,12 +39,13 @@ export interface OperationStore {
   getAttempt(operationId: string): StoredOperationAttempt | undefined;
   /** Compare and swap under the short journal lock; null requires an absent record. */
   putAttemptCAS(record: StoredOperationAttempt, expectedRevision: number | null): void;
-  /** Non-queuing account lock. Browser implementation uses same-origin Web Locks. */
-  runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T>;
+  /** Fails fast by default. Waiting is only for short journal writes, never wallet admission. */
+  runExclusive<T>(scope: string, action: () => Promise<T>, options?: { wait?: boolean }): Promise<T>;
   /** Holds one operation across validation without blocking nested journal writes. */
   runOperationExclusive<T>(operationId: string, action: () => Promise<T>): Promise<T>;
 }
 
 export interface OperationLockProvider {
-  runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T>;
+  /** A waiting caller must acquire the same lock after its current holder finishes. */
+  runExclusive<T>(scope: string, action: () => Promise<T>, options?: { wait?: boolean }): Promise<T>;
 }

@@ -84,6 +84,7 @@ export class MemoryOperationStore implements OperationStore {
   private records = new Map<string, StoredOperationStep>();
   private attempts = new Map<string, StoredOperationAttempt>();
   private active = new Set<string>();
+  private waiters = new Map<string, (() => void)[]>();
   get(operationId: string, stepId: string): StoredOperationStep | undefined {
     const value = this.records.get(identity(operationId, stepId));
     return value === undefined ? undefined : clone(value);
@@ -107,10 +108,21 @@ export class MemoryOperationStore implements OperationStore {
     assertOperationId(operationId);
     return this.runExclusive(`operation:${operationId}`, action);
   }
-  async runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T> {
-    if (this.active.has(scope)) throw busy();
-    this.active.add(scope);
-    try { return await action(); } finally { this.active.delete(scope); }
+  async runExclusive<T>(scope: string, action: () => Promise<T>, options: { wait?: boolean } = {}): Promise<T> {
+    if (this.active.has(scope)) {
+      if (!options.wait) throw busy();
+      await new Promise<void>(resolve => {
+        const waiting = this.waiters.get(scope) ?? [];
+        waiting.push(resolve); this.waiters.set(scope, waiting);
+      });
+    } else this.active.add(scope);
+    try { return await action(); }
+    finally {
+      const waiting = this.waiters.get(scope), next = waiting?.shift();
+      if (!waiting?.length) this.waiters.delete(scope);
+      // Keep ownership assigned while the next queued callback resumes.
+      if (next) next(); else this.active.delete(scope);
+    }
   }
 }
 
@@ -172,20 +184,20 @@ export class BrowserOperationStore implements OperationStore {
     try { this.storage.setItem(this.key, canonicalJson(document)); }
     catch (error) { throw storageError(error); }
   }
-  async runExclusive<T>(scope: string, action: () => Promise<T>): Promise<T> {
+  async runExclusive<T>(scope: string, action: () => Promise<T>, options: { wait?: boolean } = {}): Promise<T> {
     // The document contains several accounts, so its read/merge/write needs one store-wide lock.
     const name = this.lockKey ?? `${this.key}:journal`;
-    return this.lock(name, action);
+    return this.lock(name, action, options);
   }
   runOperationExclusive<T>(operationId: string, action: () => Promise<T>): Promise<T> {
     assertOperationId(operationId);
     return this.lock(`${this.lockKey ?? `${this.key}:journal`}:${this.key}:operation:${operationId}`, action);
   }
-  private async lock<T>(name: string, action: () => Promise<T>): Promise<T> {
-    if (this.locks) return this.locks.runExclusive(name, action);
+  private async lock<T>(name: string, action: () => Promise<T>, options: { wait?: boolean } = {}): Promise<T> {
+    if (this.locks) return this.locks.runExclusive(name, action, options);
     const locks = globalThis.navigator?.locks;
     if (!locks) throw new WalletOperationError('This browser cannot safely coordinate wallet operations across tabs.', { kind: 'not_sent', code: 'unsupported' });
-    return locks.request(name, { mode: 'exclusive', ifAvailable: true }, async lock => {
+    return locks.request(name, { mode: 'exclusive', ...(options.wait ? {} : { ifAvailable: true }) }, async lock => {
       if (!lock) throw busy();
       return action();
     });

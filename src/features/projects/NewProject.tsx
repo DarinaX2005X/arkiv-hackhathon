@@ -30,6 +30,8 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   activeDraft.current = draft.id;
   const [review, setReview] = useState(false), [publicAcknowledged, setPublicAcknowledged] = useState(false);
   const [step, setStep] = useState<'event' | 'needs'>('event');
+  const [validationAttempts, setValidationAttempts] = useState({ event: 0, needs: 0 });
+  const editorSurface = useRef<HTMLDivElement>(null), focusRequest = useRef<'step' | 'error' | null>(null);
   const action = useRepositoryAction(`project-create:${draft.id}`);
   const validation = validateEditorDraft(draft.editor), authority = authorityFor(session.actor, session.mode, session.chainId);
   const ownerChanged = draft.scope !== currentScope;
@@ -54,6 +56,29 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   }, [runtime, currentScope, session.activeDraftId]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { setReview(false); setPublicAcknowledged(false); }, [session.actor, session.mode, session.chainId]);
+  useEffect(() => { setStep('event'); setValidationAttempts({ event: 0, needs: 0 }); focusRequest.current = null; }, [draft.id]);
+  useEffect(() => {
+    const request = focusRequest.current, surface = editorSurface.current;
+    focusRequest.current = null;
+    if (!request || !surface) return;
+    const target = request === 'error' ? surface.querySelector<HTMLElement>('[aria-invalid="true"]') : surface.querySelector<HTMLElement>('h2');
+    if (target) {
+      if (request === 'step') target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: 'start', behavior: 'instant' });
+    } else surface.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [step, validationAttempts]);
+  const moveTo = (next: 'event' | 'needs') => {
+    if (next === 'needs' && !detailsReady) {
+      focusRequest.current = 'error'; setValidationAttempts(previous => ({ ...previous, event: previous.event + 1 })); return;
+    }
+    if (step !== next) { focusRequest.current = 'step'; setStep(next); }
+  };
+  const reviewProject = () => {
+    if (!ownsCurrentDraft()) return;
+    if (validation.valid) setReview(true);
+    else { focusRequest.current = 'error'; setValidationAttempts(previous => ({ ...previous, needs: previous.needs + 1 })); }
+  };
   const ownsCurrentDraft = () => {
     const current = runtime.session.getSnapshot();
     if (draft.scope !== draftScope(current.mode, current.actor) || activeDraft.current !== draft.id) return false;
@@ -109,26 +134,26 @@ export function NewProjectRoute({ onShareDraft }: NewProjectRouteProps) {
   };
   return <div className="pf-stack project-create">
     <header className="project-heading"><div><h1>Create your event project</h1><p>Set the date and bring together the help you need. Your project is created publicly on Arkiv with your wallet.</p></div><Link href={routeHref({ name: 'workspace' })}>My projects</Link></header>
-    <nav className="project-creation-nav" aria-label="Project creation"><ol className="project-steps"><li aria-current={step === 'event' ? 'step' : undefined}><Button variant={step === 'event' ? 'primary' : 'quiet'} onClick={() => setStep('event')}>Event and date</Button></li><li aria-current={step === 'needs' ? 'step' : undefined}><Button variant={step === 'needs' ? 'primary' : 'quiet'} disabled={!detailsReady} onClick={() => setStep('needs')}>Place and help</Button></li><li>Review and create</li></ol></nav>
+    <nav className="project-creation-nav" aria-label="Project creation"><ol className="project-steps"><li aria-current={step === 'event' ? 'step' : undefined}><Button variant={step === 'event' ? 'primary' : 'quiet'} onClick={() => moveTo('event')}>Event and date</Button></li><li aria-current={step === 'needs' ? 'step' : undefined}><Button variant={step === 'needs' ? 'primary' : 'quiet'} disabled={waiting || ownerChanged} onClick={() => moveTo('needs')}>Place and help</Button></li><li>Review and create</li></ol></nav>
     {ownerChanged && <Notice tone="warning" title="This draft belongs to another account context"><p>Your original input is retained. Reconnect its account to continue editing or publishing. Connecting a different account does not transfer this draft.</p><Button variant="secondary" onClick={() => { const next = startNewProjectDraft(runtime); setDraftSession(next); runtime.session.selectDraft(next.draft.id); setOpenError(null); }}>Start a separate draft in this account</Button></Notice>}
     {!saveStatus.persisted && <Notice tone="warning">{copy.memoryOnly}</Notice>}
     {store.exportRecovery() !== null && <Notice tone="warning" title="Saved drafts need recovery"><p>The unreadable data is preserved and has not been replaced.</p><Button variant="secondary" onClick={() => downloadText('partfolk-drafts-recovery.txt', store.exportRecovery()!, 'text/plain')}>Export original data</Button></Notice>}
     {draftSession.recoveryText !== null && <Notice tone="warning" title="The saved draft location needs recovery"><p>The original location data is preserved. Export it before closing this page.</p><Button variant="secondary" onClick={() => downloadText('partfolk-draft-location-recovery.txt', draftSession.recoveryText!, 'text/plain')}>Export original draft location</Button></Notice>}
-    <RecipeEditor value={validation.recipe ?? { title: '', outcome: '', timeZone: draft.editor.timeZone, variants: [], instructions: '' }} draft={draft.editor}
-      onDraftChange={editor => save({ ...draft, editor, updatedAt: runtime.now() })} onChange={() => {}} disabled={waiting || ownerChanged} section={step} />
+    <div ref={editorSurface}><RecipeEditor key={draft.id} value={validation.recipe ?? { title: '', outcome: '', timeZone: draft.editor.timeZone, variants: [], instructions: '' }} draft={draft.editor}
+      onDraftChange={editor => save({ ...draft, editor, updatedAt: runtime.now() })} onChange={() => {}} disabled={waiting || ownerChanged} section={step} validationRequested={validationAttempts[step] > 0} /></div>
     <div className="pf-sheet pf-stack project-create-continuation"><h2>{step === 'event' ? 'Next, bring the plan together' : 'Create a shared starting point'}</h2><p>{step === 'event' ? 'Choose the place and describe at least one contribution. Contributors will offer their help and decide on the complete plan.' : 'Contributors can read the public project and offer help. After everyone agrees, you can publish the visitor page and open registration.'}</p><div className="project-form-actions">
-      {step === 'event' && <Button onClick={() => setStep('needs')} disabled={!detailsReady || waiting || ownerChanged}>Continue to place and help</Button>}
-      {step === 'needs' && <Button variant="secondary" onClick={() => setStep('event')}>Back to event and date</Button>}
+      {step === 'event' && <Button onClick={() => moveTo('needs')} disabled={waiting || ownerChanged}>Continue to place and help</Button>}
+      {step === 'needs' && <Button variant="secondary" onClick={() => moveTo('event')}>Back to event and date</Button>}
       {session.mode === 'local' && onShareDraft && <Button onClick={() => {
         if (waiting || !ownsCurrentDraft()) return;
         const shared = newProjectDraftForSharing(runtime, draft);
         if (shared) onShareDraft(shared);
       }} disabled={!validation.valid || ownerChanged || waiting}
         disabledReason={!validation.valid ? 'Complete the marked fields before sharing. Your input is retained.' : ownerChanged ? 'Reconnect the account that owns this draft.' : undefined}>Continue as a public project</Button>}
-      {step === 'needs' && session.mode === 'public' && <Button onClick={() => { if (ownsCurrentDraft()) setReview(true); }} disabled={ownerChanged || !validation.valid || waiting || action.state.status === 'confirmed'}>Review public project</Button>}
+      {step === 'needs' && session.mode === 'public' && <Button onClick={reviewProject} disabled={ownerChanged || waiting || action.state.status === 'confirmed'}>Review public project</Button>}
     </div>
     {step === 'event' && !detailsReady && <p className="pf-field-message">Add the event name, purpose, start and end before continuing.</p>}
-    {step === 'needs' && !validation.valid && <p className="pf-field-message">Complete the marked details before reviewing the public project.</p>}
+    {step === 'needs' && !validation.valid && <p className="pf-field-message">{validationAttempts.needs ? 'Complete the marked details before reviewing the public project.' : 'Describe the place and at least one contribution before reviewing the public project.'}</p>}
     <p className="project-create-status" role="status">{saveStatus.persisted ? 'Your unfinished input is saved automatically on this device. Nothing is published until you confirm with your wallet.' : copy.memoryOnly}</p></div>
     <ActionFeedback state={action.state} action={action} onReconcile={() => { void checkOriginal(); }} onResume={action.recoverableCommand ? () => { void submit(action.recoverableCommand as CreateProjectCommand); } : undefined} />
     {action.state.status === 'confirmed' && draft.projectRoot === null && <Button variant="secondary" disabled={ownerChanged || !authority} onClick={() => { void checkOriginal(); }}>Open the confirmed project</Button>}

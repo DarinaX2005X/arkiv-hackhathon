@@ -24,8 +24,9 @@
 .pf-app-main { display: grid; gap: 32px; min-height: 65vh; align-content: start; padding-block: 40px 80px; }
 .pf-app-main > * { min-width: 0; }
 .pf-app-main--home { padding-top: 20px; }
-.pf-foundation-intro { max-width: 850px; padding-block: 24px; }
-.pf-foundation-intro h1 { max-width: 18ch; font-size: clamp(32px, 4vw, 44px); line-height: 1.03; font-weight: 500; color: var(--text-primary); }
+.pf-foundation-intro { max-width: 850px; padding-block: 8px; }
+.pf-foundation-intro h1 { font-size: clamp(32px, 3.2vw, 40px); line-height: 1.12; font-weight: 500; color: var(--text-primary); }
+.pf-foundation-intro h1 + p { margin-top: 12px; }
 .pf-foundation-intro > p { max-width: 62ch; }
 
 .pf-workspace-bar { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 12px; width: calc(100% - var(--page-gutter) * 2); max-width: 1216px; margin-inline: auto; }
@@ -228,4 +229,16 @@
 @media (prefers-reduced-motion: reduce) {
   .pf-app-navigation a { transition: none; }
   .pf-app-navigation a:active { transform: none; }
+}
+
+/* Compact the practice controls while retaining the mode and role explanation. */
+.pf-practice-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px var(--space-6); padding: 8px var(--space-4); }
+.pf-practice-controls .pf-workspace-summary { display: flex; flex: 1 1 360px; flex-wrap: wrap; align-items: baseline; gap: 4px var(--space-3); font-size: 14px; }
+.pf-practice-controls > .pf-field { display: grid; grid-template-columns: auto minmax(180px, 260px); align-items: center; gap: var(--space-3); }
+.pf-practice-controls > .pf-field .pf-field-label { font-size: 14px; }
+.pf-app-main:has(.project-page--folio), .pf-app-main:has(.pf-events-page) { padding-top: var(--space-6); }
+@media (max-width: 600px) {
+  .pf-practice-controls { padding: 10px 12px; }
+  .pf-practice-controls .pf-workspace-summary { flex-basis: 100%; }
+  .pf-practice-controls > .pf-field { width: 100%; grid-template-columns: auto minmax(0, 1fr); }
 }

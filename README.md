@@ -32,6 +32,8 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **Arkiv holds the shared record.** Offers and agreements belong to their authors, so an organizer cannot turn an old “yes” into permission for a changed plan. Independent clients can read and verify those same decisions.
 
+<img src="docs/screenshots/partfolk-home.jpg" alt="Partfolk home with event discovery, creation and the shared event scene" width="960">
+
 <p align="center">
   <a href="https://partfolk.vercel.app/media/partfolk-demo-v2.mp4">
     <img src="public/media/partfolk-demo-v2.jpg" alt="Partfolk demo v2 — from creating an event through contributor agreement and publication" width="960">
@@ -97,6 +99,8 @@ Publishing and registration require an injected Ethereum-compatible EOA wallet o
 3. **See what changes.** Choose **Let Oak withdraw**. The old plan loses readiness, while its decisions remain attached to their original version.
 4. **Repair and agree again.** Choose **Add Juniper and update the plan**, then **Play fresh agreement**. Juniper installs with Willow, freeing Cedar for transport. Every required owner reviews the new version.
 
+<img src="docs/screenshots/partfolk-plan.jpg" alt="The Small Works practice project showing its current agreed plan and assigned space and equipment" width="960">
+
 Choose **Explore the full project** to inspect people, history and the run sheet. Use **Practice as** to switch fictional roles, prepare offers, record work, acknowledge handovers and export a JSON record or readable HTML run sheet. A scheduled equipment return is never treated as an actual return.
 
 Practice uses local domain operations with fictional identities and a controlled clock. Its agreement buttons and role selector simulate the separate owners. Progress survives reload; **Start the example again** resets only the example.
@@ -107,7 +111,11 @@ Practice uses local domain operations with fictional identities and a controlled
 
 Events can be **online**, **in person** or **hybrid**. Physical events name a country, city and venue; online participation uses a public HTTPS link or public joining instructions. Each event displays its own named time zone. Publication uses searchable country and city choices from a [versioned directory](public/places/ATTRIBUTION.md), loaded one country at a time. Catalog filters use the locations actually present in the loaded events.
 
+<img src="docs/screenshots/partfolk-events.jpg" alt="The populated event catalogue with Sketchbook exchange and Bookbinding at a shared table" width="960">
+
 Organizers can set a deadline, limited or unlimited places, an optional waiting list and open or wallet-invitation-only admission. Registration can be closed and reopened after validation; events can be cancelled or ended.
+
+<img src="docs/screenshots/partfolk-event.jpg" alt="Bookbinding event with its Almaty schedule and waiting-list action" width="960">
 
 <img src="docs/assets/registration-paths.svg" alt="Unlimited open events register a valid signed decision directly. Limited or invitation-only events keep requests pending until the organizer admits the exact request and reserves a place. Waiting-list participation is optional." width="960">
 
@@ -150,6 +158,8 @@ Read the [data schema](arkiv/schema.md), [full protocol](docs/protocol.md) and [
 | Unsent input, display preferences and tour progress | Projects, offers and immutable proposals |
 | Isolated practice and recoverable older drafts | Independently authored decisions and grants |
 | Pending-action and transaction journals | Event releases, admissions and attendance states |
+
+<img src="docs/screenshots/partfolk-contribution.jpg" alt="A saved Common Bench Workshop contribution with three repair toolkits and filled availability" width="960">
 
 The same wallet can discover its public records from another client. Drafts and pending journals do not automatically move between browsers or origins. Deleting a draft does not delete a published project; disconnecting preserves saved work.
 
@@ -239,4 +249,4 @@ The verified source baseline passed TypeScript, unit/integration checks and both
 
 Partfolk's application code is [MIT licensed](LICENSE). IBM Plex Sans retains its [SIL Open Font License](public/fonts/IBM-Plex-Sans/license.txt); dependencies retain their respective licenses. The separately licensed city directory is redistributed under ODbL 1.0, with its [source attribution, coverage and complete derivative download](public/places/ATTRIBUTION.md).
 
-The README diagrams are original explanatory illustrations, not interface screenshots. VibeMachina supplied development guidance; it is not a runtime dependency.
+VibeMachina supplied development guidance; it is not a runtime dependency.

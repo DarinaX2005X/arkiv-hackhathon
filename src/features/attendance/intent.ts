@@ -29,8 +29,16 @@ export function joinTargetStore(storage: StoragePort | null, projectRoot: Public
   return createDraftStore({ storage, key: `partfolk:events:join:${projectRoot.toLowerCase()}`, kind: 'event-join-target', validate: validJoinTarget });
 }
 
-export function clearJoinTarget(storage: StoragePort | null, projectRoot: PublicEntityKey): boolean {
-  try { if (!storage) return false; storage.removeItem(`partfolk:events:join:${projectRoot.toLowerCase()}`); return true; } catch { return false; }
+export function clearJoinTarget(storage: StoragePort | null, projectRoot: PublicEntityKey, reviewed: JoinTarget): boolean {
+  try {
+    if (!storage) return false;
+    const saved = joinTargetStore(storage, projectRoot).load();
+    if (saved.status !== 'ready' || saved.value.projectRoot !== reviewed.projectRoot
+      || saved.value.releaseKey !== reviewed.releaseKey || saved.value.audienceHash !== reviewed.audienceHash
+      || saved.value.attendee !== reviewed.attendee || saved.value.selectedAt !== reviewed.selectedAt) return false;
+    storage.removeItem(`partfolk:events:join:${projectRoot.toLowerCase()}`);
+    return true;
+  } catch { return false; }
 }
 
 export interface WithdrawalTarget extends JoinTarget { attendanceKey: PublicEntityKey }

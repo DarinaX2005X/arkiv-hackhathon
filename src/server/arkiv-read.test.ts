@@ -8,6 +8,7 @@ import type { EIP1193RequestFn } from 'viem';
 import { ENTITY_SELECTION } from '../data/arkiv/envelope';
 import { createWalletGateway } from '../data/wallet/gateway';
 import type { NativeBatch } from '../data/wallet';
+import { MAX_HEADER_BATCH_SIZE } from '../data/arkiv/read-policy';
 import { ARKIV_READ_LIMITS, createArkivReadHandler } from './arkiv-read';
 import type { ArkivReadHandlerOptions } from './arkiv-read';
 import entryPoint from '../../api/arkiv-read';
@@ -23,6 +24,9 @@ const page = () => ({ data: [], blockNumber: '0x64' });
 const query = (expression = "project = str('partfolk-events') AND entity_type = str('event_state') AND schema_version = i32(1)", settings = {}) =>
   ({ jsonrpc: '2.0', id: 1, method: 'arkiv_query', params: [expression, { atBlock: '0x64', limit: '0x64', select, ...settings }] });
 const rpc = (method: string, params?: unknown[], id: number | string = 1) => ({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
+const headerBatch = (count = 2) => Array.from({ length: count }, (_item, index) => rpc('eth_getBlockByNumber', [`0x${(100 + index).toString(16)}`, false], `header-${index}`));
+const headerReplies = (count = 2) => Array.from({ length: count }, (_item, index) => ({ jsonrpc: '2.0', id: index + 1,
+  result: { number: `0x${(100 + index).toString(16)}`, hash: ENTITY, timestamp: '0x1' } }));
 const success = (result: unknown, id = 1) => Response.json({ jsonrpc: '2.0', id, result });
 function request(body: unknown, options: RequestInit = {}): Request {
   return new Request(URL, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' }, ...options });
@@ -342,6 +346,203 @@ describe('bounded bodies and sanitized provider failures', () => {
   it('does not expose fetch exceptions or follow provider redirects', async () => {
     const fetcher = vi.fn<typeof fetch>(async (_url, init) => { expect(init?.redirect).toBe('error'); throw new Error(`redirect https://elsewhere.test/${SECRET}`); });
     const response = await setup(fetcher).handler(request(query())); expect(response.status).toBe(502); expect(await response.text()).not.toContain(SECRET);
+  });
+});
+
+describe('admitted header-operation budgets', () => {
+  it('counts every repeated-height batch member and scalar header against the same independent allowance', async () => {
+    const forwarded: number[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (_url, options) => {
+      const input = JSON.parse(options!.body as string);
+      const requests = Array.isArray(input) ? input : [input]; forwarded.push(requests.length);
+      const replies = requests.map(item => ({ jsonrpc: '2.0', id: item.id, result: item.method === 'eth_chainId' ? '0x7614d1'
+        : { number: item.params[0], hash: ENTITY, timestamp: '0x1' } }));
+      return Response.json(Array.isArray(input) ? replies : replies[0]);
+    });
+    const { handler } = setup(fetcher, { now: () => 0, limits: { headerIpBurst: 32, headerInstanceBurst: 32 } });
+    const repeated = headerBatch(32).map(item => ({ ...item, params: ['0x64', false] }));
+    expect((await handler(request(repeated))).status).toBe(200);
+    const limited = await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])));
+    expect(limited.status).toBe(429); expect(limited.headers.get('Retry-After')).toBe('1');
+    expect((await handler(request(rpc('eth_chainId')))).status).toBe(200);
+    expect(forwarded).toEqual([32, 1]);
+  });
+
+  it('rejects a whole batch above a lowered header cap before forwarding any member', async () => {
+    const { handler, fetcher } = setup(undefined, { now: () => 0, limits: { headerIpBurst: 1, headerInstanceBurst: 1 } });
+    const response = await handler(request(headerBatch()));
+    expect(response.status).toBe(429); expect(fetcher).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual(headerBatch().map(item => ({ jsonrpc: '2.0', id: item.id,
+      error: { code: -32099, message: 'Several reads are already in progress. Try again shortly.' } })));
+  });
+
+  it('preserves both header buckets on rejected IP admission and bounds all IPs together', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(headerReplies()));
+    const { handler } = setup(fetcher, { now: () => 0, limits: { headerIpBurst: 2, headerInstanceBurst: 4 } });
+    const from = (ip: string) => request(headerBatch(), { headers: { 'Content-Type': 'application/json', 'x-vercel-forwarded-for': ip } });
+    expect((await handler(from('192.0.2.1'))).status).toBe(200);
+    expect((await handler(from('192.0.2.1'))).status).toBe(429);
+    expect((await handler(from('192.0.2.2'))).status).toBe(200);
+    expect((await handler(from('192.0.2.3'))).status).toBe(429);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the new IP allowance when the shared instance header budget rejects it', async () => {
+    let clock = 0;
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async () => Response.json(headerReplies())), {
+      now: () => clock, limits: { headerIpBurst: 2, headerIpPerMinute: 1, headerInstanceBurst: 2, headerInstancePerMinute: 60 },
+    });
+    const from = (ip: string) => request(headerBatch(), { headers: { 'Content-Type': 'application/json', 'x-vercel-forwarded-for': ip } });
+    expect((await handler(from('192.0.2.1'))).status).toBe(200);
+    expect((await handler(from('192.0.2.2'))).status).toBe(429);
+    clock = 2_000; expect((await handler(from('192.0.2.2'))).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares units between scalar and batch requests without debiting a partially affordable batch', async () => {
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async (_url, options) => {
+      const input = JSON.parse(options!.body as string);
+      return Array.isArray(input) ? Response.json(headerReplies(input.length)) : success({ number: '0x64', hash: ENTITY, timestamp: '0x1' });
+    }), { now: () => 0, limits: { headerIpBurst: 4, headerInstanceBurst: 4, headerIpPerMinute: 60, headerInstancePerMinute: 60 } });
+    const single = () => request(rpc('eth_getBlockByNumber', ['0x64', false]));
+    expect((await handler(request(headerBatch()))).status).toBe(200);
+    expect((await handler(single())).status).toBe(200);
+    const partial = await handler(request(headerBatch()));
+    expect(partial.status).toBe(429); expect(partial.headers.get('Retry-After')).toBe('1');
+    expect((await handler(single())).status).toBe(200);
+    expect((await handler(single())).status).toBe(429); expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns the full-batch deficit from the slower bucket and admits only after complete refill', async () => {
+    let clock = 0;
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async () => Response.json(headerReplies(4))), {
+      now: () => clock, limits: { headerIpBurst: 4, headerIpPerMinute: 60, headerInstanceBurst: 4, headerInstancePerMinute: 30 },
+    });
+    expect((await handler(request(headerBatch(4)))).status).toBe(200);
+    clock = 1_000; const response = await handler(request(headerBatch(4)));
+    expect(response.status).toBe(429); expect(response.headers.get('Retry-After')).toBe('7');
+    clock = 7_999; expect((await handler(request(headerBatch(4)))).status).toBe(429);
+    clock = 8_000; expect((await handler(request(headerBatch(4)))).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not charge header units for malformed batches or missing credentials, while HTTP admission remains independent', async () => {
+    let credential: string | undefined;
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async () => success({ number: '0x64', hash: ENTITY, timestamp: '0x1' })), {
+      now: () => 0, accessKey: () => credential, limits: { headerIpBurst: 1, headerInstanceBurst: 1, ipBurst: 3 },
+    });
+    expect((await handler(request([...headerBatch(1), rpc('eth_chainId', [], 2)]))).status).toBe(400);
+    expect((await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])))).status).toBe(503);
+    credential = SECRET;
+    expect((await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])))).status).toBe(200);
+    expect((await handler(request(rpc('eth_chainId')))).status).toBe(429); expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains admitted header units when the provider returns an RPC failure', async () => {
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async () => Response.json({ jsonrpc: '2.0', id: 1,
+      error: { code: -32000, message: 'not available' } })), { now: () => 0, limits: { headerIpBurst: 1, headerInstanceBurst: 1 } });
+    expect((await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])))).status).toBe(200);
+    expect((await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])))).status).toBe(429);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains admitted header units when a queued request is cancelled before reaching the provider', async () => {
+    let release!: (response: Response) => void, admitted = () => {}, credentials = 0;
+    const headerAdmitted = new Promise<void>(resolve => { admitted = resolve; });
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(() => new Promise(resolve => { release = resolve; })), {
+      now: () => 0, accessKey: () => { if (++credentials === 2) admitted(); return SECRET; },
+      limits: { maxConcurrent: 1, maxQueued: 1, headerIpBurst: 1, headerInstanceBurst: 1 },
+    });
+    const first = handler(request(query())); await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    const leaving = new AbortController();
+    const queued = handler(request(rpc('eth_getBlockByNumber', ['0x64', false]), { signal: leaving.signal }));
+    await headerAdmitted; leaving.abort(); expect((await queued).status).toBe(408);
+    expect((await handler(request(rpc('eth_getBlockByNumber', ['0x64', false])))).status).toBe(429);
+    release(success(page())); expect((await first).status).toBe(200); expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('bounded standard block-header batches', () => {
+  it('accepts exactly32 headers in one upstream request and remaps reordered responses to every caller ID', async () => {
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(async (_url, options) => {
+      const body = JSON.parse(options?.body as string);
+      expect(body).toHaveLength(MAX_HEADER_BATCH_SIZE);
+      expect(body.every((item: { method: string; params: unknown[] }, index: number) => item.method === 'eth_getBlockByNumber'
+        && item.params[0] === headerBatch(MAX_HEADER_BATCH_SIZE)[index]!.params![0] && item.params[1] === false)).toBe(true);
+      return Response.json(headerReplies(MAX_HEADER_BATCH_SIZE).reverse());
+    }));
+    const response = await handler(request(headerBatch(MAX_HEADER_BATCH_SIZE)));
+    expect(response.status).toBe(200); expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toEqual(headerReplies(MAX_HEADER_BATCH_SIZE).map((item, index) => ({ ...item, id: `header-${index}` })));
+  });
+
+  it.each([
+    [], headerBatch(MAX_HEADER_BATCH_SIZE + 1), [headerBatch()[0], rpc('eth_chainId', [], 'other')],
+    [headerBatch()[0], { ...query(), id: 'other' }], [headerBatch()[0], { ...headerBatch()[1], params: ['latest', false] }],
+    [headerBatch()[0], { ...headerBatch()[1], params: ['0x65', true] }],
+    [headerBatch()[0], { ...headerBatch()[1], id: 'header-0' }],
+  ].map(body => ({ body })))('rejects an empty, oversized, mixed, inexact or duplicate-ID batch before contacting upstream: %#', async ({ body }) => {
+    const { handler, fetcher } = setup();
+    expect((await handler(request(body))).status).toBe(400); expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('retains an individual provider error under its own ID without exposing provider messages or claiming success', async () => {
+    const { handler } = setup(vi.fn<typeof fetch>(async () => Response.json([
+      { jsonrpc: '2.0', id: 2, error: { code: -32005, message: SECRET, data: SECRET } }, headerReplies()[0],
+    ])));
+    const response = await handler(request(headerBatch()));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([{ ...headerReplies()[0], id: 'header-0' },
+      { jsonrpc: '2.0', id: 'header-1', error: { code: -32005, message: 'The public network rejected this read.' } }]);
+  });
+
+  it.each([
+    [headerReplies()[0]], [...headerReplies(), { ...headerReplies()[0], id: 3 }],
+    [headerReplies()[0], headerReplies()[0]], [headerReplies()[0], { ...headerReplies()[1], id: 3 }],
+    [headerReplies()[0], { ...headerReplies()[1], id: '2' }],
+    [headerReplies()[0], { ...headerReplies()[1], jsonrpc: '1.0' }],
+    [headerReplies()[0], { ...headerReplies()[1], error: { code: -32005 } }],
+    [headerReplies()[0], { jsonrpc: '2.0', id: 2, error: { code: 'invalid' } }],
+    [headerReplies()[0], { ...headerReplies()[1], result: { payload: SECRET } }], headerReplies()[0],
+  ].map(body => ({ body })))('rejects incomplete, duplicate, foreign or malformed provider replies as a whole: %#', async ({ body }) => {
+    const { handler } = setup(vi.fn<typeof fetch>(async () => Response.json(body)));
+    const response = await handler(request(headerBatch()));
+    expect(response.status).toBe(502);
+    const data = await response.json();
+    expect(data.map((item: { id: string }) => item.id)).toEqual(['header-0', 'header-1']);
+    expect(data.every((item: { error?: unknown; result?: unknown }) => item.error && !Object.hasOwn(item, 'result'))).toBe(true);
+    expect(JSON.stringify(data)).not.toContain(SECRET);
+  });
+
+  it('applies the existing aggregate byte limit to the whole batch', async () => {
+    const { handler } = setup(vi.fn<typeof fetch>(async () => Response.json(headerReplies().map(item => ({
+      ...item, result: { ...item.result, extraData: 'a'.repeat(300) },
+    })))), { limits: { responseBytes: 512 } });
+    const response = await handler(request(headerBatch()));
+    expect(response.status).toBe(413); expect(response.headers.get('X-Arkiv-Read-Error')).toBe('response_too_large');
+    expect((await response.json()).every((item: { error: { code: number } }) => item.error.code === -32098)).toBe(true);
+  });
+
+  it('bounds a stalled batch with the same upstream deadline and cancellation', async () => {
+    vi.useFakeTimers();
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(() => new Promise(() => {})), { limits: { upstreamTimeoutMs: 20 } });
+    const pending = handler(request(headerBatch())); await vi.advanceTimersByTimeAsync(21);
+    const response = await pending;
+    expect(response.status).toBe(504); expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect((await response.json()).map((item: { id: string }) => item.id)).toEqual(['header-0', 'header-1']);
+  });
+
+  it('keeps overlapping recheck batches independent within the shared concurrency limit', async () => {
+    const releases: ((response: Response) => void)[] = [];
+    const { handler, fetcher } = setup(vi.fn<typeof fetch>(() => new Promise(resolve => releases.push(resolve))),
+      { limits: { maxConcurrent: 1, maxQueued: 1 } });
+    const first = handler(request(headerBatch())), recheck = handler(request(headerBatch()));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect((await handler(request(headerBatch()))).status).toBe(429);
+    releases[0]!(Response.json(headerReplies())); expect((await first).status).toBe(200);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    releases[1]!(Response.json(headerReplies().map(item => ({ ...item, result: { ...item.result, hash: OTHER } }))));
+    expect((await (await recheck).json()).every((item: { result: { hash: string } }) => item.result.hash === OTHER)).toBe(true);
   });
 });
 

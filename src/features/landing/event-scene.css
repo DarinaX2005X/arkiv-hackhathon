@@ -57,3 +57,9 @@
 @media (prefers-reduced-motion: reduce) {
   .pf-event-screen-highlight, .pf-event-leaf { animation: none; }
 }
+
+.pf-event-art { aspect-ratio: 22 / 9; }
+.pf-event-stage-shadow { fill: var(--surface-dark); opacity: .16; filter: var(--event-shadow); }
+.pf-event-stage { fill: #cad8c5; }
+.pf-event-stage-top { fill: #e5eddf; }
+@media (max-width: 560px) { .pf-event-art { aspect-ratio: 22 / 9; } }

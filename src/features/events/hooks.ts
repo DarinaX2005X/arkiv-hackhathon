@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppSession } from '../../app/session';
 import type { EventReadOptions, EventRepositoryContract, MyEvent } from '../../data/events/types';
 import { markEventReadStale } from '../../data/events/read-cache';
@@ -113,7 +113,14 @@ export function useEventRead(repository: EventRepositoryContract | null, project
   const sequence = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const address = session.actor?.kind === 'wallet' ? session.actor.address : null;
+  const identity = useMemo(() => ({ repository, projectRoot, address }), [repository, projectRoot, address]);
+  const live = useRef(identity), mounted = useRef(true);
+  live.current = identity;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++sequence.current; abort.current?.abort(); }; }, []);
   const refreshRead = useCallback(async (withdrawal = false): Promise<EventRead | null> => {
+    // A settled write can still hold the refresh callback from its original
+    // account or page. It must not cancel or replace the current account's read.
+    if (!mounted.current || live.current !== identity) return null;
     const serial = ++sequence.current;
     abort.current?.abort();
     const current = new AbortController(); abort.current = current;
@@ -124,7 +131,7 @@ export function useEventRead(repository: EventRepositoryContract | null, project
       const result = withdrawal && actor
         ? await readEventForWithdrawal(repository, projectRoot, actor, current.signal)
         : await readEventForActor(repository, projectRoot, actor, current.signal);
-      if (serial !== sequence.current || current.signal.aborted) return null;
+      if (!mounted.current || live.current !== identity || serial !== sequence.current || current.signal.aborted) return null;
       if (!result.ok) {
         setError(result.error);
         setValue(previous => previous ? markEventReadStale(previous) : null);
@@ -133,24 +140,26 @@ export function useEventRead(repository: EventRepositoryContract | null, project
         // outage or cooldown; explicit withdrawal refresh remains available.
         if (!withdrawal && actor && result.error.code !== 'rate_limited' && result.error.code !== 'network') {
           const own = await readEventForWithdrawal(repository, projectRoot, actor, current.signal);
-          if (serial === sequence.current && !current.signal.aborted && own.ok) setValue(own.value);
+          if (mounted.current && live.current === identity && serial === sequence.current && !current.signal.aborted && own.ok) setValue(own.value);
         }
         return null;
       }
       setValue(result.value);
       return result.value;
     } catch {
-      if (serial === sequence.current && !current.signal.aborted) {
+      if (mounted.current && live.current === identity && serial === sequence.current && !current.signal.aborted) {
         setError({ code: 'network', reasons: [], retryable: true });
         setValue(previous => previous ? markEventReadStale(previous) : null);
       }
       return null;
-    } finally { if (serial === sequence.current) setPending(false); }
-  }, [repository, projectRoot, address]);
+    } finally { if (mounted.current && live.current === identity && serial === sequence.current) setPending(false); }
+  }, [identity]);
   const refresh = useCallback(() => refreshRead(), [refreshRead]);
   const refreshWithdrawal = useCallback(() => refreshRead(true), [refreshRead]);
   useEffect(() => { setValue(null); void refresh(); return () => { ++sequence.current; abort.current?.abort(); }; }, [refresh]);
-  return { value, pending, error, refresh, refreshWithdrawal };
+  const currentValue = value?.event.projectRoot === projectRoot
+    && (value.actor?.address.toLowerCase() ?? null) === (address?.toLowerCase() ?? null) ? value : null;
+  return { value: currentValue, pending, error, refresh, refreshWithdrawal };
 }
 
 /** Freshness can expire while a page stays open, without a user interaction. */

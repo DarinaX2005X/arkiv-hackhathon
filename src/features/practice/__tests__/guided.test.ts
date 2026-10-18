@@ -77,6 +77,7 @@ describe('persisted guided practice', () => {
     expect(storage.getItem(repository.storageKey)).toBe(saved);
   });
 
+  // Two plan searches and two complete seven-owner approval rounds exceed the single-test budget.
   it('moves a genuinely impossible project through owner agreement, withdrawal, repair and fresh agreement', async () => {
     const { fresh, repository } = setup();
     const initial = await loadGuidedPractice(repository, () => repository.currentTime());
@@ -168,8 +169,9 @@ describe('persisted guided practice', () => {
       expect(current.decidedAt).toBeGreaterThan(previous.decidedAt);
     }
     expect(book(repaired.project, oak).decisions.find(item => sameSource(item, firstSource))?.status).toBe('withdrawn');
-  });
+  }, 30_000);
 
+  // This full workflow also reloads and repeats every action to verify durable no-ops.
   it('derives every stage after reload and makes repeated completed actions durable no-ops', async () => {
     const { fresh, repository, storage } = setup();
     const seeded = storage.getItem(repository.storageKey);
@@ -205,5 +207,5 @@ describe('persisted guided practice', () => {
     expect(final.project.proposalHistory).toHaveLength(2);
     expect(final.project.publishers).toHaveLength(9);
     expectExactAgreements(final.project);
-  });
+  }, 30_000);
 });

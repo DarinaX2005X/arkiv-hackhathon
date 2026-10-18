@@ -8,16 +8,9 @@ import { landingCopy as copy } from './catalog';
 import { DemoVideo } from './DemoVideo';
 import { EventScene } from './EventScene';
 import { OwnershipScene } from './OwnershipScene';
-import { ProcessArt } from './ProcessArt';
 import './landing.css';
 
 export interface LandingPageProps { onCreateProject?: () => void }
-
-const changes = [
-  { kind: 'withdrawn', art: 'offer', title: copy.withdrawnTitle, body: copy.withdrawnBody },
-  { kind: 'replacement', art: 'set', title: copy.replacementTitle, body: copy.replacementBody },
-  { kind: 'agreement', art: 'agree', title: copy.agreementTitle, body: copy.agreementBody },
-] as const;
 
 /** Public explanation only. Rendering this page never creates personal work. */
 export function LandingPage({ onCreateProject }: LandingPageProps) {
@@ -27,16 +20,13 @@ export function LandingPage({ onCreateProject }: LandingPageProps) {
   return <div className="pf-landing">
     <section className="pf-landing-hero" aria-labelledby="landing-title">
       <div className="pf-landing-opening">
-        <h1 id="landing-title"><span>{copy.heading}</span>{' '}<span>{copy.headingContinuation}</span></h1>
-        <p className="pf-landing-description">{copy.description}</p>
-        <div className="pf-landing-entry">
-          {browse('pf-button pf-button--primary')}
-          {create('pf-button pf-button--secondary')}
+        <h1 id="landing-title"><span>{copy.heading}.</span>{' '}<span>{copy.headingContinuation}.</span></h1>
+        <div className="pf-landing-opening-invitation"><p className="pf-landing-description">{copy.description}</p>
+          <div className="pf-landing-entry">{browse('pf-button pf-button--primary')}{create('pf-button pf-button--secondary')}</div>
+          <DemoVideo />
         </div>
-        <DemoVideo />
-        <p className="pf-landing-arkiv-intro">{copy.arkivIntro}</p>
       </div>
-      <EventScene />
+      <figure className="pf-landing-assembly"><EventScene /><figcaption><span>A place to meet. Something to share. People to make it happen.</span><span>Each contribution has its own owner and agreement.</span></figcaption></figure>
     </section>
 
     <section className="pf-landing-roles" aria-labelledby="landing-roles-title">
@@ -44,32 +34,10 @@ export function LandingPage({ onCreateProject }: LandingPageProps) {
         <h2 id="landing-roles-title">{copy.rolesTitle}</h2>
         <p>{copy.rolesIntro}</p>
       </div>
-      <div className="pf-landing-role-grid">
-        <article className="pf-landing-role pf-landing-role--join pf-surface-light">
-          <div className="pf-landing-role-art"><ProcessArt kind="join" /></div>
-          <div className="pf-landing-role-copy">
-            <h3>{copy.attendeeTitle}</h3>
-            <p>{copy.attendeeBody}</p>
-            <p className="pf-landing-role-result">{copy.attendeeResult}</p>
-            {browse('pf-button pf-button--primary')}
-          </div>
-        </article>
-        <article className="pf-landing-role pf-landing-role--set pf-surface-dark">
-          <div className="pf-landing-role-art"><ProcessArt kind="set" /></div>
-          <div className="pf-landing-role-copy">
-            <h3>{copy.organizerTitle}</h3>
-            <p>{copy.organizerBody}</p>
-            {create('pf-button pf-button--secondary')}
-          </div>
-        </article>
-        <article className="pf-landing-role pf-landing-role--offer pf-surface-light">
-          <div className="pf-landing-role-art"><ProcessArt kind="offer" /></div>
-          <div className="pf-landing-role-copy">
-            <h3>{copy.contributorTitle}</h3>
-            <p>{copy.contributorBody}</p>
-            <Link className="pf-button pf-button--secondary" href={routeHref({ name: 'contributions' })}>{copy.offerAction}</Link>
-          </div>
-        </article>
+      <div className="pf-landing-entry-list">
+        <article><h3>{copy.attendeeTitle}</h3><p>{copy.attendeeBody}</p>{browse('pf-landing-entry-link')}</article>
+        <article><h3>{copy.organizerTitle}</h3><p>{copy.organizerBody}</p>{create('pf-landing-entry-link')}</article>
+        <article><h3>{copy.contributorTitle}</h3><p>{copy.contributorBody}</p><Link className="pf-landing-entry-link" href={routeHref({ name: 'contributions' })}>{copy.offerAction}</Link></article>
       </div>
     </section>
 
@@ -98,18 +66,16 @@ export function LandingPage({ onCreateProject }: LandingPageProps) {
     <section className="pf-landing-change pf-surface-light" aria-labelledby="landing-change-title">
       <div className="pf-landing-section-heading">
         <h2 id="landing-change-title">{copy.changeTitle}</h2>
-        <p>{copy.changeIntro}</p>
+        <div className="pf-landing-change-intro">
+          <p>{copy.changeIntro}</p>
+          <Link className="pf-button pf-button--secondary" href={routeHref({ name: 'demo' })}>{copy.practiceAction}</Link>
+        </div>
       </div>
-      <ol className="pf-landing-change-steps">
-        {changes.map((step, index) => <li className={`pf-landing-change-step pf-landing-change-step--${step.kind}`} key={step.kind}>
-          <div className="pf-landing-change-art">
-            <ProcessArt kind={step.art} />
-            {index < changes.length - 1 && <span className="pf-landing-change-arrow" aria-hidden="true">→</span>}
-          </div>
-          <h3>{step.title}</h3>
-          <p>{step.body}</p>
-        </li>)}
-      </ol>
+      <div className="pf-landing-change-example" aria-label="Illustrative example of a changed event plan">
+        <div className="pf-landing-example-heading"><h3>A transport offer changes</h3><p>An illustrative example. If required agreement is withdrawn, new registrations pause.</p></div>
+        <div className="pf-landing-change-comparison"><section><h4>Before withdrawal</h4><dl><div><dt>Space</dt><dd>Offered and agreed</dd></div><div><dt>Display equipment</dt><dd>Offered and agreed</dd></div><div><dt>Transport</dt><dd>Offered and agreed</dd></div></dl></section><section><h4>After withdrawal</h4><dl><div><dt>Space</dt><dd>Still in the plan</dd></div><div><dt>Display equipment</dt><dd>Still in the plan</dd></div><div className="pf-landing-missing-part"><dt>Transport</dt><dd>A replacement is needed</dd></div></dl></section></div>
+        <div className="pf-landing-change-decision"><h3>Same occasion. A new agreement.</h3><p>{copy.agreementBody}</p></div>
+      </div>
       <div className="pf-landing-guests">
         <div>
           <h3>{copy.guestsTitle}</h3>

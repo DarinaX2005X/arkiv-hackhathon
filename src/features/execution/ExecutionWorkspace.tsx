@@ -21,7 +21,7 @@ import { RepairPanel } from './RepairPanel';
 import './execution.css';
 
 interface ProgressReview { actor: Actor; source: SourcePlanRef; duty: RunbookObligation; input: ProgressInput; id: string }
-interface ReleaseReview { actor: Actor; publisherRoot: EntityKey; holdId: string; reason: string; title: string }
+interface ReleaseReview { actor: Actor; publisherRoot: EntityKey; holdId: string; reason: string; title: string; id: string }
 
 function Duty({ row, project, proposal, source, blocked, onRecord }: {
   row: RunbookRow; project: ProjectAggregate; proposal: EntityRecord<Proposal>; source: SourcePlanRef | null;
@@ -48,7 +48,9 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
         if (!allocation) return <li key={id}>Referenced resource unavailable: {id}</li>;
         const publisher = project.publishers.find(item => item.root.key === allocation.publisherRoot);
         const resource = publisher?.book.status === 'unique' ? publisher.book.entity.payload.resources.find(item => item.id === allocation.resourceId) : null;
-        return <li key={id}>{allocation.quantity} {allocation.unit} of {resource?.name ?? allocation.resourceId} from {publisherName(project, allocation.publisherRoot)}
+        const ownerName = publisherName(project, allocation.publisherRoot), resourceName = resource?.name ?? allocation.resourceId;
+        return <li key={id}><strong>{resourceName}</strong><span className="execution-resource-quantity">{allocation.quantity} {allocation.unit}</span>
+          {resourceName !== ownerName && <span className="execution-resource-owner">Offered by {ownerName}</span>}
           {(allocation.interval.start !== duty.interval.start || allocation.interval.end !== duty.interval.end) && <span className="execution-detail">Reserved {formatDateTime(allocation.interval.start, zone)}–{formatDateTime(allocation.interval.end, zone)}, including any transfer time.</span>}</li>;
       })}</ul>
       {row.reports.map(report => {
@@ -66,7 +68,8 @@ function Duty({ row, project, proposal, source, blocked, onRecord }: {
         </>}
       </div>; })}
       {row.historicalStatements.length > 0 && <details><summary>Earlier reports and acknowledgements</summary><p>These earlier statements remain in history and do not confirm a corrected transfer.</p><ul>{row.historicalStatements.map(item => <li key={item.id}>{publisherName(project, item.author)} {item.kind === 'transfer_report' ? `reported ${item.quantity} ${item.unit}` : item.kind === 'transfer_acknowledgement' ? `acknowledged ${item.acknowledgedQuantity}` : `reported ${item.status === 'done' ? 'done' : 'incomplete'}`} at {formatDateTime(item.recordedAt, zone)}.</li>)}</ul></details>}
-      {duty.kind === 'task' && owned.includes(duty.publisherRoot) && <div className="pf-stack"><Textarea label="My completion note" hint="This records your own report. It does not record anyone else’s agreement or receipt." value={note} maxLength={10000} onChange={event => setNote(event.target.value)} />
+      {duty.kind === 'task' && owned.includes(duty.publisherRoot) && <div className="pf-stack execution-task-report"><details className="execution-completion-note"><summary>Completion note (optional)</summary><Textarea label="My completion note" className="execution-note-input" rows={2} value={note} maxLength={10000} onChange={event => setNote(event.target.value)} /></details>
+        <p className="execution-detail">This records your own report. It does not record anyone else’s agreement or receipt.</p>
         <div className="pf-actions"><Button variant="secondary" disabled={!canAct || row.completed} onClick={() => onRecord(duty.id, { kind: 'task_report', status: 'done', note })}>Report my task done</Button>
           {row.reports.length > 0 && <Button variant="quiet" disabled={!canAct || row.status === 'reported_not_done'} onClick={() => onRecord(duty.id, { kind: 'task_report', status: 'not_done', note })}>Correct my task to incomplete</Button>}</div></div>}
       {giver && remaining > 0 && <div className="pf-actions"><Field label={duty.kind === 'return' ? 'Quantity I returned' : 'Quantity I handed over'} type="number" min={1} max={remaining} step={1} value={quantityRaw} error={parsedQuantity === null ? `Enter a whole number from 1 to ${remaining}.` : undefined} onChange={event => setQuantity(event.target.value)} />
@@ -125,7 +128,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
   }
   function record(obligationId: string, input: ProgressInput) {
     setError('');
-    if (blocked || !selected || !source || !authority) return;
+    if (blocked || working.current || !selected || !source || !authority) return;
     try {
       const id = globalThis.crypto.randomUUID();
       prepareProgressCommand(project, selected, source, obligationId, authority, input, runtime.now(), id);
@@ -165,9 +168,18 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
     if (!releaseReview) return;
     const review = releaseReview;
     await withCurrentProject(review.actor, async (fresh, currentAuthority) => {
-      const result = await action.run(prepareCustodyReleaseCommand(fresh, review.publisherRoot, review.holdId, currentAuthority, review.reason, runtime.now(), globalThis.crypto.randomUUID()), (repository, command) => repository.replaceBook(command));
+      const result = await action.run(prepareCustodyReleaseCommand(fresh, review.publisherRoot, review.holdId, currentAuthority, review.reason, runtime.now(), review.id), (repository, command) => repository.replaceBook(command));
       if (result.ok) setReleaseReview(null);
     });
+  }
+  function reviewRelease(publisherRoot: EntityKey, holdId: string, title: string, reason: string) {
+    if (blocked || working.current || !authority) return;
+    setError('');
+    try {
+      const id = globalThis.crypto.randomUUID();
+      prepareCustodyReleaseCommand(project, publisherRoot, holdId, authority, reason, runtime.now(), id);
+      setReleaseReview(structuredClone({ actor: authority.actor, publisherRoot, holdId, title, reason, id }));
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'The owner release could not be prepared.'); }
   }
   function reuse() {
     setError('');
@@ -183,12 +195,12 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
   }
   return <section className="pf-stack execution-workspace" aria-label="Project runbook">
     <header className="execution-heading"><div><h2>Run sheet</h2><p>Follow the agreed times, report your work and confirm equipment transfers.</p></div><Button variant="secondary" onClick={() => { const target = document.getElementById(exportId); target?.scrollIntoView({ block: 'start' }); target?.focus({ preventScroll: true }); }}>Export run sheet</Button></header>
-    {selected ? <><section className="pf-sheet execution-overview"><dl><div><dt>Duties in this version</dt><dd>{rows.length}</dd></div><div><dt>Reported complete</dt><dd>{rows.filter(row => row.completed).length}</dd></div><div><dt>Still to resolve</dt><dd>{rows.filter(row => !row.completed).length}</dd></div></dl>{nextDuty && <div className="execution-next"><div><h3>Your next unfinished duty</h3><p>{nextDuty.obligation.title}</p></div><Button onClick={() => { setMine(false); setReviewTransfer(nextDuty.obligation.id); }}>Review my duty</Button></div>}</section><div className="execution-version"><Select label="Plan version" value={selected.key} onChange={event => setSelectedKey(event.target.value as EntityKey)} options={versions.map(item => ({ value: item.key, label: `${item.payload.plan.variant.title}, ${formatDateTime(item.payload.createdAt, item.payload.plan.variant.timeZone)}${activeSource(project)?.proposalKey === item.key ? ' (current)' : ' (historical)'}` }))} />
+    {selected ? <><section className="execution-overview"><dl><div><dt>duties in this version</dt><dd>{rows.length}</dd></div><div><dt>reported complete</dt><dd>{rows.filter(row => row.completed).length}</dd></div><div><dt>still to resolve</dt><dd>{rows.filter(row => !row.completed).length}</dd></div></dl>{nextDuty && <div className="execution-next"><div><h3>Your next unfinished duty</h3><p>{nextDuty.obligation.title}</p></div><Button variant="secondary" onClick={() => { setMine(false); setReviewTransfer(nextDuty.obligation.id); }}>Review my duty</Button></div>}</section><div className="execution-version"><Select label="Plan version" value={selected.key} onChange={event => setSelectedKey(event.target.value as EntityKey)} options={versions.map(item => ({ value: item.key, label: `${item.payload.plan.variant.title}, ${formatDateTime(item.payload.createdAt, item.payload.plan.variant.timeZone)}${activeSource(project)?.proposalKey === item.key ? ' (current)' : ' (historical)'}` }))} />
       <Checkbox label="My tasks and transfers" checked={mine} onChange={event => setMine(event.target.checked)} /></div>
-      <Notice tone={readiness.status === 'ready' && activeSource(project)?.proposalKey === selected.key ? 'success' : 'warning'} title={versionStatus(project, selected, runtime.now())}>
+      <div className="execution-version-status"><StatusLabel tone={readiness.status === 'ready' && activeSource(project)?.proposalKey === selected.key ? 'success' : 'warning'}>{versionStatus(project, selected, runtime.now())}</StatusLabel>
         <p>{state?.lifecycle === 'in_progress' ? 'The project is in progress.' : state?.lifecycle === 'planning' ? 'The project has not started yet.' : 'This is the recorded project outcome.'}</p>
         <a href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'agreement' })}>Open the complete plan and agreement</a>
-      </Notice><details><summary>Advanced</summary><h3>Version and record details</h3><p>Last checked {formatDateTime(project.snapshot.fetchedAt, selected.payload.plan.variant.timeZone)} ({selected.payload.plan.variant.timeZone}). Progress is recorded separately by each contributor.</p><p className="execution-id">Proposal {selected.key}<br />Hash {selected.payload.proposalHash}<br />Activation {source?.activationKey ?? 'Not available'}</p></details>
+      </div><details className="execution-record-details"><summary>Version and record details</summary><p>Last checked {formatDateTime(project.snapshot.fetchedAt, selected.payload.plan.variant.timeZone)} ({selected.payload.plan.variant.timeZone}). Progress is recorded separately by each contributor.</p><p className="execution-id">Proposal {selected.key}<br />Hash {selected.payload.proposalHash}<br />Activation {source?.activationKey ?? 'Not available'}</p></details>
       {displayed.length === 0 && <EmptyState title={mine ? 'No tasks for the selected account in this version' : 'No runbook duties are available'} description={mine ? 'Switch off this filter to view the complete runbook.' : 'Review the complete plan before continuing.'} />}
       {[...grouped].map(([day, duties]) => <section className="pf-sheet pf-stack execution-day" aria-label={`Runbook for ${day}`} key={day}><h3>{formatDateTime(duties[0]!.obligation.interval.start, selected.payload.plan.variant.timeZone, { dateStyle: 'full', timeStyle: undefined })}</h3>{duties.map(row => <Duty key={`${selected.key}:${row.obligation.id}`} row={row} project={project} proposal={selected} source={source} blocked={blocked || !authority} onRecord={(id, input) => void record(id, input)} />)}</section>)}
     </> : <EmptyState title="No agreed runbook yet" description="Find a complete plan, name its transfers, then ask every required owner to agree." actions={<a href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Find a plan</a>} />}
@@ -209,7 +221,7 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
         const resource = owner?.book.status === 'unique' ? owner.book.entity.payload.resources.find(item => item.id === hold.resourceId) : null;
         const title = `${resource?.name ?? 'Equipment'}: ${hold.quantity} ${hold.unit}`;
         return <article className="execution-statement" key={hold.id}><p><strong>{title}</strong> from {owner ? publisherName(project, owner.root.key) : 'an unavailable owner'}</p><p>The physical return remains outstanding. Closing or cancelling the project does not release this hold.</p>
-          {owner && owned.includes(owner.root.key) && <><Field label="My reason for releasing this equipment hold" value={releaseReasons[hold.id] ?? ''} maxLength={10000} onChange={event => setReleaseReasons(current => ({ ...current, [hold.id]: event.target.value }))} /><Button variant="secondary" disabled={blocked || !authority || !releaseReasons[hold.id]?.trim()} onClick={() => authority && setReleaseReview({ actor: structuredClone(authority.actor), publisherRoot: owner.root.key, holdId: hold.id, title, reason: releaseReasons[hold.id] ?? '' })}>Review my owner release</Button></>}
+          {owner && owned.includes(owner.root.key) && <><Field label="My reason for releasing this equipment hold" value={releaseReasons[hold.id] ?? ''} maxLength={10000} onChange={event => setReleaseReasons(current => ({ ...current, [hold.id]: event.target.value }))} /><Button variant="secondary" disabled={blocked || !authority || !releaseReasons[hold.id]?.trim()} onClick={() => reviewRelease(owner.root.key, hold.id, title, releaseReasons[hold.id] ?? '')}>Review my owner release</Button></>}
         </article>;
       })}
       {state?.lifecycle !== 'closed' && coordinator && <><p>Record the actual result. Outstanding work and returns remain visible; this action does not create another person’s acknowledgement. Timed commitments remain until their owner releases them or their exact deadline passes.</p>
@@ -227,11 +239,11 @@ export function ExecutionWorkspace({ project, onRefresh, onReuse }: { project: P
         {progressReview.input.kind === 'task_report' && progressReview.input.note && <p>{progressReview.input.note}</p>}
         {progressReview.input.kind === 'transfer_report' && <Notice>{progressReview.input.correctsReportId ? 'This corrects your report. The recipient must acknowledge the corrected quantity separately; earlier reports stay in history.' : 'The recipient must record their own acknowledgement. Your report alone does not confirm that the items were received.'}</Notice>}
         {progressReview.input.kind === 'transfer_acknowledgement' && <Notice>This acknowledges the selected giver’s report and your received quantity. It does not acknowledge any other transfer.</Notice>}
-        <p className="pf-secondary">{session.mode === 'public' ? 'Your statement will be public. Confirm this action in your own wallet.' : 'This records your side of the transfer or task in this practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}<ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} />
+        <p className="pf-secondary">{session.mode === 'public' ? 'Your statement will be public. Confirm this action in your own wallet.' : 'This records your side of the transfer or task in this practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}{action.state.operation?.id === progressReview.id && <ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} />}
       </div>}
     </Dialog>
     <Dialog open={releaseReview !== null} title="Review my equipment release" closeLabel="Cancel" onClose={() => { if (!blocked) setReleaseReview(null); }} footer={<><Button variant="secondary" disabled={blocked} onClick={() => setReleaseReview(null)}>Cancel</Button><Button disabled={blocked || !authority || !releaseReview || !sameActor(authority.actor, releaseReview.actor)} onClick={() => void confirmRelease()}>{checking ? 'Checking current records…' : 'Publish my owner release'}</Button></>}>
-      {releaseReview && <div className="pf-stack"><h3>{releaseReview.title}</h3><p>{releaseReview.reason}</p><Notice tone="warning">You are releasing your equipment hold. This records your decision as owner; it does not confirm a physical return or another person’s receipt.</Notice><p className="pf-secondary">{session.mode === 'public' ? 'Your release and reason will be public. Your own wallet must approve this action.' : 'This release applies to the current practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}<ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} /></div>}
+      {releaseReview && <div className="pf-stack"><h3>{releaseReview.title}</h3><p>{releaseReview.reason}</p><Notice tone="warning">You are releasing your equipment hold. This records your decision as owner; it does not confirm a physical return or another person’s receipt.</Notice><p className="pf-secondary">{session.mode === 'public' ? 'Your release and reason will be public. Your own wallet must approve this action.' : 'This release applies to the current practice project.'}</p>{error && <Notice tone="warning" role="alert">{error}</Notice>}{action.state.operation?.id === releaseReview.id && <ActionFeedback state={action.state} action={action} onReconcile={() => void action.reconcile().then(() => onRefresh())} />}</div>}
     </Dialog>
   </section>;
 }

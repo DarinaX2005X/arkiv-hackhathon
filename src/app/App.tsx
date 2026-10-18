@@ -3,6 +3,7 @@ import { AppProvider, useApp, useAppSession, type AppRuntime } from './context';
 import { parseRoute, routeBehindSignIn, routeFromLocation, routeHref, routePath, type Route } from './routes';
 import { BrandMark, Button, EmptyState, ErrorState, LoadingState, Notice } from '../ui';
 import { workDestination } from '../features/account/account';
+import { routeNavigation } from './route-navigation';
 
 export interface RouteViewProps { route: Route }
 export type RouteRegistry = Partial<Record<Route['name'], ComponentType<RouteViewProps>>>;
@@ -14,19 +15,22 @@ const navigation = [
 ] as const;
 
 /** Native hash navigation remains usable on static hosts. It never owns the app runtime. */
+const visibleRoutes = new WeakMap<Window, Route>();
 function HashNavigation() {
   const { session } = useApp();
   useEffect(() => {
     const read = () => {
-      const previous = session.currentRoute();
+      const previous = visibleRoutes.get(window);
       const next = routeFromLocation(window.location);
       if (next.name === 'not-found' && window.location.hash !== '#/404') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/404`);
+      const navigation = routeNavigation(previous, next, window.history.state);
+      visibleRoutes.set(window, next);
+      if (navigation.historyState) window.history.replaceState(navigation.historyState, '', window.location.href);
       session.navigate(next);
-      if (previous.name !== 'sign-in' && next.name !== 'sign-in') document.getElementById('main-content')?.focus({ preventScroll: true });
+      if (navigation.scrollToStart) window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+      if (navigation.focusMain) document.getElementById('main-content')?.focus({ preventScroll: true });
     };
-    const first = routeFromLocation(window.location);
-    if (first.name === 'not-found' && window.location.hash !== '#/404') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/404`);
-    session.navigate(first);
+    read();
     window.addEventListener('hashchange', read);
     return () => window.removeEventListener('hashchange', read);
   }, [session]);

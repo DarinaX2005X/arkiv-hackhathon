@@ -9,6 +9,7 @@ import { ArkivReader } from '../arkiv/reader';
 import type { ArkivReaderOptions, ReadContext } from '../arkiv/reader';
 import { ArkivRepositoryError, assertArkiv, repositoryError } from '../arkiv/errors';
 import { creatorOf, publicAddress, publicKey, sameIdentity } from '../arkiv/envelope';
+import { MAX_HEADER_BATCH_SIZE, readBlockHeaders } from '../arkiv/read-policy';
 import { EVENTS_NAMESPACE, decodeEventEntity } from './envelope';
 import type { EventFilters, EventReadOptions, MyEvent } from './types';
 
@@ -142,7 +143,7 @@ export class EventReader {
       const creator = publicAddress(row.creator);
       groups.set(creator, [...(groups.get(creator) ?? []), row]);
     }
-    const times = new Map<string, { timestamp: number; hash: string }>();
+    const historicalBlocks = new Set<string>();
     for (const [attendee, records] of groups) {
       this.core.checkAbort(context.options);
       const valid: EventRecord<AttendanceState>[] = []; const reasons: DomainReason[] = [];
@@ -155,36 +156,34 @@ export class EventReader {
       }
       const attendance: EventScope<AttendanceState> = reasons.length ? { status: 'unverified', reasons }
         : valid.length !== 1 ? { status: 'conflict', entities: valid } : { status: 'unique', entity: valid[0]! };
-      let registeredRelease: EventRecord<EventRelease> | null = null; let inclusionTimestamp: number | null = null;
+      if (attendance.status === 'unique' && attendance.entity.provenance.createdAtBlock !== context.snapshot.blockNumber) {
+        historicalBlocks.add(attendance.entity.provenance.createdAtBlock!);
+      }
+      result.entries.push({ attendee, attendance, registeredRelease: null, inclusionTimestamp: null });
+    }
+    // Authenticate distinct creation blocks in bounded standard RPC batches. The complete
+    // request set and both independent header passes remain at the same pinned snapshot.
+    const times = await this.inclusionHeaders(context, [...historicalBlocks]);
+    for (const entry of result.entries) {
+      this.core.checkAbort(context.options);
+      const attendance = entry.attendance;
       if (attendance.status === 'unique') {
         const record = attendance.entity; const blockNumber = record.provenance.createdAtBlock!;
         if (blockNumber === context.snapshot.blockNumber) {
           // The context already authenticates this block; finish() checks it again after the walk.
-          inclusionTimestamp = context.snapshot.blockTimestamp;
-        } else if (!times.has(blockNumber)) {
-          const block = await context.client.getBlock({ blockNumber: BigInt(blockNumber) });
-          this.core.checkAbort(context.options);
-          const timestamp = Number(block.timestamp * 1_000n);
-          assertArkiv(block.number === BigInt(blockNumber) && block.hash !== null && Number.isSafeInteger(timestamp)
-            && timestamp >= 0 && timestamp <= context.snapshot.blockTimestamp
-            && (blockNumber !== context.snapshot.blockNumber || block.hash === context.snapshot.blockHash),
-          'unverified', 'incomplete_snapshot', 'The request inclusion block could not be authenticated.');
-          times.set(blockNumber, { timestamp, hash: block.hash });
-        }
-        inclusionTimestamp ??= times.get(blockNumber)!.timestamp;
+          entry.inclusionTimestamp = context.snapshot.blockTimestamp;
+        } else entry.inclusionTimestamp = times.get(blockNumber)!.timestamp;
         try {
-          registeredRelease = await this.entity<EventRelease>(context, record.payload.releaseKey, 'event_release', creatorOf(event.root!));
-          if (registeredRelease && (registeredRelease.payload.projectRoot !== event.projectRoot
-            || registeredRelease.payload.audienceHash !== record.payload.audienceHash)) registeredRelease = null;
+          entry.registeredRelease = await this.entity<EventRelease>(context, record.payload.releaseKey, 'event_release', creatorOf(event.root!));
+          if (entry.registeredRelease && (entry.registeredRelease.payload.projectRoot !== event.projectRoot
+            || entry.registeredRelease.payload.audienceHash !== record.payload.audienceHash)) entry.registeredRelease = null;
         } catch (error) { targetReasons(error); }
       }
-      result.entries.push({ attendee, attendance, registeredRelease, inclusionTimestamp });
     }
+    const checkedTimes = await this.inclusionHeaders(context, [...historicalBlocks]);
     for (const [blockNumber, expected] of times) {
-      this.core.checkAbort(context.options);
-      const block = await context.client.getBlock({ blockNumber: BigInt(blockNumber) });
-      this.core.checkAbort(context.options);
-      assertArkiv(block.number === BigInt(blockNumber) && block.hash === expected.hash && Number(block.timestamp * 1_000n) === expected.timestamp,
+      const checked = checkedTimes.get(blockNumber)!;
+      assertArkiv(checked.hash === expected.hash && checked.timestamp === expected.timestamp,
         'unverified', 'incomplete_snapshot', 'A request inclusion block changed during roster verification.');
     }
     result.entries.sort((a, b) => {
@@ -211,6 +210,29 @@ export class EventReader {
         || (release.payload.terms.registration?.admission === 'invite_only'
           && !release.payload.terms.registration.invitedAccounts.includes(admission.attendee))) {
         result.diagnostics.push({ code: 'evidence_unavailable', path: 'admissions' });
+      }
+    }
+    return result;
+  }
+
+  private async inclusionHeaders(context: ReadContext, blockNumbers: string[]): Promise<Map<string, { timestamp: number; hash: string }>> {
+    const result = new Map<string, { timestamp: number; hash: string }>();
+    for (let offset = 0; offset < blockNumbers.length; offset += MAX_HEADER_BATCH_SIZE) {
+      this.core.checkAbort(context.options);
+      const chunk = blockNumbers.slice(offset, offset + MAX_HEADER_BATCH_SIZE);
+      const headers = await readBlockHeaders(this.core.request, chunk.map(BigInt), { signal: context.options.signal });
+      this.core.checkAbort(context.options);
+      assertArkiv(Array.isArray(headers) && headers.length === chunk.length, 'unverified', 'incomplete_snapshot', 'The request inclusion blocks are incomplete.');
+      for (const [index, blockNumber] of chunk.entries()) {
+        const block = headers[index] as { number?: unknown; timestamp?: unknown; hash?: unknown } | null;
+        const quantity = (value: unknown): value is string => typeof value === 'string' && /^0x[\da-f]+$/i.test(value);
+        assertArkiv(block && quantity(block.number) && quantity(block.timestamp) && typeof block.hash === 'string' && /^0x[\da-f]{64}$/i.test(block.hash),
+          'unverified', 'incomplete_snapshot', 'The request inclusion block could not be authenticated.');
+        const timestamp = Number(BigInt(block.timestamp) * 1_000n);
+        assertArkiv(BigInt(block.number) === BigInt(blockNumber) && Number.isSafeInteger(timestamp)
+          && timestamp >= 0 && timestamp <= context.snapshot.blockTimestamp,
+        'unverified', 'incomplete_snapshot', 'The request inclusion block could not be authenticated.');
+        result.set(blockNumber, { timestamp, hash: block.hash });
       }
     }
     return result;

@@ -5,7 +5,7 @@ import type { AppSession } from '../../app/session';
 import type { StoragePort } from '../../app/storage';
 import type { EventRepositoryContract, ReplaceAttendanceCommand } from '../../data/events/types';
 import type { MutationResult } from '../../data/types';
-import { attendanceStatus, deriveEventAvailability, registrationEligibility, type AttendanceState, type EventRecord } from '../../domain/events';
+import { attendanceStatus, currentEventSnapshot, deriveEventAvailability, registrationEligibility, type AttendanceState, type EventRecord } from '../../domain/events';
 import { TIRAMISU_CHAIN_ID, type PublicEntityKey } from '../../domain/types';
 import { Button, Checkbox, Link, Notice } from '../../ui';
 import type { EventRead } from '../events/hooks';
@@ -38,7 +38,13 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
   const [checking, setChecking] = useState(false);
   const [storageIssue, setStorageIssue] = useState(false);
   const sessionRef = useRef(session); sessionRef.current = session;
-  const busy = useRef(false);
+  const account = session.actor?.kind === 'wallet' ? session.actor.address : null;
+  const context = useMemo(() => ({ repository, projectRoot, storage, account, mode: session.mode, chainId: session.chainId }),
+    [repository, projectRoot, storage, account, session.mode, session.chainId]);
+  const live = useRef(context), mounted = useRef(true), busy = useRef<typeof context | null>(null);
+  live.current = context;
+  const stillHere = () => mounted.current && live.current === context;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { controller: action, state } = useEventAction(repository, session, `attendance:${projectRoot}`, storage);
   useEffect(() => {
     const loaded = store.load();
@@ -46,7 +52,7 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
     setStorageIssue(loaded.status === 'unavailable' || loaded.status === 'recovery');
     setAcknowledged(false); setMessage(null);
   }, [store]);
-  const account = session.actor?.kind === 'wallet' ? session.actor.address : null;
+  useEffect(() => { setWithdrawal(null); setAcknowledged(false); setMessage(null); setChecking(false); }, [context]);
   useEffect(() => { setAcknowledged(false); }, [account, read.event.release?.key]);
   // Sign-in restores the selected event. It never restores consent or sends a transaction.
   useEffect(() => {
@@ -91,17 +97,18 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
   }
 
   async function checkOriginal() {
-    if (busy.current) return; busy.current = true; setChecking(true); setMessage(null);
-    try { await action.reconcile(); await refreshSavedDecision(); }
-    finally { busy.current = false; setChecking(false); }
+    if (!stillHere() || busy.current === context) return; busy.current = context; setChecking(true); setMessage(null);
+    try { await action.reconcile(); if (stillHere()) await refreshSavedDecision(); }
+    finally { if (busy.current === context) { busy.current = null; if (stillHere()) setChecking(false); } }
   }
 
   async function confirm() {
-    if (!canConfirm || !target || busy.current) return;
-    busy.current = true; setChecking(true); setMessage(null);
+    if (!canConfirm || !target || !stillHere() || busy.current === context) return;
+    busy.current = context; setChecking(true); setMessage(null);
     const selected = target;
     try {
-      const fresh = await refresh();
+      const fresh = !unverified && currentEventSnapshot(read.event.snapshot, Date.now()) ? read : await refresh();
+      if (!stillHere()) return;
       if (!fresh) { setMessage('The event could not be refreshed. Nothing new was sent. Your review is kept.'); return; }
       const prepared = prepareRegistration(fresh, selected, sessionRef.current, Date.now(), joinWaitlist);
       if (!prepared.ok) { setAcknowledged(false); setMessage(prepared.message); return; }
@@ -114,14 +121,20 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
       const result = sameRetry
         ? await action.resume<ReplaceAttendanceCommand, MutationResult<EventRecord<AttendanceState>>>((repo, command) => repo.replaceAttendance(command))
         : await action.run(prepared.command, (repo, command) => repo.replaceAttendance(command));
+      if (!stillHere()) return;
       setAcknowledged(false);
-      if (!result.ok) { setMessage(eventError(result.error)); return; }
+      if (!result.ok) {
+        setMessage(eventError(result.error));
+        if (result.error.code === 'stale_heads' || result.error.code === 'conflict') await refresh();
+        return;
+      }
       // A receipt alone is not the confirmation shown to the attendee.
       const verified = await refresh();
+      if (!stillHere()) return;
       const going = verified?.attendance && ['going', 'pending', 'waitlisted'].includes(attendanceStatus(verified.attendance, verified.event, Date.now(), verified.myEvent?.registeredRelease ?? null));
       if (!going) setMessage('The transaction was recorded, but your current registration still needs a fresh check. Refresh your registration before relying on it.');
-      else { setTarget(null); clearJoinTarget(storage, projectRoot); }
-    } finally { busy.current = false; setChecking(false); }
+      else { setTarget(null); clearJoinTarget(storage, projectRoot, selected); }
+    } finally { if (busy.current === context) { busy.current = null; if (stillHere()) setChecking(false); } }
   }
 
   function chooseWithdrawal() {
@@ -132,11 +145,12 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
   }
 
   async function confirmWithdrawal() {
-    if (!withdrawal || !acknowledged || !correctChain || unresolved || submitting || busy.current) return;
-    busy.current = true; setChecking(true); setMessage(null);
-    const selected = withdrawal;
+    if (!withdrawal || !acknowledged || !correctChain || unresolved || submitting || !stillHere() || busy.current === context) return;
+    busy.current = context; setChecking(true); setMessage(null);
+    const selected = withdrawal, reviewedTarget = target;
     try {
       const fresh = await refreshWithdrawal();
+      if (!stillHere()) return;
       if (!fresh) { setMessage('Your registration could not be refreshed. No withdrawal was sent.'); return; }
       const prepared = prepareWithdrawal(fresh, selected, sessionRef.current, Date.now());
       if (!prepared.ok) { setMessage(prepared.message); setAcknowledged(false); return; }
@@ -148,13 +162,15 @@ export function RegistrationPanel({ repository, session, projectRoot, read, now,
       const result = sameRetry
         ? await action.resume<ReplaceAttendanceCommand, MutationResult<EventRecord<AttendanceState>>>((repo, command) => repo.replaceAttendance(command))
         : await action.run(prepared.command, (repo, command) => repo.replaceAttendance(command));
+      if (!stillHere()) return;
       setAcknowledged(false);
       if (!result.ok) { setMessage(eventError(result.error)); return; }
       const verified = await refreshWithdrawal();
+      if (!stillHere()) return;
       const recorded = verified?.attendance && attendanceStatus(verified.attendance, verified.event, Date.now(), verified.myEvent?.registeredRelease ?? null) === 'withdrawn';
-      if (recorded) { setWithdrawal(null); setTarget(null); clearJoinTarget(storage, projectRoot); }
+      if (recorded) { setWithdrawal(null); setTarget(null); if (reviewedTarget) clearJoinTarget(storage, projectRoot, reviewedTarget); }
       else setMessage('The transaction was recorded. Refresh your registration to verify that the withdrawal is current.');
-    } finally { busy.current = false; setChecking(false); }
+    } finally { if (busy.current === context) { busy.current = null; if (stillHere()) setChecking(false); } }
   }
 
   return <aside className={`pf-event-registration pf-surface-light${freshConfirmation ? ' pf-event-registration--confirmed' : ''}`} aria-labelledby="registration-title" aria-busy={submitting}>

@@ -25,6 +25,14 @@ export interface ReadContext {
 export interface ArkivReaderOptions { request?: RpcRequest; now?: () => number; policy?: Partial<ReaderPolicy> }
 const DEFAULT_POLICY: ReaderPolicy = { maxPages: 160, maxEntities: 4_000, maxPublishers: 50, pageSize: 100, cursorRestarts: 1 };
 
+/** Drain both independent reads before returning or throwing, so no branch outlives its context. */
+async function settleReads<A, B>(first: Promise<A>, second: Promise<B>): Promise<[A, B]> {
+  const [left, right] = await Promise.allSettled([first, second]);
+  if (left.status === 'rejected') throw left.reason;
+  if (right.status === 'rejected') throw right.reason;
+  return [left.value, right.value];
+}
+
 export class ArkivReader {
   readonly client: ArkivReadClient;
   readonly request: RpcRequest;
@@ -47,7 +55,9 @@ export class ArkivReader {
     // Each traversal owns its SDK request closure; concurrent reads never share a mutable signal
     // or viem's per-client in-flight header deduplication. The endpoint policy remains shared.
     const client = this.createScopedClient(options.signal);
-    assertArkiv(await client.getChainId() === TIRAMISU_CHAIN_ID, 'wrong_chain', 'invalid_identity', 'The RPC is not Arkiv Tiramisu.');
+    const [, latestBlock] = await settleReads(client.getChainId().then(chainId => {
+      assertArkiv(chainId === TIRAMISU_CHAIN_ID, 'wrong_chain', 'invalid_identity', 'The RPC is not Arkiv Tiramisu.');
+    }), options.snapshot ? Promise.resolve(null) : client.getBlockNumber({ cacheTime: 0 }));
     this.checkAbort(options);
     let snapshot: Snapshot;
     if (options.snapshot) {
@@ -60,8 +70,7 @@ export class ArkivReader {
       assertArkiv(block.hash === snapshot.blockHash && Number(block.timestamp * 1_000n) === snapshot.blockTimestamp,
         'unverified', 'incomplete_snapshot', 'The requested snapshot is no longer canonical.');
     } else {
-      const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
-      this.checkAbort(options);
+      const blockNumber = latestBlock!;
       const block = await client.getBlock({ blockNumber });
       this.checkAbort(options);
       const timestamp = Number(block.timestamp * 1_000n);
@@ -194,25 +203,36 @@ export class ArkivReader {
     const root = await this.entity<ProjectRoot>(context, target, 'project_root');
     assertArkiv(root, 'not_found', 'missing_root', 'The project root is unavailable at this block.');
     const creator = creatorOf(root);
-    const state = await this.scope<ProjectState>(context, 'project_state', target, creator);
-    const activation = await this.scope<PlanActivation>(context, 'plan_activation', target, creator);
-    let proposal: EntityRecord<Proposal> | null = null;
-    if (activation.status === 'unique') {
-      proposal = await this.entity<Proposal>(context, activation.entity.payload.proposalKey, 'proposal', creator);
-      if (proposal) assertArkiv(sameIdentity(proposal.payload.projectRoot, target)
-        && sameIdentity(proposal.payload.proposalHash, activation.entity.payload.proposalHash), 'unverified', 'proposal_mismatch', 'The active proposal does not match its activation.');
-    }
-    const publishers: PublisherAggregate[] = [];
-    if (state.status === 'unique') {
-      assertArkiv(state.entity.payload.publisherRoots.length <= this.policy.maxPublishers, 'incomplete', 'page_budget', 'The project exceeds the configured participant read budget.');
-      for (const publisherRoot of state.entity.payload.publisherRoots) {
-        try { publishers.push(await this.publisher(context, publisherRoot)); }
-        catch (error) {
-          if (!(error instanceof ArkivRepositoryError && ['not_found', 'unverified', 'expired', 'invalid_input'].includes(error.detail.code))) throw error;
-          context.snapshot.completeness = 'incomplete'; context.snapshot.reasons.push(...error.detail.reasons);
+    const [state, activation] = await settleReads(this.scope<ProjectState>(context, 'project_state', target, creator),
+      this.scope<PlanActivation>(context, 'plan_activation', target, creator));
+    const sourceRead = async () => {
+      let proposal: EntityRecord<Proposal> | null = null;
+      if (activation.status === 'unique') {
+        proposal = await this.entity<Proposal>(context, activation.entity.payload.proposalKey, 'proposal', creator);
+        if (proposal) assertArkiv(sameIdentity(proposal.payload.projectRoot, target)
+          && sameIdentity(proposal.payload.proposalHash, activation.entity.payload.proposalHash), 'unverified', 'proposal_mismatch', 'The active proposal does not match its activation.');
+      }
+      return proposal;
+    };
+    const publisherRead = async () => {
+      const publishers: PublisherAggregate[] = [];
+      if (state.status === 'unique') {
+        assertArkiv(state.entity.payload.publisherRoots.length <= this.policy.maxPublishers, 'incomplete', 'page_budget', 'The project exceeds the configured participant read budget.');
+        for (const publisherRoot of state.entity.payload.publisherRoots) {
+          try { publishers.push(await this.publisher(context, publisherRoot)); }
+          catch (error) {
+            if (!(error instanceof ArkivRepositoryError && ['not_found', 'unverified', 'expired', 'invalid_input'].includes(error.detail.code))) throw error;
+            context.snapshot.completeness = 'incomplete'; context.snapshot.reasons.push(...error.detail.reasons);
+          }
         }
       }
-    }
+      return publishers;
+    };
+    // Both branches share the pinned block and cumulative counters. The endpoint policy
+    // still limits requests, and final canonical verification starts only after both settle.
+    const [proposal, publishers] = await settleReads(sourceRead(), publisherRead());
+    // Optional lineage must not spend pages needed by the current agreement. Missing
+    // historical proposals stay a history gap after every mandatory publisher was read.
     const history = await this.proposalChain(context, target, creator, proposal,
       state.status === 'unique' ? state.entity.payload.completion?.source ?? null : null);
     return { root, state, activation, proposal, proposalHistory: history.records, proposalHistoryStatus: history.status,

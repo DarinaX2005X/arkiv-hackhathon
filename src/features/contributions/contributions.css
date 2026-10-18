@@ -12,7 +12,6 @@
 .pf-contribution-invitation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; }
 .pf-contribution-invitation > div:first-child { flex: 1; min-width: min(100%, 260px); max-width: 64ch; }
 .pf-contribution-invitation h2 { margin-block: 4px 8px; font-size: 1.45rem; }
-.pf-contribution-invitation .pf-eyebrow { color: var(--text-secondary); font-size: .9rem; font-weight: 500; }
 .pf-contribution-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
 .pf-contribution-handoff-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 .pf-contribution-starts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -23,10 +22,12 @@
 .pf-contribution-start .pf-contribution-start-label { margin-top: 6px; color: var(--action); font-weight: 500; text-decoration: none; }
 .pf-offer-editor-layout { display: grid; grid-template-columns: minmax(150px, .65fr) minmax(0, 2.35fr); align-items: start; gap: 24px; }
 .pf-resource-collection { display: grid; gap: 8px; }
-.pf-resource-collection button { display: grid; justify-items: start; gap: 4px; min-width: 0; min-height: 64px; padding: 16px; border: 1px solid var(--border-quiet); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-primary); text-align: left; cursor: pointer; }
+.pf-resource-collection button { display: grid; justify-items: start; gap: 4px; min-width: 0; min-height: 64px; padding: 16px; border: 1px solid var(--border-quiet); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-primary); text-align: left; cursor: pointer; transition: background-color var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease); }
 .pf-resource-collection button strong { font-weight: 500; overflow-wrap: anywhere; }
 .pf-resource-collection button span { color: var(--text-secondary); font-size: .9rem; }
-.pf-resource-collection button[aria-pressed='true'] { border-color: var(--action); background: var(--selected-surface); box-shadow: inset 3px 0 0 var(--action); }
+.pf-resource-collection button[aria-pressed='true'] { border-color: var(--action); background: var(--selected-surface); box-shadow: inset 0 0 0 1px var(--action); }
+.pf-resource-collection button[aria-pressed='true'] strong { font-weight: 600; }
+.pf-contribution-start:active:not(:disabled), .pf-resource-collection button:active:not(:disabled) { background: var(--selected-surface); border-color: var(--action); box-shadow: inset 0 1px 3px rgb(8 27 20 / 10%); transition-duration: var(--motion-press); }
 .pf-contribution-start:focus-visible, .pf-resource-collection button:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
 .pf-resource-context, .pf-resource-context > * { min-width: 0; }
 .pf-contribution-editor { margin: 0; min-width: 0; padding: 20px; border: 1px solid var(--border-quiet); border-radius: var(--radius-control); background: var(--surface-soft); }
@@ -134,4 +135,51 @@
 @media (max-width: 759px) {
   .pf-agreement-overview, .pf-agreement-duty-grid, .pf-conflict-copies, .pf-contribution-history { grid-template-columns: minmax(0, 1fr); }
   .pf-agreement-obligations, .pf-agreement-decision, .pf-conflict-copy { padding: 16px; }
+}
+
+.pf-contributions-workspace--editing { gap: var(--space-5); }
+.pf-contribution-studio { padding: clamp(20px, 3vw, 32px); border-radius: var(--radius-sheet); border: 1px solid var(--border-quiet); }
+.pf-contribution-studio-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
+.pf-contribution-studio-heading h2 { font-size: 24px; }
+.pf-contribution-studio-heading p { max-width: 44ch; color: var(--text-secondary); font-size: 15px; }
+.pf-contribution-identity-fields { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--space-5); max-width: 800px; }
+.pf-contribution-about { max-width: 800px; }
+.pf-contribution-about[open] > .pf-field { margin-top: var(--space-3); }
+.pf-contribution-starts--compact { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-quiet); }
+.pf-contribution-starts--compact .pf-contribution-start { min-height: 50px; padding: 8px 14px; align-items: center; flex-direction: row; gap: 8px; border-radius: var(--radius-control); background: var(--surface-control); box-shadow: none; }
+.pf-contribution-starts--compact .pf-contribution-art { width: 40px; height: 30px; }
+.pf-contribution-starts--compact .pf-contribution-start > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 12px; }
+.pf-contribution-starts--compact .pf-contribution-start strong { font-size: 15px; }
+.pf-contribution-starts--compact .pf-contribution-start > span > span:not(.pf-contribution-start-label) { display: none; }
+.pf-contribution-starts--compact .pf-contribution-start-label { margin: 0; font-size: 13px; }
+.pf-offer-editor-layout { grid-template-columns: minmax(165px, .52fr) minmax(0, 2.48fr); gap: clamp(20px, 3vw, 36px); }
+.pf-resource-collection > h3 { padding: 6px 4px; font-size: 16px; }
+.pf-resource-collection button { grid-template-columns: 42px minmax(0, 1fr); column-gap: 10px; padding: 12px; }
+.pf-resource-collection button .pf-contribution-art { grid-row: 1 / 3; width: 42px; height: 32px; align-self: center; }
+.pf-resource-collection button > span { grid-column: 2; }
+.pf-resource-context { gap: var(--space-6); }
+.pf-resource-context-heading { display: flex; align-items: center; gap: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-quiet); }
+.pf-resource-context-heading .pf-contribution-art { width: 84px; height: 62px; }
+.pf-resource-context-heading h3 { font-size: 26px; line-height: 1.2; }
+.pf-resource-context-heading p { margin-top: 4px; color: var(--text-secondary); font-size: 14px; }
+.pf-resource-context .pf-contribution-editor { padding: var(--space-5) 0 0; border: 0; border-top: 1px solid var(--border-quiet); border-radius: 0; background: transparent; }
+.pf-resource-context .pf-contribution-editor > legend { padding: 0 var(--space-3) 0 0; font-size: 18px; }
+.pf-resource-context .pf-contribution-editor--offer { padding: var(--space-5); background: var(--surface-soft); border: 1px solid var(--border-quiet); border-radius: var(--radius-control); }
+.pf-resource-context .pf-contribution-editor--offer > legend { padding-inline: var(--space-2); }
+.pf-resource-context .pf-contribution-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pf-resource-context .pf-contribution-window .pf-contribution-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pf-resource-context .pf-contribution-window .pf-contribution-fields > :last-child { grid-column: 1 / -1; }
+.pf-resource-context .pf-input { background: var(--surface-control); }
+@media (max-width: 759px) {
+  .pf-contribution-studio-heading { flex-direction: column; gap: var(--space-2); }
+  .pf-offer-editor-layout { grid-template-columns: minmax(0, 1fr); }
+  .pf-resource-collection { display: flex; flex-wrap: wrap; }
+  .pf-resource-collection > h3 { flex-basis: 100%; }
+  .pf-resource-collection > button { flex: 1 1 170px; }
+}
+@media (max-width: 560px) {
+  .pf-contribution-identity-fields, .pf-resource-context .pf-contribution-fields, .pf-resource-context .pf-contribution-window .pf-contribution-fields { grid-template-columns: minmax(0, 1fr); }
+  .pf-contribution-starts--compact .pf-contribution-start { flex: 1 1 100%; }
+  .pf-resource-context-heading h3 { font-size: 23px; }
+  .pf-resource-context .pf-contribution-editor--offer { padding: var(--space-4); }
 }

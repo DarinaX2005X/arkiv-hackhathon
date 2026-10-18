@@ -19,6 +19,7 @@ export function RequestsInbox({ onSignIn }: { onSignIn?: () => void } = {}) {
   const startInboxRead = useReadGuard(); const startProjectRead = useReadGuard();
   const [links, setLinks] = useState<DiscoveryLink[]>([]); const [owners, setOwners] = useState<PublisherAggregate[]>([]);
   const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [identity, setIdentity] = useState(''); const [project, setProject] = useState<ProjectAggregate | null>(null);
+  const [identityTouched, setIdentityTouched] = useState(false);
   const [summaries, setSummaries] = useState<Record<string, { title: string; option: string }>>({});
   const selectedPanel = useRef<HTMLElement>(null);
   useEffect(() => { if (project) { selectedPanel.current?.scrollIntoView({ block: 'start' }); selectedPanel.current?.focus({ preventScroll: true }); } }, [project?.root.key]);
@@ -68,11 +69,14 @@ export function RequestsInbox({ onSignIn }: { onSignIn?: () => void } = {}) {
   }, [runtime.repository, actorScope(session.actor), session.mode]);
   const known = requestProjects(owners, links);
   const pastedTarget = contributionProjectTarget(identity, session.mode);
+  const invitationError = identityTouched && !pastedTarget
+    ? session.mode === 'public' ? 'Paste a Partfolk project link or a complete public project reference beginning with 0x.'
+      : 'Paste a Partfolk project link or a local project reference beginning with local:.' : undefined;
   return <div className="pf-stack pf-requests-workspace">
     <header className="pf-contribution-page-heading"><div><h1>Requests</h1><p>See where your help is needed, read the whole plan, and decide what you can promise.</p></div><Button variant="secondary" disabled={loading || !session.actor} onClick={() => void readRequests()}>Refresh requests</Button></header>
     {!session.actor && <Notice title="Your requests follow your wallet"><p>Sign in to find plans sent to your contribution profiles. A shared project can be read below without signing in.</p>{onSignIn ? <Button variant="secondary" onClick={onSignIn}>Sign in with your wallet</Button> : <Link href={routeHref({ name: 'sign-in', returnTo: session.destination })}>Sign in with your wallet</Link>}</Notice>}
     {error && <Notice tone="warning" role="alert">{error}</Notice>}
-    <form className="pf-sheet pf-request-invitation" onSubmit={event => { event.preventDefault(); if (pastedTarget) void readProject(pastedTarget); }}><div><h2>Have an invitation?</h2><p className="pf-secondary">Open the current plan and check what has changed before making a decision.</p></div><Field label="Project invitation or reference" value={identity} onChange={e => setIdentity(e.target.value)} placeholder="Paste a Partfolk project link" /><Button type="submit" variant="secondary" disabled={loading || !pastedTarget}>Open current plan</Button></form>
+    <form className="pf-sheet pf-request-invitation" onSubmit={event => { event.preventDefault(); setIdentityTouched(true); if (pastedTarget) void readProject(pastedTarget); }}><div><h2>Have an invitation?</h2><p className="pf-secondary">Open the current plan and check what has changed before making a decision.</p></div><Field label="Project invitation or reference" value={identity} error={invitationError} onBlur={() => setIdentityTouched(true)} onChange={e => setIdentity(e.target.value)} placeholder="Paste a Partfolk project link" /><Button type="submit" variant="secondary" disabled={loading}>Open current plan</Button></form>
     {loading && <LoadingState title="Reading current requests" />}
     {known.length > 0 && <section className="pf-stack"><div className="pf-contribution-section-heading"><h2>Projects asking for your part</h2><p className="pf-secondary">{known.length} project{known.length === 1 ? '' : 's'}</p></div><div className="pf-request-grid">{known.map(key => {
       const invitations = links.filter(link => link.entity.payload.projectRoot === key);

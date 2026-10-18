@@ -1,6 +1,8 @@
 import { isIP } from 'node:net';
 import { hexToBytes, toEventSelector, toFunctionSelector } from 'viem';
 import type { Hex } from 'viem';
+import { MAX_HEADER_BATCH_SIZE } from '../data/arkiv/read-policy';
+import { MAX_EVENT_RESERVATIONS } from '../domain/events/types';
 
 const UPSTREAM = 'https://rpc.tiramisu.db-chain.testnet.arkiv.network';
 const NATIVE = '0x4400000000000000000000000000000000000044';
@@ -17,12 +19,20 @@ const SELECTION: Record<string, boolean> = { key: true, owner: true, creator: tr
   updatedAt: false, expiresAt: true, creationFlags: true, contentType: true, payload: true,
   attributeSchema: false, attributes: true };
 
+// Two independent historical-header passes for one maximum managed roster, plus one
+// batch of head/recheck reserve. This allowance is 1056 admitted header operations.
+const HEADER_TRAVERSAL_UNITS = 2 * MAX_EVENT_RESERVATIONS + MAX_HEADER_BATCH_SIZE;
+
 /** Service bounds, not Arkiv protocol limits. No settled responses or chain heads are cached. */
 export const ARKIV_READ_LIMITS = Object.freeze({
   requestBytes: 2 * 1024 * 1024, responseBytes: 4 * 1024 * 1024,
   bodyTimeoutMs: 2_000, upstreamTimeoutMs: 7_000, queueTimeoutMs: 1_500,
   maxIncoming: 64, maxConcurrent: 3, maxQueued: 24,
   instanceBurst: 180, instancePerMinute: 600, ipBurst: 96, ipPerMinute: 240, maxIpEntries: 1024,
+  // Two reads in an IP burst; one full read per 15 seconds sustained. Instance bounds
+  // allow four burst reads and three independent readers at that cadence. HTTP caps also apply.
+  headerIpBurst: 2 * HEADER_TRAVERSAL_UNITS, headerIpPerMinute: 4 * HEADER_TRAVERSAL_UNITS,
+  headerInstanceBurst: 4 * HEADER_TRAVERSAL_UNITS, headerInstancePerMinute: 12 * HEADER_TRAVERSAL_UNITS,
 });
 type Limits = { [K in keyof typeof ARKIV_READ_LIMITS]: number };
 export interface ArkivReadHandlerOptions {
@@ -323,16 +333,19 @@ function checkResult(value: unknown, request: Rpc, secret: string): void {
     if (!Array.isArray(value) || value.length > 2048 || !value.every(object)) throw upstreamFailure();
   } else if (value !== null && !object(value)) throw upstreamFailure();
 }
-function respond(id: Id, reply: Reply, status = 200, retryAfter?: number): Response {
-  return new Response(JSON.stringify({ jsonrpc: '2.0', id, ...reply }), { status, headers: {
+function respond(id: Id | Id[], reply: Reply | Reply[], status = 200, retryAfter?: number): Response {
+  const ids = Array.isArray(id) ? id : [id], replies = Array.isArray(reply) ? reply : ids.map(() => reply);
+  const body = replies.map((item, index) => ({ jsonrpc: '2.0', id: ids[index] ?? null, ...item }));
+  return new Response(JSON.stringify(Array.isArray(id) ? body : body[0]), { status, headers: {
     'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, max-age=0',
     'CDN-Cache-Control': 'no-store', 'Vercel-CDN-Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
     ...(status === 405 ? { Allow: 'POST' } : {}), ...(retryAfter === undefined ? {} : { 'Retry-After': String(retryAfter) }),
-    ...(status === 413 && 'error' in reply && reply.error.code === -32098 ? { 'X-Arkiv-Read-Error': 'response_too_large' } : {}),
+    ...(status === 413 && replies.some(item => 'error' in item && item.error.code === -32098) ? { 'X-Arkiv-Read-Error': 'response_too_large' } : {}),
   } });
 }
 interface Bucket { tokens: number; updated: number }
-interface Flight { promise: Promise<Reply>; controller: AbortController; consumers: number }
+interface IpBuckets { requests: Bucket; headers: Bucket }
+interface Flight { promise: Promise<Reply[]>; controller: AbortController; consumers: number }
 interface Waiting { run: () => void; stop: () => void }
 
 /** Per-instance admission is a bounded guard, not a distributed quota or user-authentication guarantee. */
@@ -341,14 +354,18 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
   for (const [key, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < (key === 'maxQueued' ? 0 : 1) || value > ARKIV_READ_LIMITS[key as keyof Limits]) throw new Error('Invalid read service bounds.');
   }
-  const flights = new Map<string, Flight>(), ips = new Map<string, Bucket>(), queue: Waiting[] = [];
+  const flights = new Map<string, Flight>(), ips = new Map<string, IpBuckets>(), queue: Waiting[] = [];
   const aggregate: Bucket = { tokens: limits.instanceBurst, updated: now() };
+  const aggregateHeaders: Bucket = { tokens: limits.headerInstanceBurst, updated: now() };
   let incoming = 0, active = 0, cooldownUntil = 0, cooldownStatus = 429;
   const checkCooldown = () => {
     if (cooldownUntil > now()) throw new Failure(cooldownStatus, -32099, 'The public network needs a moment. Try again later.', Math.ceil((cooldownUntil - now()) / 1000));
   };
+  const refill = (bucket: Bucket, burst: number, perMinute: number, time = now()) => {
+    bucket.tokens = Math.min(burst, bucket.tokens + Math.max(0, time - bucket.updated) * perMinute / 60_000); bucket.updated = time;
+  };
   const spend = (bucket: Bucket, burst: number, perMinute: number) => {
-    const time = now(); bucket.tokens = Math.min(burst, bucket.tokens + Math.max(0, time - bucket.updated) * perMinute / 60_000); bucket.updated = time;
+    refill(bucket, burst, perMinute);
     if (bucket.tokens < 1) throw busy(Math.max(1, Math.ceil((1 - bucket.tokens) * 60 / perMinute))); bucket.tokens--;
   };
   const admit = (request: Request) => {
@@ -356,11 +373,27 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
     // Vercel supplies this header. Deploying behind another runtime requires a trusted-IP adapter;
     // the independent instance-wide budget still applies when headers are missing or forged there.
     const forwarded = request.headers.get('x-vercel-forwarded-for') ?? '', ip = isIP(forwarded) ? forwarded.toLowerCase() : 'unknown';
-    let bucket = ips.get(ip);
-    if (!bucket) { if (ips.size >= limits.maxIpEntries) ips.delete(ips.keys().next().value!); bucket = { tokens: limits.ipBurst, updated: now() }; ips.set(ip, bucket); }
-    spend(bucket, limits.ipBurst, limits.ipPerMinute);
+    let buckets = ips.get(ip);
+    if (!buckets) {
+      if (ips.size >= limits.maxIpEntries) ips.delete(ips.keys().next().value!);
+      buckets = { requests: { tokens: limits.ipBurst, updated: now() }, headers: { tokens: limits.headerIpBurst, updated: now() } };
+      ips.set(ip, buckets);
+    }
+    spend(buckets.requests, limits.ipBurst, limits.ipPerMinute); return buckets;
   };
-  const schedule = (work: () => Promise<Reply>, signal: AbortSignal): Promise<Reply> => new Promise((resolve, reject) => {
+  const admitHeaders = (ip: IpBuckets, units: number) => {
+    if (!units) return;
+    const time = now();
+    refill(aggregateHeaders, limits.headerInstanceBurst, limits.headerInstancePerMinute, time);
+    refill(ip.headers, limits.headerIpBurst, limits.headerIpPerMinute, time);
+    const delay = Math.max((units - aggregateHeaders.tokens) * 60 / limits.headerInstancePerMinute,
+      (units - ip.headers.tokens) * 60 / limits.headerIpPerMinute);
+    if (delay > 0) throw busy(Math.max(1, Math.ceil(delay)));
+    // Reserve the whole request atomically. Rejected batches cannot drain another IP's
+    // header allowance. Admitted work stays charged on queue cancellation or provider failure.
+    aggregateHeaders.tokens -= units; ip.headers.tokens -= units;
+  };
+  const schedule = (work: () => Promise<Reply[]>, signal: AbortSignal): Promise<Reply[]> => new Promise((resolve, reject) => {
     if (signal.aborted) { reject(cancelled()); return; }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const run = () => {
@@ -377,12 +410,13 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
     queue.push(waiting); signal.addEventListener('abort', stop, { once: true });
     timer = setTimeout(() => { remove(); reject(busy()); }, limits.queueTimeoutMs);
   });
-  const callUpstream = async (rpc: Rpc, secret: string, signal: AbortSignal): Promise<Reply> => {
+  const callUpstream = async (requests: Rpc[], batch: boolean, secret: string, signal: AbortSignal): Promise<Reply[]> => {
     try {
       return await deadline(limits.upstreamTimeoutMs, signal, new Failure(504, -32099, 'The public network response timed out.'), async boundedSignal => {
+        const outgoing = requests.map((rpc, index) => ({ jsonrpc: '2.0', id: index + 1, method: rpc.method, params: rpc.params }));
         const response = await fetcher(UPSTREAM, { method: 'POST', redirect: 'error', cache: 'no-store', signal: boundedSignal,
           headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-API-KEY': secret },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: rpc.method, params: rpc.params }) });
+          body: JSON.stringify(batch ? outgoing : outgoing[0]) });
         if (!response.ok) {
           void response.body?.cancel().catch(() => undefined);
           const status = [401, 403, 413, 429, 500, 502, 503, 504].includes(response.status) ? response.status : 502;
@@ -393,15 +427,24 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
         }
         const body = await boundedJson(response.body, response.headers, limits.responseBytes,
           new Failure(413, -32098, 'This read exceeds the response limit. No partial result was returned.'), boundedSignal);
-        if (!object(body) || body.jsonrpc !== '2.0' || body.id !== 1) throw upstreamFailure();
-        if (Object.hasOwn(body, 'error')) {
-          if (!keys(body, ['jsonrpc', 'id', 'error']) || !object(body.error) || !Number.isSafeInteger(body.error.code)
-            || Number(body.error.code) < -2_147_483_648 || Number(body.error.code) > 2_147_483_647) throw upstreamFailure();
-          // Preserve cursor and other machine codes, but discard every provider message/data field.
-          return { error: { code: body.error.code as number, message: 'The public network rejected this read.' } };
+        const entries = batch ? body : [body];
+        if (!Array.isArray(entries) || entries.length !== requests.length) throw upstreamFailure();
+        const replies = new Map<number, Reply>();
+        for (const entry of entries) {
+          if (!object(entry) || entry.jsonrpc !== '2.0' || !Number.isSafeInteger(entry.id)
+            || Number(entry.id) < 1 || Number(entry.id) > requests.length || replies.has(Number(entry.id))) throw upstreamFailure();
+          const index = Number(entry.id) - 1;
+          if (Object.hasOwn(entry, 'error')) {
+            if (!keys(entry, ['jsonrpc', 'id', 'error']) || !object(entry.error) || !Number.isSafeInteger(entry.error.code)
+              || Number(entry.error.code) < -2_147_483_648 || Number(entry.error.code) > 2_147_483_647) throw upstreamFailure();
+            // Preserve machine codes with their exact request IDs, never provider messages/data.
+            replies.set(index + 1, { error: { code: entry.error.code as number, message: 'The public network rejected this read.' } });
+          } else {
+            if (!keys(entry, ['jsonrpc', 'id', 'result'])) throw upstreamFailure();
+            checkResult(entry.result, requests[index]!, secret); replies.set(index + 1, { result: entry.result });
+          }
         }
-        if (!keys(body, ['jsonrpc', 'id', 'result'])) throw upstreamFailure();
-        checkResult(body.result, rpc, secret); return { result: body.result };
+        return requests.map((_rpc, index) => replies.get(index + 1)!);
       });
     } catch (error) {
       if (signal.aborted) throw cancelled();
@@ -410,7 +453,7 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
       throw failure;
     }
   };
-  const join = (flight: Flight, signal: AbortSignal): Promise<Reply> => new Promise((resolve, reject) => {
+  const join = (flight: Flight, signal: AbortSignal): Promise<Reply[]> => new Promise((resolve, reject) => {
     flight.consumers++; let finished = false;
     const finish = (action: () => void) => {
       if (finished) return; finished = true; signal.removeEventListener('abort', abort);
@@ -422,9 +465,9 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
     if (signal.aborted) abort();
   });
   return async request => {
-    let id: Id = null, admitted = false;
+    let id: Id | Id[] = null, admitted = false;
     try {
-      admit(request);
+      const ip = admit(request);
       if (request.method !== 'POST') throw new Failure(405, -32600, 'Use POST for this read endpoint.');
       const origin = request.headers.get('origin');
       if ((origin && origin !== new URL(request.url).origin) || request.headers.get('sec-fetch-site') === 'cross-site') throw new Failure(403, -32600, 'This read endpoint does not allow cross-origin browser requests.');
@@ -435,21 +478,35 @@ export function createArkivReadHandler(options: ArkivReadHandlerOptions): (reque
       const input = await deadline(limits.bodyTimeoutMs, request.signal, new Failure(408, -32600, 'The request body timed out.'),
         signal => boundedJson(request.body, request.headers, limits.requestBytes, new Failure(413, -32600, 'The request exceeds the read service limit.'), signal));
       if (object(input) && validId(input.id)) id = input.id;
-      let rpc: Rpc;
-      try { rpc = validateRpc(input); } catch (error) { throw error instanceof Failure ? error : invalid(); }
+      const batch = Array.isArray(input);
+      let requests: Rpc[];
+      try {
+        if (batch) {
+          requireValue(input.length > 0 && input.length <= MAX_HEADER_BATCH_SIZE);
+          id = input.map(item => object(item) && validId(item.id) ? item.id : null);
+          requests = input.map(validateRpc);
+          // Batching is deliberately narrow: queries, simulations and all other methods
+          // retain their existing one-request admission and byte/CPU bounds.
+          requireValue(requests.every(rpc => rpc.method === 'eth_getBlockByNumber')
+            && new Set(requests.map(rpc => rpc.id)).size === requests.length);
+        } else requests = [validateRpc(input)];
+      } catch (error) { throw error instanceof Failure ? error : invalid(); }
       let secret: string | undefined;
       try { secret = options.accessKey(); } catch { /* Credential-store failures are never client input errors. */ }
       if (!secret || !/^[\x21-\x7e]{1,1024}$/.test(secret)) throw new Failure(503, -32099, 'Public network access is temporarily unavailable.');
+      // Every exact header costs one unit, including scalar requests and repeated heights.
+      admitHeaders(ip, requests.filter(rpc => rpc.method === 'eth_getBlockByNumber').length);
+      const rpc = requests[0]!;
       const key = JSON.stringify([rpc.method, rpc.params], (_name, item: unknown) => object(item)
         ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
       // A finish/reorg check must contact the provider after that check begins, even when
       // another reader has an older header request in progress. Heads are never coalesced.
-      const shareable = !['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber'].includes(rpc.method);
+      const shareable = !batch && !['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber'].includes(rpc.method);
       let flight = shareable ? flights.get(key) : undefined;
       if (!flight || flight.controller.signal.aborted) {
         const controller = new AbortController();
-        const created: Flight = { controller, consumers: 0, promise: Promise.resolve({ result: null }) };
-        created.promise = schedule(() => callUpstream(rpc, secret, controller.signal), controller.signal)
+        const created: Flight = { controller, consumers: 0, promise: Promise.resolve([]) };
+        created.promise = schedule(() => callUpstream(requests, batch, secret, controller.signal), controller.signal)
           .finally(() => { if (flights.get(key) === created) flights.delete(key); });
         if (shareable) flights.set(key, created); flight = created;
       }

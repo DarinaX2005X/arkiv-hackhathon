@@ -2,8 +2,8 @@ import { useEffect, useId, useState } from 'react';
 import { formatDateTime, localDateTimeToUtc, routeHref, useApp, useAppSession, utcToLocalDateTime } from '../../app';
 import { useRepositoryAction } from '../../app/actions';
 import { activeSource, deriveDraftStatus, deriveReadiness, lastAcceptedDuty, sameActor, sameSource } from '../../domain/readiness';
-import { hashOffer, hashPlan } from '../../domain/canonical';
-import type { Actor, Decision, EntityKey, ProjectAggregate, SourcePlanRef } from '../../domain/types';
+import { canonicalJson, hashOffer, hashPlan } from '../../domain/canonical';
+import type { Actor, Decision, DomainReason, EntityKey, ProjectAggregate, SourcePlanRef } from '../../domain/types';
 import { Button, ContributionRow, Dialog, EmptyState, Field, Link, Notice, PlanDiff, RequirementRow, Select, StatusLabel, Textarea } from '../../ui';
 import { conditionText, hasVerifiedApproval, ownsPublisher, prepareDecisionCommand, publisherName, writeAuthority } from './model';
 import { intervalText, Reasons, useCurrentTime } from './shared';
@@ -36,6 +36,20 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
     [session.actor, session.mode, session.chainId, selected, source?.activationKey, source?.proposalKey, source?.proposalHash]);
   const timeZone = proposal?.payload.plan.variant.timeZone ?? 'UTC';
   const name = (key: EntityKey) => publisherName(project.publishers.find(p => p.root.key === key), key);
+  const reasonGroups = new Map<string, { reason: DomainReason; owners: Set<EntityKey> }>();
+  for (const reason of readiness.reasons) {
+    const { publisherRoot, ...evidence } = reason;
+    // Group only identical evidence. Distinct offers, resources, duties and
+    // quantities keep separate explanations, even when their wording matches.
+    const key = canonicalJson({ scope: publisherRoot ? 'owner' : 'project', ...evidence });
+    const group = reasonGroups.get(key) ?? { reason, owners: new Set<EntityKey>() };
+    if (publisherRoot) group.owners.add(publisherRoot);
+    reasonGroups.set(key, group);
+  }
+  const reasonSummary = reasonGroups.size > 0 && <div className="pf-stack pf-stack--compact">{[...reasonGroups].map(([key, group]) => <div key={key}>
+    <Reasons reasons={[group.reason]} />
+    {group.owners.size > 0 && <p className="pf-secondary">Affected {group.owners.size === 1 ? 'owner' : 'owners'}: {[...group.owners].map(name).join(', ')}.</p>}
+  </div>)}</div>;
   const begin = (status: Decision['status']) => {
     if (!source || !proposal || !selected || !session.actor) return;
     setReviewedOwner({ actor: structuredClone(session.actor), publisherRoot: selected });
@@ -60,7 +74,7 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The decision could not be prepared.'); }
     finally { setBusy(false); }
   };
-  if (!source || !proposal) return <section className="pf-stack"><h2>Agreement</h2><EmptyState title={project.activation.status === 'conflict' ? 'Competing active plans' : 'No current plan to approve'} description={project.state.status === 'unique' && project.state.entity.payload.lifecycle === 'closed' ? 'This project is closed. Restarting requires a new version of the plan and new approvals.' : 'The coordinator must select a complete plan before owners can decide.'} /><Reasons reasons={readiness.reasons} /><ActionFeedback action={action} onRefresh={onRefresh} /><Button variant="secondary" onClick={() => void onRefresh?.()}>Refresh project</Button></section>;
+  if (!source || !proposal) return <section className="pf-stack"><h2>Agreement</h2><EmptyState title={project.activation.status === 'conflict' ? 'Competing active plans' : 'No current plan to approve'} description={project.state.status === 'unique' && project.state.entity.payload.lifecycle === 'closed' ? 'This project is closed. Restarting requires a new version of the plan and new approvals.' : 'The coordinator must select a complete plan before owners can decide.'} />{reasonSummary}<ActionFeedback action={action} onRefresh={onRefresh} /><Button variant="secondary" onClick={() => void onRefresh?.()}>Refresh project</Button></section>;
   const plan = proposal.payload.plan;
   const predecessor = plan.predecessor ? project.proposalHistory.find(p => p.key === plan.predecessor!.proposalKey && p.payload.proposalHash === plan.predecessor!.proposalHash && hashPlan(p.payload.plan) === plan.predecessor!.proposalHash) : null;
   const changes = predecessor ? agreementDifference(predecessor.payload.plan, plan) : [];
@@ -82,7 +96,7 @@ export function ProjectAgreementPanel({ project, onRefresh, publisherRoot }: Pro
     <div className="pf-agreement-overview"><dl><div><dt>Owners approved</dt><dd>{approvedCount}<span> of {plan.requiredApprovers.length}</span></dd></div><div><dt>Shared needs</dt><dd>{plan.variant.requirements.length}</dd></div><div><dt>Tasks and transfers</dt><dd>{plan.runbook.length}</dd></div></dl><p>Each owner agrees to this exact plan. A new version needs fresh approval from everyone.</p></div>
     <nav className="pf-agreement-jumps" aria-label="Agreement sections">{selected && <Button variant="secondary" onClick={() => jump('mine')}>My part and decision</Button>}<Button variant="quiet" onClick={() => jump('requirements')}>All contributions</Button><Button variant="quiet" onClick={() => jump('terms')}>Terms and run sheet</Button><Button variant="quiet" onClick={() => jump('owners')}>Owner decisions</Button></nav>
     {draft.changed && <Notice tone="warning" title="The project draft has changed"><p>The changes are not part of this version of the plan. The coordinator must share the updated terms for every required owner to review again.</p></Notice>}
-    <Reasons reasons={readiness.reasons} /><div className="pf-actions"><Button variant="secondary" onClick={() => void onRefresh?.()}>Refresh agreement</Button><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Review replacement plans</Link></div>
+    {reasonSummary}<div className="pf-actions"><Button variant="secondary" onClick={() => void onRefresh?.()}>Refresh agreement</Button><Link href={routeHref({ name: 'project', projectRoot: project.root.key, tab: 'plans' })}>Review replacement plans</Link></div>
     <p className="pf-secondary">Each owner records their own commitment to this version. Guest registrations are managed separately.</p>
     {plan.predecessor && <section className="pf-stack"><h3>Changes from the previous plan</h3>{predecessor ? changes.length ? <PlanDiff title="Review changed terms" labels={{ requirement: 'Term', before: 'Previous version', after: 'This version' }} rows={changes} footer={<p>Every required owner must approve this version, even if their assignments stayed the same.</p>} /> : <Notice>The terms are unchanged, but every required owner must approve this new version of the plan.</Notice> : <Notice tone="warning">The previous plan is unavailable for comparison. Review all current terms; previous approvals do not carry over.</Notice>}</section>}
     {owned.length > 1 && <Select label="Review as contribution owner" value={selected} options={owned.map(p => ({ value: p.root.key, label: publisherName(p, p.root.key) }))} onChange={e => setSelected(e.target.value as EntityKey)} />}

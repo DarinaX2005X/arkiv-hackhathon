@@ -3,8 +3,8 @@ import { defineCatalog } from '../../i18n';
 export const landingCopy = defineCatalog({
   heading: 'Join an event',
   headingContinuation: 'Bring one to life',
-  description: 'Find workshops, exhibitions and gatherings online or in person. Or create an event with people who bring the space, equipment and skills it needs.',
-  arkivIntro: 'Each owner signs their own offers and decisions on Arkiv. Independent apps can read the same record of who agreed to what.',
+  description: 'Find workshops, exhibitions and gatherings online or in person. Or bring yours together with people who offer the space, equipment and skills, and agree to their own part.',
+  arkivIntro: 'Owners sign their offers and agreements on Arkiv. Other apps can read the same records of who agreed to what.',
   createProject: 'Create an event',
   browseEvents: 'Browse events',
   watchDemo: 'Watch demo video',
@@ -34,6 +34,7 @@ export const landingCopy = defineCatalog({
   deskAction: 'Open Partfolk Desk',
   changeTitle: 'Plans can change. Your yes doesn’t have to follow',
   changeIntro: 'An agreed contribution can be withdrawn. The missing part stays visible, and a replacement needs a fresh decision.',
+  practiceAction: 'Try the exhibition example',
   withdrawnTitle: 'An owner withdraws their part',
   withdrawnBody: 'If a required, agreed contribution is withdrawn, new registrations pause. The event page still shows what needs to be resolved.',
   replacementTitle: 'The organizer finds a replacement',

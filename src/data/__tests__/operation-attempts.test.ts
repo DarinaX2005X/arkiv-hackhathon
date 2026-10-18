@@ -1,7 +1,7 @@
 import { mkdtempSync, rmdirSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson, hashCanonical } from '../../domain/canonical';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import type { OperationIntent } from '../types';
@@ -44,6 +44,122 @@ function fixture(store: OperationStore = new MemoryOperationStore()) {
 }
 
 describe('durable writer attempts before native preparation', () => {
+  it.each(['memory', 'browser'] as const)('settles a concurrent read failure in %s storage before allowing a deliberate retry', async kind => {
+    const values = new Map<string, string>();
+    const store = kind === 'memory' ? new MemoryOperationStore() : new BrowserOperationStore({
+      getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); },
+    }, { locks: new MemoryOperationStore() });
+    const f = fixture(store), second = { ...f.operation, id: 'concurrent-read' };
+    let enteredRead!: () => void, failRead!: () => void, enteredPrepare!: () => void, finishPrepare!: () => void;
+    const reading = new Promise<void>(resolve => { enteredRead = resolve; });
+    const failedRead = new Promise<void>(resolve => { failRead = resolve; });
+    const preparing = new Promise<void>(resolve => { enteredPrepare = resolve; });
+    const prepared = new Promise<void>(resolve => { finishPrepare = resolve; });
+    const originalPrepare = f.gateway.prepare.bind(f.gateway);
+    f.gateway.prepare = async (...args) => { enteredPrepare(); await prepared; return originalPrepare(...args); };
+    const originalFailure = new Error('Independent read failed');
+    const failed = f.controller.withOperationAttempt(second, async () => {
+      enteredRead(); await failedRead; throw originalFailure;
+    }).catch(error => error as unknown);
+    await reading;
+    const first = f.controller.withOperationAttempt(f.operation, f.prepare);
+    await preparing;
+    failRead();
+    // Settlement remains pending while another operation owns the journal.
+    await Promise.resolve(); await Promise.resolve();
+    expect(f.controller.getAttempt(second.id)?.state).toBe('preflight');
+    expect(f.control.sends).toBe(0);
+    finishPrepare(); await first;
+    expect(await failed).toBe(originalFailure);
+    expect(f.controller.getAttempt(second.id)).toMatchObject({ state: 'rejected-before-native', nativeStepIds: [] });
+    expect(f.journal(second)).toEqual({ complete: true, notSentEvidence: 'preflight-journal' });
+    expect(f.control).toEqual({ preparations: 1, sends: 0 });
+
+    const step = allocateOperationStep(second, 'book_pending', batch, [KEY]);
+    await f.controller.withOperationAttempt(second, async () => {
+      await f.controller.beforeNativeAttempt(second.id, step);
+      await f.controller.prepareStep({ operation: { ...second, phase: 'book_pending', steps: [step] }, step, batch });
+      await f.controller.submitStep(second.id, step.id);
+    });
+    expect(f.controller.getStep(second.id, step.id)?.step.status).toBe('submitted');
+    expect(f.control).toEqual({ preparations: 2, sends: 1 });
+  });
+
+  it.each(['checkpoint', 'prepare'] as const)('can settle lock contention before the %s callback entered native preparation', async boundary => {
+    const f = fixture(), second = { ...f.operation, id: `busy-${boundary}` };
+    let enteredRead!: () => void, finishRead!: () => void, enteredPrepare!: () => void, finishPrepare!: () => void;
+    const reading = new Promise<void>(resolve => { enteredRead = resolve; });
+    const read = new Promise<void>(resolve => { finishRead = resolve; });
+    const preparing = new Promise<void>(resolve => { enteredPrepare = resolve; });
+    const prepared = new Promise<void>(resolve => { finishPrepare = resolve; });
+    const originalPrepare = f.gateway.prepare.bind(f.gateway);
+    f.gateway.prepare = async (...args) => { enteredPrepare(); await prepared; return originalPrepare(...args); };
+    const step = allocateOperationStep(second, 'book_pending', batch, [KEY]);
+    const failed = f.controller.withOperationAttempt(second, async () => {
+      enteredRead(); await read;
+      if (boundary === 'checkpoint') await f.controller.beforeNativeAttempt(second.id, step);
+      else await f.controller.prepareStep({ operation: { ...second, phase: 'book_pending', steps: [step] }, step, batch });
+    }).catch(error => error as WalletOperationError);
+    await reading;
+    const first = f.controller.withOperationAttempt(f.operation, f.prepare); await preparing;
+    finishRead(); await Promise.resolve(); await Promise.resolve();
+    finishPrepare(); await first;
+    expect(await failed).toMatchObject({ kind: 'not_sent', code: 'conflict' });
+    expect(f.journal(second)).toEqual({ complete: true, notSentEvidence: 'preflight-journal' });
+    expect(f.controller.getAttempt(second.id)?.nativeStepIds).toEqual([]);
+    expect(f.control).toEqual({ preparations: 1, sends: 0 });
+  });
+
+  it('preserves the original read error and fails closed when its settlement cannot be stored', async () => {
+    const originalFailure = new Error('Read unavailable'), writeFailure = new WalletOperationError('Disk full', { kind: 'not_sent', code: 'storage' });
+    class FailingSettlementStore extends MemoryOperationStore {
+      override putAttemptCAS(record: StoredOperationAttempt, revision: number | null) {
+        if (record.state === 'rejected-before-native') throw writeFailure;
+        super.putAttemptCAS(record, revision);
+      }
+    }
+    const f = fixture(new FailingSettlementStore());
+    const failed = await f.controller.withOperationAttempt(f.operation, async () => { throw originalFailure; }).catch(error => error as WalletOperationError);
+    expect(failed).toMatchObject({ kind: 'unverified', code: 'storage' });
+    expect(failed.cause).toBeInstanceOf(AggregateError);
+    expect((failed.cause as AggregateError).errors).toEqual([originalFailure, writeFailure]);
+    expect(f.journal().complete).toBe(false);
+    expect(f.controller.getAttempt(f.operation.id)?.state).toBe('preflight');
+    expect(f.control).toEqual({ preparations: 0, sends: 0 });
+  });
+
+  it('retains no-send evidence when preparation loses the lock after its native marker was saved', async () => {
+    const f = fixture(), second = { ...f.operation, id: 'native-marker-contention' };
+    const step = allocateOperationStep(second, 'book_pending', batch, [KEY]);
+    let marked!: () => void, continueSecond!: () => void, enteredPrepare!: () => void, finishPrepare!: () => void;
+    const nativeMarked = new Promise<void>(resolve => { marked = resolve; });
+    const continuePreparation = new Promise<void>(resolve => { continueSecond = resolve; });
+    const preparing = new Promise<void>(resolve => { enteredPrepare = resolve; });
+    const prepared = new Promise<void>(resolve => { finishPrepare = resolve; });
+    const originalPrepare = f.gateway.prepare.bind(f.gateway);
+    f.gateway.prepare = async (...args) => { enteredPrepare(); await prepared; return originalPrepare(...args); };
+    const prepareSecond = () => f.controller.prepareStep({ operation: { ...second, phase: 'book_pending', steps: [step] }, step, batch });
+    const failed = f.controller.withOperationAttempt(second, async () => {
+      await f.controller.beforeNativeAttempt(second.id, step); marked(); await continuePreparation;
+      await prepareSecond();
+    }).catch(error => error as WalletOperationError);
+    await nativeMarked;
+    const first = f.controller.withOperationAttempt(f.operation, f.prepare); await preparing;
+    continueSecond(); await Promise.resolve(); await Promise.resolve();
+    finishPrepare(); await first;
+    expect(await failed).toMatchObject({ kind: 'not_sent', code: 'conflict' });
+    expect(f.controller.getStep(second.id, step.id)).toMatchObject({
+      step: { status: 'failed-before-send' }, prepared: null, admission: null,
+    });
+    expect(f.journal(second)).toEqual({ complete: true, notSentEvidence: 'native-journal' });
+    expect(f.control).toEqual({ preparations: 1, sends: 0 });
+    await f.controller.withOperationAttempt(second, async () => {
+      await f.controller.beforeNativeAttempt(second.id, step); await prepareSecond();
+      await f.controller.submitStep(second.id, step.id);
+    });
+    expect(f.control).toEqual({ preparations: 2, sends: 1 });
+  });
+
   it('settles a thrown preflight failure and replaces its generation only on a deliberate unchanged retry', async () => {
     const f = fixture();
     await expect(f.controller.withOperationAttempt(f.operation, async () => { throw new Error('Read unavailable'); })).rejects.toThrow('Read unavailable');
@@ -200,6 +316,29 @@ describe('durable writer attempts before native preparation', () => {
 });
 
 describe('single-document attempt storage', () => {
+  it('opts in to waiting Web Locks only for journal work and retains fail-fast admission', async () => {
+    const coordinator = new MemoryOperationStore(), requests: { mode: string; ifAvailable?: boolean }[] = [];
+    vi.stubGlobal('navigator', { locks: {
+      request<T>(name: string, options: { mode: string; ifAvailable?: boolean }, callback: (lock: object | null) => Promise<T>) {
+        requests.push(options);
+        return coordinator.runExclusive(name, () => callback({ name }), { wait: !options.ifAvailable })
+          .catch(error => { if (error instanceof WalletOperationError && error.code === 'conflict') return callback(null); throw error; });
+      },
+    } });
+    try {
+      const store = new BrowserOperationStore({ getItem: () => null, setItem() {} });
+      let release!: () => void; const order: number[] = [];
+      const first = store.runExclusive('account', () => new Promise<void>(resolve => { release = resolve; }));
+      const second = store.runExclusive('account', async () => { order.push(2); }, { wait: true });
+      const third = store.runExclusive('account', async () => { order.push(3); }, { wait: true });
+      await expect(store.runExclusive('account', async () => { order.push(4); })).rejects.toMatchObject({ code: 'conflict' });
+      expect(order).toEqual([]);
+      release(); await Promise.all([first, second, third]);
+      expect(order).toEqual([2, 3]);
+      expect(requests).toEqual([{ mode: 'exclusive', ifAvailable: true }, { mode: 'exclusive' }, { mode: 'exclusive' }, { mode: 'exclusive', ifAvailable: true }]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('reads a records-only legacy document and preserves both journals across later writes', async () => {
     const legacy = fixture(); const prepared = await legacy.prepare();
     let raw = canonicalJson({ version: 1, records: { [JSON.stringify([prepared.operation.id, prepared.step.id])]: prepared } });

@@ -7,6 +7,15 @@
 .pf-event-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); padding: var(--space-6); border-radius: 16px; background: var(--surface-work); box-shadow: var(--shadow-surface); }
 .pf-event-filter-core { display: grid; grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-4); }
 .pf-event-filters .pf-field { min-width: 0; }
+.pf-event-filter-disclosure { min-width: 0; }
+.pf-event-filter-disclosure > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid transparent; list-style: none; }
+.pf-event-filter-disclosure > summary::-webkit-details-marker { display: none; }
+.pf-event-filter-disclosure > summary::after { content: ''; width: 8px; height: 8px; margin-inline-start: auto; margin-inline-end: 4px; border-inline-end: 1.5px solid currentColor; border-block-end: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform var(--motion-hover) var(--motion-ease); }
+.pf-event-filter-disclosure > summary > span { color: var(--text-secondary); font-size: 14px; line-height: 20px; font-weight: 400; }
+.pf-event-filter-disclosure[open] > summary { color: var(--action); background: var(--surface-soft); border-color: var(--border-quiet); }
+.pf-event-filter-disclosure[open] > summary::after { transform: rotate(225deg) translate(-2px, -2px); }
+.pf-event-filter-disclosure > .pf-event-filter-extra { margin-top: var(--space-5); }
+.pf-event-filter-disclosure > .pf-field-message { margin-top: var(--space-4); }
 .pf-event-filter-extra { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-4); align-items: start; }
 .pf-event-filter-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); color: var(--text-secondary); font-size: 14px; }
 .pf-events-results { display: grid; gap: var(--space-4); min-width: 0; }
@@ -111,3 +120,74 @@
   .pf-my-event:has(a[href], button:enabled):hover { box-shadow: var(--shadow-surface-hover); }
 }
 @media (prefers-reduced-motion: reduce) { .pf-event-card, .pf-event-cover img, .pf-my-event { transition: none; transform: none !important; } }
+
+/* Programme rows let the event's actual date and invitation lead the catalogue. */
+.pf-event-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+.pf-event-programme { display: grid; grid-template-columns: 92px minmax(0, 1fr) minmax(170px, 22%); gap: clamp(20px, 3vw, 36px); align-items: start; padding: clamp(24px, 3vw, 36px); border: 1px solid var(--border-quiet); border-radius: var(--radius-sheet); min-width: 0; transition: border-color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease); }
+.pf-event-programme-date { display: grid; justify-items: start; gap: 2px; color: var(--action); font-variant-numeric: tabular-nums; }
+.pf-event-programme-date strong { font-size: clamp(48px, 5vw, 66px); line-height: 1; font-weight: 500; letter-spacing: -.045em; }
+.pf-event-programme-date span { font-size: 15px; }
+.pf-event-programme-body { display: grid; gap: var(--space-3); min-width: 0; }
+.pf-event-programme h2 { font-size: clamp(24px, 2.4vw, 32px); line-height: 1.15; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.pf-event-programme-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); min-height: 20px; }
+.pf-event-programme-badges:empty { display: none; }
+.pf-event-record-note { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 13px; }
+.pf-event-record-note svg { width: 16px; height: 16px; }
+.pf-event-programme-facts { display: grid; gap: 4px; font-size: 15px; }
+.pf-event-programme-facts span { color: var(--text-secondary); }
+.pf-event-programme-description { max-width: 70ch; color: var(--text-secondary); font-size: 15px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pf-event-programme-art { align-self: center; }
+.pf-event-programme-art .pf-event-cover { aspect-ratio: 1; border-radius: 50% 50% 14px 14px; }
+.pf-event-programme-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); padding-top: var(--space-3); }
+.pf-event-programme-foot > div { display: grid; justify-items: start; gap: 6px; }
+.pf-event-programme-foot > div > span:last-child:not(.pf-status) { font-size: 13px; color: var(--text-secondary); }
+.pf-event-programme-foot .pf-button { gap: var(--space-4); flex-shrink: 0; }
+.pf-event-programme:focus-within { border-color: var(--action); box-shadow: 0 0 0 1px var(--action); }
+@media (hover: hover) and (pointer: fine) { .pf-event-programme:hover { border-color: var(--border-control); box-shadow: var(--shadow-surface); } }
+@media (max-width: 850px) {
+  .pf-event-programme { grid-template-columns: 74px minmax(0, 1fr); gap: var(--space-5); }
+  .pf-event-programme-art { display: none; }
+}
+@media (max-width: 560px) {
+  .pf-event-programme { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); padding: var(--space-6); }
+  .pf-event-programme-date { display: flex; gap: 8px; align-items: baseline; }
+  .pf-event-programme-date strong { font-size: 36px; }
+  .pf-event-programme h2 { font-size: 26px; }
+  .pf-event-programme-foot { align-items: start; }
+}
+@media (prefers-reduced-motion: reduce) { .pf-event-programme { transition: none; } }
+
+/* Keep the first event's date, place and invitation close to the search controls. */
+.pf-events-page { gap: var(--space-4); }
+.pf-events-heading > div { flex: 1; max-width: none; gap: var(--space-2); }
+.pf-events-heading h1 { max-width: none; font-size: clamp(32px, 3.4vw, 40px); }
+.pf-events-heading p { max-width: 88ch; font-size: 15px; line-height: 1.5; }
+.pf-event-filters { grid-template-columns: minmax(0, 1fr) auto; gap: 6px var(--space-4); padding: 12px var(--space-5); }
+.pf-event-filter-core { grid-column: 1 / -1; }
+.pf-event-filter-disclosure { grid-column: 1; grid-row: 2; }
+.pf-event-filter-disclosure > summary { padding-inline: 0 10px; }
+.pf-event-filter-foot { grid-column: 2; grid-row: 2; align-self: start; min-height: 44px; justify-content: flex-end; gap: var(--space-3); font-size: 13px; }
+.pf-event-filter-disclosure[open] { grid-column: 1 / -1; }
+.pf-event-filters:has(.pf-event-filter-disclosure[open]) .pf-event-filter-foot { grid-column: 1 / -1; grid-row: 3; justify-content: space-between; }
+.pf-events-results { gap: var(--space-2); }
+.pf-event-programme-facts p { display: flex; flex-wrap: wrap; gap: 4px var(--space-4); }
+.pf-event-overview { grid-template-columns: minmax(0, 1fr) minmax(140px, .55fr); grid-template-areas: 'facts cover'; align-items: start; gap: var(--space-4); padding: var(--space-5); }
+.pf-event-overview-facts { grid-area: facts; padding: 4px; gap: var(--space-4); }
+.pf-event-overview-facts .pf-event-quick-facts { gap: var(--space-3); font-size: 15px; }
+.pf-event-detail-cover { grid-area: cover; align-self: start; }
+.pf-event-detail-cover .pf-event-cover { aspect-ratio: 1; max-height: 240px; }
+.pf-event-detail-cover .pf-event-cover-badges { position: static; padding-top: var(--space-2); justify-items: start; gap: 6px; }
+.pf-event-detail-cover .pf-event-cover-badges .pf-status { font-size: 12px; line-height: 18px; text-align: left; }
+@media (max-width: 600px) {
+  .pf-events-heading h1 { font-size: 32px; }
+  .pf-event-filters { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
+  .pf-event-filter-core { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .pf-event-filter-core > :first-child { grid-column: 1 / -1; }
+  .pf-event-filter-disclosure { grid-column: 1; grid-row: 2; }
+  .pf-event-filter-foot { grid-column: 1; grid-row: 3; min-height: 28px; align-items: center; flex-direction: row; justify-content: space-between; }
+  .pf-event-filter-disclosure > summary { gap: 4px 12px; }
+  .pf-event-overview { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'facts' 'cover'; }
+  .pf-event-overview-facts { padding: 0; }
+  .pf-event-detail-cover .pf-event-cover { aspect-ratio: 16 / 7; max-height: 190px; }
+  .pf-event-detail-cover .pf-event-cover-badges { display: flex; flex-wrap: wrap; }
+}

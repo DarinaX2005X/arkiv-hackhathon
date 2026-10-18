@@ -16,6 +16,7 @@ const noEvents: readonly EventAggregate[] = [];
 
 export function EventCatalog({ repository }: EventCatalogProps) {
   const [input, setInput] = useState<CatalogFilterInput>(emptyCatalogFilters);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [zone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const { result, pending, error, refresh } = useEventCatalog(repository);
   const now = useEventClock();
@@ -30,6 +31,9 @@ export function EventCatalog({ repository }: EventCatalogProps) {
   const warnings = Boolean(result?.diagnostics.length);
   const visible = useMemo(() => filterCatalog(events, parsed.filters, now, unverified), [events, parsed.filters, now, unverified]);
   const filtered = Object.values(input).some(Boolean);
+  const advancedCount = [input.countryCode, input.city, input.from, input.to, input.deadline].filter(Boolean).length;
+
+  useEffect(() => { if (advancedCount) setFiltersExpanded(true); }, [advancedCount]);
 
   useEffect(() => {
     setInput(previous => {
@@ -56,6 +60,8 @@ export function EventCatalog({ repository }: EventCatalogProps) {
         <Select label="Event format" value={input.format} onChange={event => change('format', event.target.value)} options={[{ value: '', label: 'Every format' }, { value: 'in_person', label: 'In person' }, { value: 'online', label: 'Online' }, { value: 'hybrid', label: 'Hybrid' }]} />
         <Select label="Registration" value={input.availability} onChange={event => change('availability', event.target.value)} options={[{ value: '', label: 'Every status' }, { value: 'open', label: 'Registration open' }, { value: 'waitlist', label: 'Waiting list open' }, { value: 'full', label: 'Fully booked' }, { value: 'registration_closed', label: 'Deadline passed' }, { value: 'closed', label: 'Registration closed' }, { value: 'paused', label: 'Plans being updated' }, { value: 'cancelled', label: 'Cancelled' }, { value: 'ended', label: 'Ended' }, { value: 'unverified', label: 'Needs verification' }]} />
       </div>
+      <details className="pf-event-filter-disclosure" open={filtersExpanded} onToggle={event => setFiltersExpanded(event.currentTarget.open)}>
+        <summary>Place and dates <span>{advancedCount ? `${advancedCount} active` : 'Filter by location or date'}</span></summary>
       <div className="pf-event-filter-extra">
         <SearchSelect label="Country" value={input.countryCode} options={options.countries} placeholder="Every country" clearLabel="Clear country" onValueChange={changeCountry} disabled={input.format === 'online' || !options.countries.length} noResultsText="No country in this event list matches" />
         <SearchSelect label="City" value={input.city} options={options.cities} placeholder={input.countryCode ? 'Every city' : 'Choose country first'} clearLabel="Clear city" onValueChange={value => change('city', value)} disabled={input.format === 'online' || !input.countryCode || !options.cities.length} noResultsText="No city in this event list matches" />
@@ -63,7 +69,9 @@ export function EventCatalog({ repository }: EventCatalogProps) {
         <Field type="date" label="Through date" value={input.to} onChange={event => change('to', event.target.value)} error={parsed.dateErrorField === 'to' ? parsed.dateError : undefined} />
         <Field type="date" label="Deadline by" value={input.deadline} onChange={event => change('deadline', event.target.value)} error={parsed.deadlineError} hint="Registration deadlines on or before this date." />
       </div>
-      <div className="pf-event-filter-foot"><p>Filters update as you choose. Calendar dates use {zone}.</p>
+        <p className="pf-field-message">Calendar dates use {zone}.</p>
+      </details>
+      <div className="pf-event-filter-foot"><p>Filters update as you choose.</p>
         {filtered && <Button variant="quiet" size="compact" onClick={clearFilters}>Clear filters</Button>}</div>
     </form>
     {error && <ErrorState title="Events could not be refreshed" description={eventError(error)} actions={<Button variant="secondary" onClick={() => void refresh()} disabled={pending}>Try again</Button>} />}
@@ -72,7 +80,7 @@ export function EventCatalog({ repository }: EventCatalogProps) {
     {!pending && !error && warnings && !stale && <Notice tone="warning" title="Some published records could not be verified" actions={<Button variant="secondary" onClick={() => void refresh()}>Refresh events</Button>}>Some events could not be loaded safely. The verified records below are still available to review.</Notice>}
     {!pending && !error && stale && !incomplete && <Notice tone="warning" title="This list needs a fresh check" actions={<Button variant="secondary" onClick={() => void refresh()}>Refresh events</Button>}>Open an event to read its current registration status, or refresh this list.</Notice>}
     {result && <div className="pf-events-results" aria-busy={pending}>
-      <div className="pf-events-result-heading"><p className="pf-events-result-label" role="status" aria-live="polite">{pending ? 'Refreshing event records.' : `${visible.length} ${visible.length === 1 ? 'event' : 'events'}${filtered ? ' match your filters' : ' to explore'}${unverified ? ' in this unverified list' : ''}`}</p>
+      <div className="pf-events-result-heading"><p className="pf-events-result-label" role="status" aria-live="polite">{pending ? 'Refreshing event records.' : `${visible.length} ${visible.length === 1 ? 'event' : 'events'}${filtered ? visible.length === 1 ? ' matches your filters' : ' match your filters' : ' to explore'}${unverified ? ' in this unverified list' : ''}`}</p>
         {!error && !stale && <Button variant="quiet" size="compact" disabled={pending} onClick={() => void refresh()}>Refresh events</Button>}</div>
       {visible.length > 0 && <div className="pf-event-list">{visible.map(event => <EventSummary key={event.projectRoot} event={event} now={now} unverified={unverified} />)}</div>}
       {!visible.length && !pending && <EmptyState

@@ -50,6 +50,96 @@ function heldRead(rpc: ReadRpcFixture, matches: (args: Parameters<RpcRequest>[0]
 }
 
 describe('strict Arkiv reader through the real SDK and a readonly RPC provider', () => {
+  it.each([false, true])('overlaps only independent reads and waits for both branches before the final header (reorg=%s)', async reorg => {
+    const { rpc } = readyFixture();
+    const labels = ['chain', 'head', 'initial', 'root', 'state', 'activation', 'proposal', 'publisher', 'book', 'final'];
+    const gates = new Map(labels.map(label => {
+      let enter = () => {}, release = () => {};
+      const entered = new Promise<void>(resolve => { enter = resolve; });
+      const held = new Promise<void>(resolve => { release = resolve; });
+      return [label, { enter, release, entered, held }] as const;
+    }));
+    const started: string[] = [], completed: string[] = []; let headers = 0, active = 0, maxActive = 0;
+    const request: RpcRequest = async args => {
+      const query = args.method === 'arkiv_query' ? String((args.params as unknown[])[0]) : '';
+      const label = args.method === 'eth_chainId' ? 'chain' : args.method === 'eth_blockNumber' ? 'head'
+        : args.method === 'eth_getBlockByNumber' ? (++headers === 1 ? 'initial' : 'final')
+          : query.includes(`key(${KEYS.project})`) && query.includes('$key') ? 'root'
+            : query.includes("str('project_state')") ? 'state' : query.includes("str('plan_activation')") ? 'activation'
+              : query.includes(`$key = key(${KEYS.proposal})`) ? 'proposal'
+                : query.includes(`$key = key(${KEYS.publisher})`) ? 'publisher' : 'book';
+      const gate = gates.get(label)!; started.push(label); active++; maxActive = Math.max(maxActive, active); gate.enter();
+      try {
+        await gate.held;
+        const result = await rpc.request(args);
+        return label === 'final' && reorg ? { ...result as object, hash: entityKey(9999) } : result;
+      } finally { active--; completed.push(label); }
+    };
+    const instance = new ArkivReader({ request, now: () => NOW });
+    const loading = instance.loadProject(KEYS.project).then(value => ({ value, error: null }), error => ({ value: null, error: repositoryError(error) }));
+    const entered = (...names: string[]) => Promise.all(names.map(name => gates.get(name)!.entered));
+    const release = (...names: string[]) => names.forEach(name => gates.get(name)!.release());
+    await entered('chain', 'head'); expect(started).toEqual(['chain', 'head']); release('chain', 'head');
+    await entered('initial'); expect(started).not.toContain('root'); release('initial');
+    await entered('root'); expect(started).not.toContain('state'); release('root');
+    await entered('state', 'activation'); expect(started).not.toContain('proposal'); release('state', 'activation');
+    await entered('proposal', 'publisher'); expect(started).not.toContain('book'); release('publisher');
+    await entered('book'); expect(started).not.toContain('final'); release('proposal');
+    expect(started).not.toContain('final'); release('book');
+    await entered('final'); expect(completed).toEqual(expect.arrayContaining(['proposal', 'book'])); release('final');
+    const result = await loading;
+    expect(maxActive).toBe(2); expect(active).toBe(0); expect(started).toHaveLength(10);
+    expect(rpc.queries.every(call => call.options.atBlock === '0x64')).toBe(true);
+    if (reorg) expect(result.error?.reasons).toContainEqual({ code: 'incomplete_snapshot' });
+    else { expect(result.error).toBeNull(); expect(deriveReadiness(result.value!, NOW).status).toBe('ready'); }
+  });
+
+  it('drains an outstanding publisher read before rejecting a malformed parallel proposal', async () => {
+    const { rpc } = readyFixture(); rpc.row(KEYS.proposal).payload = stringToHex('{');
+    const held = heldRead(rpc, args => args.method === 'arkiv_query' && String((args.params as unknown[])[0]).includes("str('book_state')"));
+    const instance = new ArkivReader({ request: held.request, now: () => NOW }); let settled = false;
+    const loading = instance.loadProject(KEYS.project).then(() => null, repositoryError).finally(() => { settled = true; });
+    await held.entered; await new Promise(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(rpc.calls.filter(call => call.method === 'eth_getBlockByNumber')).toHaveLength(1);
+    await held.release();
+    expect((await loading)?.reasons).toContainEqual({ code: 'invalid_schema' });
+    const count = rpc.calls.length; await new Promise(resolve => setTimeout(resolve, 0)); expect(rpc.calls).toHaveLength(count);
+  });
+
+  it('settles an independent head read before reporting the wrong chain without reading entities', async () => {
+    const { rpc } = readyFixture(); rpc.chainId = 1;
+    const held = heldRead(rpc, args => args.method === 'eth_blockNumber');
+    const instance = new ArkivReader({ request: held.request, now: () => NOW }); let settled = false;
+    const loading = instance.loadProject(KEYS.project).then(() => null, repositoryError).finally(() => { settled = true; });
+    await held.entered; await new Promise(resolve => setTimeout(resolve, 0)); expect(settled).toBe(false);
+    await held.release(); expect((await loading)?.code).toBe('wrong_chain');
+    expect(rpc.calls.map(call => call.method).sort()).toEqual(['eth_blockNumber', 'eth_chainId']);
+  });
+
+  it.each([2, 4])('preserves the shared page budget across concurrent branches (maxPages=%s)', async maxPages => {
+    const { rpc } = readyFixture(); const instance = reader(rpc, { maxPages });
+    await rejected(instance.loadProject(KEYS.project), 'page_budget');
+    expect(rpc.queries).toHaveLength(maxPages);
+    const count = rpc.calls.length; await new Promise(resolve => setTimeout(resolve, 0)); expect(rpc.calls).toHaveLength(count);
+    expect(rpc.calls.filter(call => call.method === 'eth_getBlockByNumber')).toHaveLength(1);
+  });
+
+  it('reserves the shared page budget for current agreement before reading optional proposal history', async () => {
+    const { rpc, predecessors } = threeProposalFixture();
+    const held = heldRead(rpc, args => args.method === 'arkiv_query' && String((args.params as unknown[])[0]) === `$key = key(${KEYS.publisher})`);
+    const instance = new ArkivReader({ request: held.request, now: () => NOW, policy: { maxPages: 6 } });
+    const loading = instance.loadProject(KEYS.project);
+    await held.entered; await new Promise(resolve => setTimeout(resolve, 0));
+    expect(rpc.queries.some(call => predecessors.slice(0, -1).some(key => call.query === `$key = key(${key})`))).toBe(false);
+    await held.release(); const project = await loading;
+    expect(rpc.queries).toHaveLength(6);
+    expect(project.publishers[0]!.book.status).toBe('unique');
+    expect(deriveReadiness(project, NOW).status).toBe('ready');
+    expect(project.proposalHistoryStatus).toMatchObject({ complete: false, reasons: [{ code: 'page_budget', path: 'proposalHistory' }] });
+    expect(project.snapshot).toMatchObject({ completeness: 'complete', freshness: 'fresh' });
+  });
+
   it.each(['chain', 'head', 'initial header', 'explicit snapshot header', 'query page', 'final header'] as const)('forwards cancellation into a held %s request', async stage => {
     const { rpc } = readyFixture(), owner = new AbortController(); let headers = 0;
     const snapshot = stage === 'explicit snapshot header' ? (await reader(rpc).loadProject(KEYS.project)).snapshot : undefined;

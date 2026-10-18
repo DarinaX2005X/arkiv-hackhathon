@@ -12,7 +12,7 @@ import type { Actor, EntityProvenance } from '../../domain/types';
 import { TIRAMISU_CHAIN_ID } from '../../domain/types';
 import { readEventForActor, readEventForWithdrawal, type EventRead } from '../events/hooks';
 import { catalogueFilters } from '../events/presentation';
-import { joinTargetStore, prepareRegistration, prepareWithdrawal, registrationLifetime, targetForEvent, targetForWithdrawal } from './intent';
+import { clearJoinTarget, joinTargetStore, prepareRegistration, prepareWithdrawal, registrationLifetime, targetForEvent, targetForWithdrawal } from './intent';
 import { matchesMyEventFilter, myEventStatus } from './MyEvents';
 
 const account = { kind: 'wallet' as const, address: STRANGER };
@@ -51,6 +51,21 @@ function register(read: EventRead) {
 }
 
 describe('visitor registration review boundaries', () => {
+  it('clears only the exact review that completed', async () => {
+    const { target } = await fixture(), storage = memoryStorage(), store = joinTargetStore(storage, KEYS.project);
+    store.save(target);
+    expect(clearJoinTarget(storage, KEYS.project, target)).toBe(true);
+    expect(store.load().status).toBe('missing');
+  });
+  it.each(['time', 'release', 'wallet'] as const)('keeps a newer %s review when an earlier confirmation finishes', async kind => {
+    const { target } = await fixture(), storage = memoryStorage(), store = joinTargetStore(storage, KEYS.project);
+    const next = { ...target, ...(kind === 'time' ? { selectedAt: target.selectedAt + 1 }
+      : kind === 'release' ? { releaseKey: entityKey(999) } : { attendee: COORDINATOR }) };
+    store.save(next);
+    expect(clearJoinTarget(storage, KEYS.project, target)).toBe(false);
+    const saved = store.load();
+    expect(saved.status === 'ready' && saved.value).toEqual(next);
+  });
   it('prepares one explicit current-wallet operation with the reviewed release and a bounded retention', async () => {
     const { event, read, target } = await fixture();
     expect(deriveEventAvailability(event, NOW)).toBe('open');
