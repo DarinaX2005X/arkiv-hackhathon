@@ -45,7 +45,7 @@ Partfolk is one ecosystem for **organizers, contributors and visitors**. Organiz
 
 **[Open Partfolk](https://partfolk.vercel.app/)** or go straight to [published events](https://partfolk.vercel.app/#/events). The hosted application uses Arkiv Tiramisu. A completed [public proof](arkiv/evidence/product-proof.json) demonstrates contributor agreement, withdrawal and fresh consent on the network.
 
-<img src="docs/screenshots/partfolk-home.jpg" alt="Partfolk home with event discovery, creation and the shared event scene" width="960">
+<img src="https://github.com/user-attachments/assets/ca11524d-dd7e-4b5b-94bb-bd4a3828f3da" alt="Partfolk home with event discovery, creation and the shared event scene" width="960">
 
 ## About project
 
